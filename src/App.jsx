@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
-import { createRepository, seedData } from './lib/repository';
+import { createRepository, createStarterTasks, isOwnedByUser, seedData, userIdentityKey } from './lib/repository';
+import { downloadPortfolioWorkbook } from './lib/exportPortfolioWorkbook';
+import metcalSeal from './assets/navair-seal-384.webp';
 
 const NAV = [
   ['overview', 'Portfolio', 'overview'],
@@ -62,16 +64,14 @@ function Skeleton() {
   return <div className="loading-shell"><div className="loading-mark">M</div><div><strong>Modernization Tracker</strong><span>Loading portfolio data…</span></div></div>;
 }
 
-function SetupGate({ repo, onReady }) {
+function SetupGate({ repo, onReady, checks = [] }) {
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
 
-  async function setup(importBaseline) {
+  async function setup() {
     setBusy(true); setError('');
     try {
       await repo.store.provision();
-      if (importBaseline) await repo.store.seed(seedData, setProgress);
       await onReady();
     } catch (caught) {
       setError(caught.message || 'SharePoint setup failed.');
@@ -80,18 +80,16 @@ function SetupGate({ repo, onReady }) {
   }
 
   return <div className="gate-shell"><div className="gate-card">
-    <div className="brand-mark large">M</div>
+    <img className="setup-seal" src={metcalSeal} alt="METCAL" />
     <Badge tone="info">First-time SharePoint setup</Badge>
     <h1>Connect the modernization portfolio</h1>
     <p>This site needs four SharePoint Lists for projects, WBS tasks, updates, and risks. Setup is additive and safe to rerun.</p>
     <div className="list-preview">
-      {['ModernizationProjects', 'ModernizationTasks', 'ModernizationUpdates', 'ModernizationRisks'].map((name) => <div key={name}><Icon name="database" /><span>{name}</span><Badge>Missing</Badge></div>)}
+      {['ModernizationProjects', 'ModernizationTasks', 'ModernizationUpdates', 'ModernizationRisks'].map((name, index) => { const check = checks[index]; const label = !check?.exists ? 'Missing list' : check.missingFields?.length ? `${check.missingFields.length} fields to add` : 'Ready'; return <div key={name}><Icon name="database" /><span>{name}</span><Badge tone={label === 'Ready' ? 'good' : 'neutral'}>{label}</Badge></div>; })}
     </div>
-    {progress && <div className="seed-progress"><div><span>Importing workbook baseline</span><strong>{progress.completed} / {progress.total}</strong></div><Progress value={(progress.completed / progress.total) * 100} /></div>}
     {error && <div className="inline-error"><Icon name="alert" />{error}</div>}
     <div className="gate-actions">
-      <button className="button primary" disabled={busy} onClick={() => setup(true)}>{busy ? 'Setting up…' : 'Create lists & import baseline'}</button>
-      <button className="button secondary" disabled={busy} onClick={() => setup(false)}>Create empty lists</button>
+      <button className="button primary" disabled={busy} onClick={setup}>{busy ? 'Creating workspace…' : 'Create SharePoint workspace'}</button>
     </div>
     <p className="fine-print">Requires Edit or Full Control on the current SharePoint site.</p>
   </div></div>;
@@ -127,7 +125,7 @@ function ProjectCard({ project, onOpen }) {
   </button>;
 }
 
-function Overview({ projects, tasks, risks, onOpen, phaseFilter, setPhaseFilter }) {
+function Overview({ projects, tasks, risks, onOpen, phaseFilter, setPhaseFilter, mockMode, onToggleMock }) {
   const active = projects.filter((project) => project.status !== 'Complete').length;
   const completedTasks = tasks.filter((task) => task.status === 'Complete').length;
   const attention = projects.filter((project) => ['At Risk', 'Blocked', 'Needs Review'].includes(project.health) || project.blockedCount).length;
@@ -136,7 +134,7 @@ function Overview({ projects, tasks, risks, onOpen, phaseFilter, setPhaseFilter 
   const attentionProjects = [...projects].sort((a, b) => (b.blockedCount + b.overdueCount + (b.health === 'At Risk' ? 2 : 0)) - (a.blockedCount + a.overdueCount + (a.health === 'At Risk' ? 2 : 0))).slice(0, 5);
 
   return <div className="page-stack">
-    <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>One view of every measurement area, milestone, and handoff across the NPSL pipeline.</p></div><div className="source-pill"><Icon name="database" /><div><span>Source baseline</span><strong>POAM_NPSL_Mod_Projects.xlsx</strong></div></div></section>
+    <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>One view of every measurement area, milestone, and handoff across the modernization pipeline.</p></div><button className={`source-pill ${mockMode ? 'active' : ''}`} onClick={onToggleMock} aria-pressed={mockMode}><Icon name={mockMode ? 'database' : 'projects'} /><div><span>{mockMode ? 'Mock preview active' : 'Want to explore?'}</span><strong>{mockMode ? 'Return to live SharePoint data' : 'Preview mock portfolio'}</strong></div></button></section>
     <section className="kpi-grid">
       <KpiCard icon="projects" label="Active projects" value={active} detail={`${projects.length} total measurement areas`} tone="blue" />
       <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${completedTasks} of ${tasks.length} tasks complete`} tone="mint" />
@@ -173,12 +171,11 @@ function ProjectsTable({ projects, onOpen }) {
 }
 
 function MyWork({ projects, tasks, user, onOpen, onTask }) {
-  const email = user?.email?.toLowerCase();
-  const assigned = projects.filter((project) => project.ownerEmail?.toLowerCase() === email);
-  const myTasks = tasks.filter((task) => task.ownerEmail?.toLowerCase() === email && !['Complete', 'Not Applicable'].includes(task.status)).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  const assigned = projects.filter((project) => isOwnedByUser(project, user));
+  const myTasks = tasks.filter((task) => isOwnedByUser(task, user) && !['Complete', 'Not Applicable'].includes(task.status)).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
   return <div className="page-stack"><section className="page-heading"><div><span className="section-kicker">Personal workspace</span><h1>My work</h1><p>Projects and actions assigned to {user?.title || user?.email || 'you'}.</p></div></section>
     <section className="dashboard-grid my-work-grid"><div className="panel"><div className="panel-heading"><div><span className="section-kicker">Ownership</span><h2>My projects</h2></div><Badge>{assigned.length}</Badge></div>{assigned.length ? <div className="project-card-grid one-column">{assigned.map((project) => <ProjectCard key={project.id} project={project} onOpen={onOpen} />)}</div> : <EmptyState title="No assigned projects" message="Open an unassigned project and choose Claim project to make it yours." />}</div>
-    <div className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>My task queue</h2></div><Badge>{myTasks.length}</Badge></div><div className="task-queue">{myTasks.slice(0, 14).map((task) => <button key={task.id} onClick={() => onTask(task)}><span className={`task-state ${statusTone(task.status)}`}><Icon name={task.status === 'Blocked' ? 'alert' : 'clock'} size={15} /></span><div><strong>{task.title}</strong><span>{projects.find((project) => project.projectKey === task.projectKey)?.title} · WBS {task.wbs}</span></div><div><Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{task.dueDate ? compactDate(task.dueDate) : 'No due date'}</Badge></div></button>)}{!myTasks.length && <EmptyState title="Queue clear" message="No open tasks are assigned to your SharePoint email." />}</div></div></section>
+    <div className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>My task queue</h2></div><Badge>{myTasks.length}</Badge></div><div className="task-queue">{myTasks.slice(0, 14).map((task) => <button key={task.id} onClick={() => onTask(task)}><span className={`task-state ${statusTone(task.status)}`}><Icon name={task.status === 'Blocked' ? 'alert' : 'clock'} size={15} /></span><div><strong>{task.title}</strong><span>{projects.find((project) => project.projectKey === task.projectKey)?.title} · WBS {task.wbs}</span></div><div><Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{task.dueDate ? compactDate(task.dueDate) : 'No due date'}</Badge></div></button>)}{!myTasks.length && <EmptyState title="Queue clear" message="No open tasks are assigned to your signed-in SharePoint identity." />}</div></div></section>
   </div>;
 }
 
@@ -190,11 +187,11 @@ function Modal({ title, subtitle, onClose, children, actions, wide = false }) {
 }
 
 function ProjectEditor({ project, user, onClose, onSave }) {
-  const [draft, setDraft] = useState({ title: '', measurementArea: '', description: '', ownerName: '', ownerEmail: '', priority: 'Medium', health: 'Needs Review', status: 'Planned', currentStageKey: 'need-scope', targetFinish: '', ...project });
+  const [draft, setDraft] = useState({ title: '', measurementArea: '', description: '', ownerName: 'Unassigned', ownerEmail: '', ownerKey: '', priority: 'Medium', health: 'Needs Review', status: 'Planned', currentStageKey: 'need-scope', targetFinish: '', ...project });
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
-  function claim() { setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email })); }
+  function claim() { setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
   return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim()} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || draft.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
-    <div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Owner name"><div className="input-action"><input value={draft.ownerName} onChange={set('ownerName')} /><button onClick={claim}>Assign me</button></div></Field><Field label="Owner email"><input type="email" value={draft.ownerEmail} onChange={set('ownerEmail')} /></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{seedData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target finish"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
+    <div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Project owner"><div className="input-action"><input value={draft.ownerName || 'Unassigned'} readOnly /><button onClick={claim}>Assign me</button></div></Field><Field label="SharePoint identity"><input value={draft.ownerEmail || draft.ownerKey || 'Not assigned'} readOnly /></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{seedData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target finish"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
   </Modal>;
 }
 
@@ -202,11 +199,11 @@ function TaskEditor({ task, user, onClose, onSave }) {
   const [draft, setDraft] = useState(task);
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
   return <Modal title="Update task" subtitle={`WBS ${task.wbs} · ${seedData.phases.find((phase) => phase.key === task.phaseKey)?.name}`} onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" onClick={() => onSave(draft)}>Save task</button></>}>
-    <div className="field-grid"><Field label="Task" wide><input value={draft.title} onChange={set('title')} /></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Due date"><input type="date" value={draft.dueDate || ''} onChange={set('dueDate')} /></Field><Field label="Owner name"><div className="input-action"><input value={draft.ownerName || ''} onChange={set('ownerName')} /><button onClick={() => setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email }))}>Assign me</button></div></Field><Field label="Owner email"><input value={draft.ownerEmail || ''} onChange={set('ownerEmail')} /></Field><Field label="Notes" wide><textarea rows="4" value={draft.notes || ''} onChange={set('notes')} /></Field>{draft.status === 'Blocked' && <Field label="Blocked reason" wide><textarea rows="3" value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}</div>
+    <div className="field-grid"><Field label="Task" wide><input value={draft.title} onChange={set('title')} /></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Due date"><input type="date" value={draft.dueDate || ''} onChange={set('dueDate')} /></Field><Field label="Task owner"><div className="input-action"><input value={draft.ownerName || 'Unassigned'} readOnly /><button onClick={() => setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) }))}>Assign me</button></div></Field><Field label="SharePoint identity"><input value={draft.ownerEmail || draft.ownerKey || 'Not assigned'} readOnly /></Field><Field label="Notes" wide><textarea rows="4" value={draft.notes || ''} onChange={set('notes')} /></Field>{draft.status === 'Blocked' && <Field label="Blocked reason" wide><textarea rows="3" value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}</div>
   </Modal>;
 }
 
-function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, onSaveTask, onAddUpdate, onAddRisk, onClaim }) {
+function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, onSaveTask, onAddUpdate, onAddRisk, onClaim, readOnly = false }) {
   const [tab, setTab] = useState('overview');
   const [taskEditor, setTaskEditor] = useState(null);
   const [updateText, setUpdateText] = useState('');
@@ -216,17 +213,17 @@ function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, 
   const projectRisks = risks.filter((item) => item.projectKey === project.projectKey);
   const phase = seedData.phases.find((item) => item.key === project.currentStageKey);
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="project-drawer" role="dialog" aria-modal="true"><header className="drawer-header"><div className="drawer-title-row"><div><span className="section-kicker">{project.measurementArea}</span><h2>{project.title}</h2><div className="drawer-badges"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><Badge>{project.priority} priority</Badge><Badge>{project.status}</Badge></div></div><button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div>
-    <div className="drawer-actions"><button className="button secondary" onClick={() => onEdit(project)}>Edit project</button>{!project.ownerEmail && <button className="button primary" onClick={() => onClaim(project)}>Claim project</button>}</div>
+    <div className="drawer-actions">{readOnly ? <Badge tone="info">Read-only mock preview</Badge> : <><button className="button secondary" onClick={() => onEdit(project)}>Edit project</button>{!project.ownerKey && <button className="button primary" onClick={() => onClaim(project)}>Claim project</button>}</>}</div>
     <div className="drawer-progress"><div><span>{project.percentComplete}% complete</span><strong>{phase?.name}</strong></div><Progress value={project.percentComplete} /></div>
     <div className="mini-pipeline">{seedData.phases.map((item, index) => <span key={item.key} className={index < phaseIndex(project.currentStageKey) ? 'done' : item.key === project.currentStageKey ? 'current' : ''} title={item.name}>{index + 1}</span>)}</div>
     <nav className="drawer-tabs">{[['overview', 'Overview'], ['tasks', `Work breakdown (${projectTasks.length})`], ['updates', `Updates (${projectUpdates.length})`], ['risks', `Risks (${projectRisks.length})`]].map(([key, label]) => <button className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{label}</button>)}</nav></header>
     <div className="drawer-content">
-      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Owner</span><strong>{project.ownerName}</strong><small>{project.ownerEmail || 'No email assigned'}</small></div><div><span>Target finish</span><strong>{displayDate(project.targetFinish)}</strong><small>{project.status}</small></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !['Complete', 'Not Applicable'].includes(task.status)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Purpose</h3><p>{project.description || 'No project description has been added.'}</p></section>{project.sourceNotes && <section className="detail-block source-note"><h3>Workbook notes</h3><p>{project.sourceNotes}</p></section>}{project.dataIssueCount > 0 && <section className="detail-block data-warning"><Icon name="alert" /><div><h3>{project.dataIssueCount} source date issue{project.dataIssueCount === 1 ? '' : 's'}</h3><p>Review tasks where the workbook start date occurs after the finish date.</p></div></section>}<section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !['Complete', 'Not Applicable'].includes(task.status)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><span>{task.wbs}</span><div><strong>{task.title}</strong><small>{seedData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section></div>}
-      {tab === 'tasks' && <div className="wbs-list">{seedData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter((task) => task.status === 'Complete').length; return <section key={stage.key} className="wbs-stage"><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><Badge>{done}/{stageTasks.length}</Badge></header><div>{stageTasks.map((task) => <button key={task.id} className="wbs-task" onClick={() => setTaskEditor(task)}><span className={`task-check ${task.status === 'Complete' ? 'checked' : ''}`}>{task.status === 'Complete' && <Icon name="check" size={13} />}</span><span className="wbs-code">{task.wbs}</span><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status}</Badge><span className="task-date">{compactDate(task.dueDate)}</span></button>)}</div></section>; })}</div>}
-      {tab === 'updates' && <div className="drawer-section-stack"><section className="composer"><textarea rows="3" placeholder="Add a concise status update, decision, or handoff…" value={updateText} onChange={(event) => setUpdateText(event.target.value)} /><div><span>Visible to the project team</span><button className="button primary small-button" disabled={!updateText.trim()} onClick={() => { onAddUpdate(project, updateText); setUpdateText(''); }}>Post update</button></div></section><section className="timeline-list">{projectUpdates.map((item) => <article key={item.id}><span className="timeline-dot" /><div><header><strong>{item.authorName}</strong><span>{displayDate(item.entryDate)}</span></header><Badge>{item.type}</Badge><p>{item.summary}</p></div></article>)}{!projectUpdates.length && <EmptyState title="No updates yet" message="Post the first status update to establish the project history." />}</section></div>}
-      {tab === 'risks' && <div className="drawer-section-stack"><section className="risk-composer"><div className="field-grid"><Field label="Risk or issue"><input value={riskDraft.title} onChange={(event) => setRiskDraft((row) => ({ ...row, title: event.target.value }))} /></Field><Field label="Severity"><select value={riskDraft.severity} onChange={(event) => setRiskDraft((row) => ({ ...row, severity: event.target.value }))}>{['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Mitigation" wide><textarea rows="3" value={riskDraft.mitigation} onChange={(event) => setRiskDraft((row) => ({ ...row, mitigation: event.target.value }))} /></Field></div><button className="button primary small-button" disabled={!riskDraft.title.trim()} onClick={() => { onAddRisk(project, riskDraft); setRiskDraft({ title: '', severity: 'Medium', probability: 'Possible', mitigation: '' }); }}>Add risk</button></section><section className="risk-list">{projectRisks.map((risk) => <article key={risk.id}><div><Badge tone={statusTone(risk.severity)}>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3>{risk.title}</h3><p>{risk.mitigation || 'No mitigation has been documented.'}</p><span>{risk.ownerName || 'Unassigned'}</span></article>)}{!projectRisks.length && <EmptyState title="No open risks" message="Capture risks and mitigation actions here as the project advances." />}</section></div>}
+      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Owner</span><strong>{project.ownerName}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Target finish</span><strong>{displayDate(project.targetFinish)}</strong><small>{project.status}</small></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !['Complete', 'Not Applicable'].includes(task.status)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Purpose</h3><p>{project.description || 'No project description has been added.'}</p></section>{readOnly && project.sourceNotes && <section className="detail-block source-note"><h3>Mock source note</h3><p>{project.sourceNotes}</p></section>}{readOnly && project.dataIssueCount > 0 && <section className="detail-block data-warning"><Icon name="alert" /><div><h3>{project.dataIssueCount} mock date issue{project.dataIssueCount === 1 ? '' : 's'}</h3><p>This read-only example intentionally preserves irregular source dates for visualization testing.</p></div></section>}<section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !['Complete', 'Not Applicable'].includes(task.status)).slice(0, 5).map((task) => <button key={task.id} onClick={() => !readOnly && setTaskEditor(task)}><span>{task.wbs}</span><div><strong>{task.title}</strong><small>{seedData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section></div>}
+      {tab === 'tasks' && <div className="wbs-list">{seedData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter((task) => task.status === 'Complete').length; return <section key={stage.key} className="wbs-stage"><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><Badge>{done}/{stageTasks.length}</Badge></header><div>{stageTasks.map((task) => <button key={task.id} className="wbs-task" onClick={() => !readOnly && setTaskEditor(task)}><span className={`task-check ${task.status === 'Complete' ? 'checked' : ''}`}>{task.status === 'Complete' && <Icon name="check" size={13} />}</span><span className="wbs-code">{task.wbs}</span><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status}</Badge><span className="task-date">{compactDate(task.dueDate)}</span></button>)}</div></section>; })}</div>}
+      {tab === 'updates' && <div className="drawer-section-stack">{!readOnly && <section className="composer"><textarea rows="3" placeholder="Add a concise status update, decision, or handoff…" value={updateText} onChange={(event) => setUpdateText(event.target.value)} /><div><span>Visible to everyone with access to this SharePoint workspace</span><button className="button primary small-button" disabled={!updateText.trim()} onClick={() => { onAddUpdate(project, updateText); setUpdateText(''); }}>Post update</button></div></section>}<section className="timeline-list">{projectUpdates.map((item) => <article key={item.id}><span className="timeline-dot" /><div><header><strong>{item.authorName}</strong><span>{displayDate(item.entryDate)}</span></header><Badge>{item.type}</Badge><p>{item.summary}</p></div></article>)}{!projectUpdates.length && <EmptyState title="No updates yet" message={readOnly ? 'This mock project has no example updates.' : 'Post the first status update to establish the project history.'} />}</section></div>}
+      {tab === 'risks' && <div className="drawer-section-stack">{!readOnly && <section className="risk-composer"><div className="field-grid"><Field label="Risk or issue"><input value={riskDraft.title} onChange={(event) => setRiskDraft((row) => ({ ...row, title: event.target.value }))} /></Field><Field label="Severity"><select value={riskDraft.severity} onChange={(event) => setRiskDraft((row) => ({ ...row, severity: event.target.value }))}>{['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Mitigation" wide><textarea rows="3" value={riskDraft.mitigation} onChange={(event) => setRiskDraft((row) => ({ ...row, mitigation: event.target.value }))} /></Field></div><button className="button primary small-button" disabled={!riskDraft.title.trim()} onClick={() => { onAddRisk(project, riskDraft); setRiskDraft({ title: '', severity: 'Medium', probability: 'Possible', mitigation: '' }); }}>Add risk</button></section>}<section className="risk-list">{projectRisks.map((risk) => <article key={risk.id}><div><Badge tone={statusTone(risk.severity)}>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3>{risk.title}</h3><p>{risk.mitigation || 'No mitigation has been documented.'}</p><span>{risk.ownerName || 'Unassigned'}</span></article>)}{!projectRisks.length && <EmptyState title="No open risks" message={readOnly ? 'This mock project has no example risks.' : 'Capture risks and mitigation actions here as the project advances.'} />}</section></div>}
     </div>
-    {taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={(task) => { onSaveTask(task); setTaskEditor(null); }} />}
+    {!readOnly && taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={(task) => { onSaveTask(task); setTaskEditor(null); }} />}
   </aside></div>;
 }
 
@@ -242,6 +239,7 @@ export function App() {
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [] });
   const [loading, setLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [setupChecks, setSetupChecks] = useState([]);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [phaseFilter, setPhaseFilter] = useState('');
@@ -249,6 +247,8 @@ export function App() {
   const [projectEditor, setProjectEditor] = useState(null);
   const [taskEditor, setTaskEditor] = useState(null);
   const [toast, setToast] = useState(null);
+  const [mockMode, setMockMode] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('mod-tracker-theme', theme); }, [theme]);
   useEffect(() => { initialize(); }, []);
@@ -259,16 +259,15 @@ export function App() {
     try {
       const [currentUser, readiness] = await Promise.all([repo.store.currentUser(), repo.store.readiness()]);
       setUser(currentUser);
-      if (!readiness.ready) { setNeedsSetup(true); setLoading(false); return; }
+      if (!readiness.ready) { setSetupChecks(readiness.checks || []); setNeedsSetup(true); setLoading(false); return; }
       setData(await repo.store.load());
       setNeedsSetup(false);
     } catch (caught) { setError(caught.message || 'Could not load portfolio data.'); }
     finally { setLoading(false); }
   }
 
-  const managers = (repo.config.managerEmails || []).map((email) => email.toLowerCase());
-  const isManager = repo.mode === 'demo' || managers.length === 0 || managers.includes(user?.email?.toLowerCase());
-  const enriched = useMemo(() => data.projects.map((project) => enrichProject(project, data.tasks)), [data.projects, data.tasks]);
+  const visibleData = mockMode ? seedData : data;
+  const enriched = useMemo(() => visibleData.projects.map((project) => enrichProject(project, visibleData.tasks)), [visibleData.projects, visibleData.tasks]);
   const filteredProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return enriched;
@@ -277,14 +276,28 @@ export function App() {
   const openProject = enriched.find((project) => project.id === openProjectId);
 
   async function saveProject(project) {
+    if (mockMode) return;
     try {
+      const creating = !project.spId && !data.projects.some((row) => row.id === project.id);
       const saved = await repo.store.saveProject(project);
-      setData((state) => ({ ...state, projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved] }));
+      const starterTasks = [];
+      if (creating) {
+        const template = createStarterTasks(saved.projectKey);
+        for (let index = 0; index < template.length; index += 5) {
+          starterTasks.push(...await Promise.all(template.slice(index, index + 5).map((task) => repo.store.saveTask(task))));
+        }
+      }
+      setData((state) => ({
+        ...state,
+        projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved],
+        tasks: starterTasks.length ? [...state.tasks, ...starterTasks] : state.tasks,
+      }));
       setOpenProjectId(saved.id); setProjectEditor(null); setToast({ message: `${saved.title} saved.` });
     } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
   }
 
   async function saveTask(task) {
+    if (mockMode) return;
     try {
       const normalized = { ...task, finishDate: task.status === 'Complete' ? (task.finishDate || todayIso()) : task.finishDate };
       const saved = await repo.store.saveTask(normalized);
@@ -294,55 +307,71 @@ export function App() {
   }
 
   async function addUpdate(project, summary) {
+    if (mockMode) return;
     try {
-      const saved = await repo.store.saveUpdate({ id: uid('update'), projectKey: project.projectKey, type: 'Status', summary, entryDate: todayIso(), authorName: user.title, authorEmail: user.email });
+      const saved = await repo.store.saveUpdate({ id: uid('update'), projectKey: project.projectKey, type: 'Status', summary, entryDate: todayIso(), authorName: user.title, authorEmail: user.email, authorKey: userIdentityKey(user) });
       setData((state) => ({ ...state, updates: [saved, ...state.updates] })); setToast({ message: 'Project update posted.' });
     } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
   }
 
   async function addRisk(project, risk) {
+    if (mockMode) return;
     try {
-      const saved = await repo.store.saveRisk({ id: uid('risk'), projectKey: project.projectKey, ...risk, probability: risk.probability || 'Possible', ownerName: user.title, status: 'Open', dueDate: '' });
+      const saved = await repo.store.saveRisk({ id: uid('risk'), projectKey: project.projectKey, ...risk, probability: risk.probability || 'Possible', ownerName: user.title, ownerKey: userIdentityKey(user), status: 'Open', dueDate: '' });
       setData((state) => ({ ...state, risks: [saved, ...state.risks] })); setToast({ message: 'Risk added.' });
     } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
   }
 
-  async function claimProject(project) { await saveProject({ ...project, ownerName: user.title, ownerEmail: user.email }); }
+  async function claimProject(project) { await saveProject({ ...project, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) }); }
 
-  async function importBaseline() {
-    try {
-      await repo.store.seed(seedData);
-      setData(await repo.store.load()); setToast({ message: 'Workbook baseline imported.' });
-    } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
+  function toggleMock() {
+    setMockMode((active) => !active);
+    setOpenProjectId('');
+    setProjectEditor(null);
+    setTaskEditor(null);
+    setPhaseFilter('');
+    setSearch('');
   }
 
-  function exportCsv() {
-    const quote = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const rows = [['Project', 'Measurement Area', 'Owner', 'Health', 'Priority', 'Stage', 'Percent Complete', 'Next Milestone', 'Next Milestone Date'], ...enriched.map((project) => [project.title, project.measurementArea, project.ownerName, project.health, project.priority, seedData.phases.find((phase) => phase.key === project.currentStageKey)?.name, project.percentComplete, project.nextMilestone, project.nextMilestoneDate])];
-    const blob = new Blob([rows.map((row) => row.map(quote).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `modernization-portfolio-${todayIso()}.csv`; link.click(); URL.revokeObjectURL(link.href);
+  async function exportWorkbook() {
+    setExporting(true);
+    try {
+      await downloadPortfolioWorkbook({
+        projects: enriched,
+        tasks: visibleData.tasks,
+        updates: visibleData.updates,
+        risks: visibleData.risks,
+        phases: seedData.phases,
+        user,
+        mock: mockMode,
+        sourceLabel: mockMode ? 'Read-only mock portfolio preview' : 'Live SharePoint portfolio',
+      });
+      setToast({ message: `${mockMode ? 'Mock portfolio' : 'Portfolio'} Excel report downloaded.` });
+    } catch (caught) {
+      setToast({ tone: 'bad', message: caught.message || 'Excel export failed.' });
+    } finally {
+      setExporting(false);
+    }
   }
 
   if (loading) return <Skeleton />;
-  if (needsSetup) return <SetupGate repo={repo} onReady={initialize} />;
+  if (needsSetup) return <SetupGate repo={repo} checks={setupChecks} onReady={initialize} />;
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><div className="brand-mark">M</div><div><strong>MODERNIZE</strong><span>NPSL Project Tracker</span></div></div><nav>{NAV.filter(([key]) => isManager || ['my-work'].includes(key)).map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{data.tasks.filter((task) => task.ownerEmail?.toLowerCase() === user?.email?.toLowerCase() && task.status !== 'Complete').length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sync-card"><span className={`sync-dot ${repo.mode}`} /><div><strong>{repo.mode === 'sharepoint' ? 'SharePoint connected' : 'Demo workspace'}</strong><span>{repo.mode === 'sharepoint' ? 'Changes save automatically' : 'Saved in this browser'}</span></div></div><div className="sidebar-user"><span className="avatar">{user?.title?.slice(0, 1) || 'U'}</span><div><strong>{user?.title || 'User'}</strong><span>{isManager ? 'Portfolio access' : 'Engineer access'}</span></div></div></div></aside>
-    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><div className="brand-mark">M</div><strong>MODERNIZE</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={initialize} aria-label="Refresh"><Icon name="refresh" /></button><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" onClick={exportCsv}><Icon name="download" /> Export</button>{isManager && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}</div></header>
-      {repo.mode === 'demo' && <div className="demo-banner"><Icon name="shield" /><span><strong>Demo workspace:</strong> edits stay in this browser. The Forge build switches to SharePoint automatically when hosted on your site.</span></div>}
-      {data.projects.some((project) => project.importedBaseline) && <div className="baseline-banner"><Icon name="alert" /><span>The workbook is a historical baseline. Validate owners, health, and target dates before using it for current reporting.</span></div>}
+    <aside className="sidebar"><div className="brand"><div className="brand-mark">M</div><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{visibleData.tasks.filter((task) => isOwnedByUser(task, user) && !['Complete', 'Not Applicable'].includes(task.status)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sync-card"><span className={`sync-dot ${mockMode ? 'mock' : repo.mode}`} /><div><strong>{mockMode ? 'Read-only mock preview' : repo.mode === 'sharepoint' ? 'SharePoint workspace' : 'Local development'}</strong><span>{mockMode ? 'Live data is unchanged' : repo.mode === 'sharepoint' ? 'Changes save to this site' : 'Clean-slate browser storage'}</span></div></div><div className="sidebar-user"><span className="avatar">{user?.title?.slice(0, 1) || 'U'}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
+    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><div className="brand-mark">M</div><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{!mockMode && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}<div className="metcal-brand" title="METCAL Portal branding"><img src={metcalSeal} alt="" /><span><strong>METCAL</strong><small>Portal</small></span></div></div></header>
       <main>
-        {view === 'overview' && <Overview projects={filteredProjects} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} />}
+        {view === 'overview' && <Overview projects={filteredProjects} tasks={visibleData.tasks} risks={visibleData.risks} onOpen={(project) => setOpenProjectId(project.id)} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} mockMode={mockMode} onToggleMock={toggleMock} />}
         {view === 'board' && <Board projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} />}
         {view === 'projects' && <ProjectsTable projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} />}
-        {view === 'my-work' && <MyWork projects={filteredProjects} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} />}
-        {!data.projects.length && <EmptyState title="Portfolio is empty" message="Import the workbook baseline or add the first project." action={<div className="empty-actions"><button className="button primary" onClick={importBaseline}>Import workbook baseline</button><button className="button secondary" onClick={() => setProjectEditor({})}>Add project</button></div>} />}
+        {view === 'my-work' && <MyWork projects={filteredProjects} tasks={visibleData.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={(task) => !mockMode && setTaskEditor(task)} />}
+        {!mockMode && !data.projects.length && <EmptyState title="Your modernization portfolio is ready" message="This is a clean SharePoint workspace. Add the first live project, or open the read-only mock portfolio to explore the pipeline." action={<div className="empty-actions"><button className="button primary" onClick={() => setProjectEditor({})}>Add first project</button><button className="button secondary" onClick={toggleMock}>Preview mock portfolio</button></div>} />}
       </main>
     </div>
-    {openProject && <ProjectDrawer project={openProject} user={user} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} />}
-    {projectEditor && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
-    {taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
+    {openProject && <ProjectDrawer project={openProject} user={user} tasks={visibleData.tasks} updates={visibleData.updates} risks={visibleData.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} readOnly={mockMode} />}
+    {!mockMode && projectEditor && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
+    {!mockMode && taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
     <Toast toast={toast} />
   </div>;
 }

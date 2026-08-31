@@ -33,7 +33,7 @@ export default defineConfig({
         bundle['modernization-project-tracker.html'] = entry;
       },
     },
-    forgeRuntime({ project: 'NPSL Modernization Project Tracker', build: buildStamp() }),
+    forgeRuntime({ project: 'Modernization Project Tracker', build: buildStamp() }),
   ],
   publicDir: false,
   build: {

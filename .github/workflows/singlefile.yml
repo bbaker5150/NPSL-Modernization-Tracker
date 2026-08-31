@@ -82,7 +82,7 @@ jobs:
           SHA256: ${{ steps.checksum.outputs.sha256 }}
         run: |
           TAG="build-$(echo "$COMMIT" | cut -c1-7)"
-          NOTES="Forge-ready SharePoint single-file build of the NPSL Modernization Project Tracker. Commit: $COMMIT. Size: $BYTES bytes. SHA-256: $SHA256."
+          NOTES="Forge-ready SharePoint single-file build of the Modernization Project Tracker. Commit: $COMMIT. Size: $BYTES bytes. SHA-256: $SHA256."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               build-singlefile/modernization-project-tracker.html \

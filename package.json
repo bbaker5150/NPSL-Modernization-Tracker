@@ -1,9 +1,9 @@
 {
-  "name": "npsl-modernization-project-tracker",
+  "name": "modernization-project-tracker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "SharePoint-backed modernization portfolio and project pipeline tracker for NPSL.",
+  "description": "SharePoint-backed modernization portfolio and project pipeline tracker.",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 4173",
     "build": "vite build",
@@ -14,6 +14,7 @@
     "smoke:singlefile": "node scripts/smoke-forge-srcdoc.mjs"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

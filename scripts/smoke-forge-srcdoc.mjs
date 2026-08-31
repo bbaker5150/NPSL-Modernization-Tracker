@@ -34,6 +34,9 @@ try {
   const frame = page.frameLocator('#app');
 
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor({ timeout: 20_000 });
+  await frame.getByText('0 total measurement areas').waitFor();
+  await frame.getByText('Your modernization portfolio is ready').waitFor();
+  await frame.getByRole('button', { name: /Preview mock portfolio/ }).first().click();
   await frame.getByText('14 total measurement areas').waitFor();
   await frame.getByRole('button', { name: /Pipeline board/ }).click();
   await frame.getByRole('heading', { name: 'Pipeline board' }).waitFor();
@@ -42,6 +45,8 @@ try {
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.locator('.wbs-task').first().waitFor();
   await frame.locator('.project-drawer .icon-button').first().click();
+  const overlays = await frame.locator('#pdc-open, #test-recorder-launcher, #test-recorder-panel, .test-recorder-ui').evaluateAll((elements) => elements.filter((element) => getComputedStyle(element).display !== 'none').length);
+  if (overlays) errors.push(`${overlays} Forge runtime control(s) were visible`);
 } catch (error) {
   errors.push(error.stack || error.message);
 }

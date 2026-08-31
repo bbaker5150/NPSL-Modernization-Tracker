@@ -8,7 +8,7 @@ export const CONTAINERS = [
     key: 'projects', suffix: 'Projects', description: 'Modernization project portfolio records.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['MeasurementArea', 'Measurement Area', FIELD.TEXT], ['Description', 'Description', FIELD.NOTE],
-      ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT],
+      ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true],
       ['ManagerName', 'Manager', FIELD.TEXT], ['ManagerEmail', 'Manager Email', FIELD.TEXT],
       ['Priority', 'Priority', FIELD.TEXT], ['Health', 'Health', FIELD.TEXT], ['ProjectStatus', 'Status', FIELD.TEXT],
       ['CurrentStageKey', 'Current Stage', FIELD.TEXT], ['PercentComplete', 'Percent Complete', FIELD.NUMBER],
@@ -23,7 +23,7 @@ export const CONTAINERS = [
       ['WBS', 'WBS', FIELD.TEXT], ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
       ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
       ['StartDate', 'Start Date', FIELD.DATE], ['FinishDate', 'Finish Date', FIELD.DATE], ['DueDate', 'Due Date', FIELD.DATE],
-      ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['Notes', 'Notes', FIELD.NOTE],
+      ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['Notes', 'Notes', FIELD.NOTE],
       ['BlockedReason', 'Blocked Reason', FIELD.NOTE], ['SourceStartLabel', 'Source Start Label', FIELD.TEXT],
       ['DataIssue', 'Data Issue', FIELD.NOTE],
     ],
@@ -32,14 +32,14 @@ export const CONTAINERS = [
     key: 'updates', suffix: 'Updates', description: 'Project status updates and decisions.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['UpdateType', 'Update Type', FIELD.TEXT], ['Summary', 'Summary', FIELD.NOTE], ['EntryDate', 'Entry Date', FIELD.DATE],
-      ['AuthorName', 'Author', FIELD.TEXT], ['AuthorEmail', 'Author Email', FIELD.TEXT],
+      ['AuthorName', 'Author', FIELD.TEXT], ['AuthorEmail', 'Author Email', FIELD.TEXT], ['AuthorKey', 'Author Identity Key', FIELD.TEXT, true],
     ],
   },
   {
     key: 'risks', suffix: 'Risks', description: 'Project risks, issues, and mitigation actions.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['RiskTitle', 'Risk', FIELD.TEXT], ['Severity', 'Severity', FIELD.TEXT], ['Probability', 'Probability', FIELD.TEXT],
-      ['Mitigation', 'Mitigation', FIELD.NOTE], ['OwnerName', 'Owner', FIELD.TEXT], ['RiskStatus', 'Status', FIELD.TEXT],
+      ['Mitigation', 'Mitigation', FIELD.NOTE], ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['RiskStatus', 'Status', FIELD.TEXT],
       ['DueDate', 'Due Date', FIELD.DATE],
     ],
   },
@@ -81,7 +81,7 @@ const safeJson = (value, fallback) => {
 
 const projectFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
-  Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, ManagerName: row.managerName,
+  Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', ManagerName: row.managerName,
   ManagerEmail: row.managerEmail || '', Priority: row.priority, Health: row.health, ProjectStatus: row.status,
   CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, TargetFinish: row.targetFinish || null,
   NextMilestone: row.nextMilestone, NextMilestoneDate: row.nextMilestoneDate || null, SourceNotes: row.sourceNotes,
@@ -92,18 +92,18 @@ const taskFields = (row) => ({
   Title: `${row.wbs} ${row.title}`, RecordId: row.id, ProjectKey: row.projectKey, WBS: row.wbs,
   TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
   StartDate: row.startDate || null, FinishDate: row.finishDate || null, DueDate: row.dueDate || null,
-  OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, Notes: row.notes, BlockedReason: row.blockedReason,
+  OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', Notes: row.notes, BlockedReason: row.blockedReason,
   SourceStartLabel: row.sourceStartLabel, DataIssue: row.dataIssue,
 });
 
 const updateFields = (row) => ({
   Title: `${row.projectKey} update`, RecordId: row.id, ProjectKey: row.projectKey, UpdateType: row.type,
-  Summary: row.summary, EntryDate: row.entryDate, AuthorName: row.authorName, AuthorEmail: row.authorEmail,
+  Summary: row.summary, EntryDate: row.entryDate, AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
 });
 
 const riskFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, RiskTitle: row.title, Severity: row.severity,
-  Probability: row.probability, Mitigation: row.mitigation, OwnerName: row.ownerName, RiskStatus: row.status,
+  Probability: row.probability, Mitigation: row.mitigation, OwnerName: row.ownerName, OwnerKey: row.ownerKey || '', RiskStatus: row.status,
   DueDate: row.dueDate || null,
 });
 
@@ -111,7 +111,7 @@ function fromProject(item) {
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.Title,
     measurementArea: item.MeasurementArea || item.Title, description: item.Description || '', ownerName: item.OwnerName || 'Unassigned',
-    ownerEmail: item.OwnerEmail || '', managerName: item.ManagerName || 'Unassigned', managerEmail: item.ManagerEmail || '',
+    ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', managerName: item.ManagerName || 'Unassigned', managerEmail: item.ManagerEmail || '',
     priority: item.Priority || 'Medium', health: item.Health || 'Needs Review', status: item.ProjectStatus || 'Planned',
     currentStageKey: item.CurrentStageKey || 'need-scope', percentComplete: Number(item.PercentComplete || 0),
     targetFinish: dateOnly(item.TargetFinish), nextMilestone: item.NextMilestone || '', nextMilestoneDate: dateOnly(item.NextMilestoneDate),
@@ -124,13 +124,13 @@ function fromTask(item) {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, wbs: item.WBS, title: item.TaskTitle,
     phaseKey: item.PhaseKey, order: Number(item.SortOrder || 0), status: item.TaskStatus || 'Not Started',
     startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate),
-    ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', notes: item.Notes || '',
+    ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
   };
 }
 
-const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail });
-const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
+const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
+const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 
 export class SharePointStore {
   constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch }) {
@@ -150,8 +150,14 @@ export class SharePointStore {
   }
 
   async readiness() {
-    const checks = await Promise.all(CONTAINERS.map(async (container) => ({ key: container.key, exists: await this.listExists(container.key) })));
-    return { ready: checks.every((check) => check.exists), checks };
+    const checks = await Promise.all(CONTAINERS.map(async (container) => {
+      const exists = await this.listExists(container.key);
+      if (!exists) return { key: container.key, exists, missingFields: container.fields.map((field) => field.name) };
+      const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
+      const existing = new Set((body.value || body.d?.results || []).map((field) => field.InternalName));
+      return { key: container.key, exists, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
+    }));
+    return { ready: checks.every((check) => check.exists && check.missingFields.length === 0), checks };
   }
 
   async provision() {
@@ -177,8 +183,20 @@ export class SharePointStore {
 
   async listItems(key, fields, converter) {
     const select = ['Id', 'Title', ...fields].join(',');
-    const body = await this.get(`${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`);
-    return (body.value || []).map(converter);
+    let path = `${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`;
+    const rows = [];
+    while (path) {
+      const body = await this.get(path);
+      rows.push(...(body.value || body.d?.results || []));
+      const next = body['@odata.nextLink'] || body.d?.__next || '';
+      if (!next) path = '';
+      else if (next.startsWith(this.webUrl)) path = next.slice(this.webUrl.length);
+      else if (/^https?:/i.test(next)) {
+        const parsed = new URL(next);
+        path = `${parsed.pathname}${parsed.search}`;
+      } else path = next;
+    }
+    return rows.map(converter);
   }
 
   async load() {
@@ -208,21 +226,6 @@ export class SharePointStore {
   async saveUpdate(row) { return { ...row, spId: await this.create('updates', updateFields(row)) }; }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
 
-  async seed(seedData, onProgress = () => {}) {
-    const existing = await this.listItems('projects', ['RecordId'], (item) => item.RecordId);
-    if (existing.length) return { skipped: true, count: existing.length };
-    const rows = [
-      ...seedData.projects.map((row) => ['projects', projectFields(row)]),
-      ...seedData.tasks.map((row) => ['tasks', taskFields(row)]),
-    ];
-    let completed = 0;
-    for (let index = 0; index < rows.length; index += 5) {
-      await Promise.all(rows.slice(index, index + 5).map(([key, fields]) => this.create(key, fields)));
-      completed = Math.min(index + 5, rows.length);
-      onProgress({ completed, total: rows.length });
-    }
-    return { skipped: false, count: rows.length };
-  }
 }
 
 export { titleFor };

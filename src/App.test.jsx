@@ -20,7 +20,7 @@ describe('application shell', () => {
     if (root) await act(async () => root.unmount());
   });
 
-  it('boots the workbook portfolio and opens the pipeline board', async () => {
+  it('boots a clean workspace and opens the read-only mock portfolio on demand', async () => {
     await act(async () => {
       root = createRoot(document.getElementById('root'));
       root.render(<App />);
@@ -28,7 +28,16 @@ describe('application shell', () => {
     });
 
     expect(document.body.textContent).toContain('Modernization at a glance');
+    expect(document.body.textContent).toContain('0 total measurement areas');
+    expect(document.body.textContent).toContain('Your modernization portfolio is ready');
+    expect(document.body.textContent).toContain('METCAL');
+    expect(document.body.textContent).not.toContain('Demo workspace');
+    expect(document.body.textContent).not.toContain('historical baseline');
+
+    const mockButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Preview mock portfolio'));
+    await act(async () => mockButton.click());
     expect(document.body.textContent).toContain('14 total measurement areas');
+    expect(document.body.textContent).toContain('Return to live SharePoint data');
 
     const boardButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Pipeline board'));
     await act(async () => boardButton.click());
