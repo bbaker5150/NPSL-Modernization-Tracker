@@ -30,7 +30,8 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Modernization at a glance');
     expect(document.body.textContent).toContain('0 total measurement areas');
     expect(document.body.textContent).toContain('Your modernization portfolio is ready');
-    expect(document.body.textContent).toContain('METCAL');
+    expect(document.querySelector('.brand-logo')?.getAttribute('alt')).toBe('NAVAIR');
+    expect(document.querySelector('.sidebar-user .avatar')?.textContent).toBe('LE');
     expect(document.body.textContent).not.toContain('Demo workspace');
     expect(document.body.textContent).not.toContain('historical baseline');
 

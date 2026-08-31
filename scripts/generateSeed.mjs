@@ -82,7 +82,7 @@ const projects = sheets.map((sheet, projectIndex) => {
     projectKey,
     title: sheet.name,
     measurementArea: sheet.name,
-    description: `${sheet.name} measurement-area modernization project imported from POAM_NPSL_Mod_Projects.xlsx.`,
+    description: `${sheet.name} example measurement-area modernization project.`,
     ownerName: 'Unassigned',
     ownerEmail: '',
     managerName: 'Unassigned',
@@ -101,8 +101,8 @@ const projects = sheets.map((sheet, projectIndex) => {
   };
 });
 
-const seed = { source: 'POAM_NPSL_Mod_Projects.xlsx', importedAt: '2026-08-31', phases, projects, tasks, updates: [], risks: [] };
-const contents = `// Generated from POAM_NPSL_Mod_Projects.xlsx. Do not edit by hand.\nexport const seedData = ${JSON.stringify(seed, null, 2)};\n`;
+const seed = { source: 'Legacy modernization planning workbook', importedAt: '2026-08-31', phases, projects, tasks, updates: [], risks: [] };
+const contents = `// Generated mock visualization data. Do not edit by hand.\nexport const seedData = ${JSON.stringify(seed, null, 2)};\n`;
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await fs.writeFile(outputPath, contents, 'utf8');
 console.log(JSON.stringify({ projects: projects.length, tasks: tasks.length, outputPath }, null, 2));

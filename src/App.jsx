@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { createRepository, createStarterTasks, isOwnedByUser, seedData, userIdentityKey } from './lib/repository';
 import { downloadPortfolioWorkbook } from './lib/exportPortfolioWorkbook';
-import metcalSeal from './assets/navair-seal-384.webp';
+import navairSeal from './assets/navair-seal-384.webp';
 
 const NAV = [
   ['overview', 'Portfolio', 'overview'],
@@ -18,6 +18,14 @@ const titleCase = (value) => String(value || '').replace(/(^|[-_])([a-z])/g, (_,
 const displayDate = (value) => value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : 'Not set';
 const compactDate = (value) => value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : '—';
 const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const userInitials = (user) => {
+  const name = String(user?.title || '').trim();
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    return `${parts[0]?.[0] || ''}${parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || ''}`.toUpperCase();
+  }
+  return String(user?.email || user?.loginName || 'U').slice(0, 2).toUpperCase();
+};
 
 function phaseIndex(key) { return Math.max(0, seedData.phases.findIndex((phase) => phase.key === key)); }
 function isOverdue(task) { return task.status !== 'Complete' && task.status !== 'Not Applicable' && task.dueDate && task.dueDate < todayIso(); }
@@ -62,37 +70,6 @@ function EmptyState({ title, message, action }) {
 
 function Skeleton() {
   return <div className="loading-shell"><div className="loading-mark">M</div><div><strong>Modernization Tracker</strong><span>Loading portfolio data…</span></div></div>;
-}
-
-function SetupGate({ repo, onReady, checks = [] }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  async function setup() {
-    setBusy(true); setError('');
-    try {
-      await repo.store.provision();
-      await onReady();
-    } catch (caught) {
-      setError(caught.message || 'SharePoint setup failed.');
-      setBusy(false);
-    }
-  }
-
-  return <div className="gate-shell"><div className="gate-card">
-    <img className="setup-seal" src={metcalSeal} alt="METCAL" />
-    <Badge tone="info">First-time SharePoint setup</Badge>
-    <h1>Connect the modernization portfolio</h1>
-    <p>This site needs four SharePoint Lists for projects, WBS tasks, updates, and risks. Setup is additive and safe to rerun.</p>
-    <div className="list-preview">
-      {['ModernizationProjects', 'ModernizationTasks', 'ModernizationUpdates', 'ModernizationRisks'].map((name, index) => { const check = checks[index]; const label = !check?.exists ? 'Missing list' : check.missingFields?.length ? `${check.missingFields.length} fields to add` : 'Ready'; return <div key={name}><Icon name="database" /><span>{name}</span><Badge tone={label === 'Ready' ? 'good' : 'neutral'}>{label}</Badge></div>; })}
-    </div>
-    {error && <div className="inline-error"><Icon name="alert" />{error}</div>}
-    <div className="gate-actions">
-      <button className="button primary" disabled={busy} onClick={setup}>{busy ? 'Creating workspace…' : 'Create SharePoint workspace'}</button>
-    </div>
-    <p className="fine-print">Requires Edit or Full Control on the current SharePoint site.</p>
-  </div></div>;
 }
 
 function KpiCard({ icon, label, value, detail, tone = 'blue' }) {
@@ -238,8 +215,6 @@ export function App() {
   const [user, setUser] = useState(null);
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [] });
   const [loading, setLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
-  const [setupChecks, setSetupChecks] = useState([]);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [phaseFilter, setPhaseFilter] = useState('');
@@ -259,9 +234,8 @@ export function App() {
     try {
       const [currentUser, readiness] = await Promise.all([repo.store.currentUser(), repo.store.readiness()]);
       setUser(currentUser);
-      if (!readiness.ready) { setSetupChecks(readiness.checks || []); setNeedsSetup(true); setLoading(false); return; }
+      if (!readiness.ready) await repo.store.provision();
       setData(await repo.store.load());
-      setNeedsSetup(false);
     } catch (caught) { setError(caught.message || 'Could not load portfolio data.'); }
     finally { setLoading(false); }
   }
@@ -355,12 +329,11 @@ export function App() {
   }
 
   if (loading) return <Skeleton />;
-  if (needsSetup) return <SetupGate repo={repo} checks={setupChecks} onReady={initialize} />;
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><div className="brand-mark">M</div><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{visibleData.tasks.filter((task) => isOwnedByUser(task, user) && !['Complete', 'Not Applicable'].includes(task.status)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sync-card"><span className={`sync-dot ${mockMode ? 'mock' : repo.mode}`} /><div><strong>{mockMode ? 'Read-only mock preview' : repo.mode === 'sharepoint' ? 'SharePoint workspace' : 'Local development'}</strong><span>{mockMode ? 'Live data is unchanged' : repo.mode === 'sharepoint' ? 'Changes save to this site' : 'Clean-slate browser storage'}</span></div></div><div className="sidebar-user"><span className="avatar">{user?.title?.slice(0, 1) || 'U'}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
-    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><div className="brand-mark">M</div><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{!mockMode && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}<div className="metcal-brand" title="METCAL Portal branding"><img src={metcalSeal} alt="" /><span><strong>METCAL</strong><small>Portal</small></span></div></div></header>
+    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{visibleData.tasks.filter((task) => isOwnedByUser(task, user) && !['Complete', 'Not Applicable'].includes(task.status)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sync-card"><span className={`sync-dot ${mockMode ? 'mock' : repo.mode}`} /><div><strong>{mockMode ? 'Read-only mock preview' : repo.mode === 'sharepoint' ? 'SharePoint workspace' : 'Local development'}</strong><span>{mockMode ? 'Live data is unchanged' : repo.mode === 'sharepoint' ? 'Changes save to this site' : 'Clean-slate browser storage'}</span></div></div><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
+    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{!mockMode && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}</div></header>
       <main>
         {view === 'overview' && <Overview projects={filteredProjects} tasks={visibleData.tasks} risks={visibleData.risks} onOpen={(project) => setOpenProjectId(project.id)} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} mockMode={mockMode} onToggleMock={toggleMock} />}
         {view === 'board' && <Board projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} />}

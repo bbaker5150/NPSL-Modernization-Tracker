@@ -13,7 +13,7 @@ npm run verify:singlefile
 
 Upload `build-singlefile/modernization-project-tracker.html` to the SharePoint site that will own the tracker lists. The GitHub Actions workflow performs the same build on every push to `main`, smoke-tests the actual Forge `iframe srcdoc` runtime, uploads a workflow artifact, and publishes the HTML plus its SHA-256 checksum as a release.
 
-The output contains React, Excel export support, styles, the read-only mock dataset, the METCAL seal, and the vendored Forge runtime in one HTML file. It has no external scripts, stylesheets, fonts, or images.
+The output contains React, Excel export support, styles, the read-only mock dataset, the NAVAIR seal, and the vendored Forge runtime in one HTML file. It has no external scripts, stylesheets, fonts, or images.
 
 ## Authentication and access
 
@@ -23,7 +23,7 @@ Every user who can open the HTML and access the lists receives the complete port
 
 ## Lists
 
-With the default prefix, clean-slate setup creates:
+With the default prefix, the automatic clean-slate provisioning creates:
 
 | List | Purpose |
 | --- | --- |

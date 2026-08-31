@@ -10,10 +10,10 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Full portfolio access for every user who has permission to the hosting SharePoint site and lists
 - A read-only mock portfolio toggle for onboarding and visualization; mock records are never written to SharePoint
 - Styled multi-sheet Excel export for projects, tasks, risks, updates, and pipeline reference data
-- Light and dark themes with the shared METCAL Portal branding
+- Light and dark themes with the NAVAIR seal in the tracker identity
 - A Forge-compatible single HTML build with no external runtime requests
 
-The bundled mock portfolio was normalized from `POAM_NPSL_Mod_Projects.xlsx`. Its 14 projects and 476 WBS tasks are examples only; the live SharePoint workspace always starts empty.
+The bundled mock portfolio was normalized from a legacy modernization planning workbook. Its 14 projects and 476 WBS tasks are examples only; the live SharePoint workspace always starts empty.
 
 ## Local development
 
@@ -31,7 +31,7 @@ npm run build:singlefile
 npm run verify:singlefile
 ```
 
-Deploy `build-singlefile/modernization-project-tracker.html` through the same Forge/App Page flow used by the METCAL Portal.
+Deploy `build-singlefile/modernization-project-tracker.html` through the established Forge/App Page flow used by the existing SharePoint tools.
 
 ## Main-branch pipeline
 
@@ -61,6 +61,6 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
 
-On first SharePoint load, setup creates empty lists and missing fields. The setup user needs permission to create lists and fields; normal use needs whatever read/edit rights the site owner grants. SharePoint permissions are the access boundary—there is no separate manager allowlist in the app.
+On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. SharePoint permissions are the access boundary—there is no separate manager allowlist in the app.
 
 See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and deployment behavior.
