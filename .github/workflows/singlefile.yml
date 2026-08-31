@@ -1,0 +1,108 @@
+name: Modernization tracker single-file build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: modernization-tracker-singlefile
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit production path
+        run: |
+          npm audit || true
+          npm audit --audit-level=high
+
+      - name: Test workbook mapping and pipeline data
+        run: npm test
+
+      - name: Build Forge single-file HTML
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          export BUILD_STAMP="$(echo "$COMMIT" | cut -c1-7) $(date -u +%Y-%m-%dT%H:%MZ)"
+          npm run build:singlefile
+
+      - name: Verify manifest and zero external subresources
+        run: npm run verify:singlefile
+
+      - name: Install browser for srcdoc smoke test
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: 120000
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test the final file inside an iframe srcdoc
+        run: node scripts/smoke-forge-srcdoc.mjs
+
+      - name: Generate checksum
+        id: checksum
+        run: |
+          cd build-singlefile
+          sha256sum modernization-project-tracker.html > modernization-project-tracker.html.sha256
+          echo "sha256=$(cut -d' ' -f1 modernization-project-tracker.html.sha256)" >> "$GITHUB_OUTPUT"
+          echo "bytes=$(stat -c%s modernization-project-tracker.html)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: modernization-project-tracker
+          path: build-singlefile/modernization-project-tracker.html*
+          retention-days: 90
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+          BYTES: ${{ steps.checksum.outputs.bytes }}
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
+        run: |
+          TAG="build-$(echo "$COMMIT" | cut -c1-7)"
+          NOTES="Forge-ready SharePoint single-file build of the NPSL Modernization Project Tracker. Commit: $COMMIT. Size: $BYTES bytes. SHA-256: $SHA256."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              build-singlefile/modernization-project-tracker.html \
+              build-singlefile/modernization-project-tracker.html.sha256 \
+              --clobber
+            gh release edit "$TAG" --title "Modernization Tracker $TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" \
+              build-singlefile/modernization-project-tracker.html \
+              build-singlefile/modernization-project-tracker.html.sha256 \
+              --title "Modernization Tracker $TAG" \
+              --notes "$NOTES"
+          fi
+
+      - name: Build summary
+        run: |
+          {
+            echo "### Modernization Tracker single-file build"
+            echo ""
+            echo "- **Size:** ${{ steps.checksum.outputs.bytes }} bytes"
+            echo "- **SHA-256:** \`${{ steps.checksum.outputs.sha256 }}\`"
+            echo "- **Latest build:** \`${{ github.server_url }}/${{ github.repository }}/releases/latest/download/modernization-project-tracker.html\`"
+          } >> "$GITHUB_STEP_SUMMARY"
