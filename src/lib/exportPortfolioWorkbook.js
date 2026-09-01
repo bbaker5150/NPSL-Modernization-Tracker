@@ -9,6 +9,7 @@ const WHITE = 'FFFFFF';
 const INK = '172B3A';
 const MUTED = '5F7282';
 const LINE = 'D8E1E8';
+const isResolvedTask = (task) => ['Complete', 'Not Required', 'Not Applicable'].includes(task.status);
 
 const toDate = (value) => {
   if (!value) return null;
@@ -58,7 +59,7 @@ function styleDataSheet(sheet, columns, statusColumns = []) {
       const value = String(cell.value || '');
       let fill;
       let color;
-      if (/complete|on track|closed/i.test(value)) { fill = 'E3F5EE'; color = '18795B'; }
+      if (/complete|not required|not applicable|on track|closed/i.test(value)) { fill = 'E3F5EE'; color = '18795B'; }
       else if (/blocked|critical|at risk/i.test(value)) { fill = 'FCE8E8'; color = 'B4232B'; }
       else if (/review|high|progress|possible|medium/i.test(value)) { fill = 'FFF2D9'; color = '9A5B00'; }
       if (fill) {
@@ -119,13 +120,13 @@ function addSummary(workbook, { projects, tasks, updates, risks, phases, user, s
   });
   sheet.getCell('B5').numFmt = 'mmm d, yyyy h:mm AM/PM';
 
-  const completedTasks = tasks.filter((task) => task.status === 'Complete').length;
+  const completedTasks = tasks.filter(isResolvedTask).length;
   const openRisks = risks.filter((risk) => risk.status !== 'Closed').length;
   const blockedTasks = tasks.filter((task) => task.status === 'Blocked').length;
   const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + Number(project.percentComplete || 0), 0) / projects.length) : 0;
   const cards = [
     ['Projects', projects.length, 'All portfolio projects'],
-    ['Portfolio progress', `${avg}%`, `${completedTasks} of ${tasks.length} tasks complete`],
+    ['Portfolio progress', `${avg}%`, `${completedTasks} of ${tasks.length} tasks resolved`],
     ['Open risks', openRisks, `${risks.length} risks captured`],
     ['Blocked tasks', blockedTasks, `${updates.length} status updates`],
   ];
@@ -237,7 +238,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     rows: tasks.map((task) => [
       task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.wbs, task.title,
       phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, task.ownerName || 'Unassigned', task.ownerEmail || '', task.ownerKey || '',
-      toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '),
+      toDate(task.startDate), toDate(['Not Required', 'Not Applicable'].includes(task.status) ? '' : task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '),
     ]),
   });
   addDataSheet(workbook, {

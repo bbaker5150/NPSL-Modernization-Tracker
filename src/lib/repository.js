@@ -45,7 +45,7 @@ export function createRepository() {
   // so the resolved web URL — not the child frame location — is authoritative.
   const inSharePoint = /^https:\/\/[^/]*\.(?:sharepoint\.com|sharepoint\.us|sharepoint-mil\.us|sharepoint\.de|sharepoint\.cn)(?::\d+)?(?:\/|$)/i.test(webUrl);
   if ((inSharePoint || config.forceSharePoint === true) && config.forceLocal !== true) {
-    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization' }), config };
+    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', hideLists: config.hideLists !== false }), config };
   }
   return { mode: 'local', store: new LocalStore(), config };
 }
@@ -56,16 +56,29 @@ export function userIdentityKey(user) {
   return String(raw).trim().toLowerCase();
 }
 
-export function isOwnedByUser(record, user) {
-  const identity = userIdentityKey(user);
-  const recordKey = String(record?.ownerKey || '').trim().toLowerCase();
-  if (identity && recordKey) return identity === recordKey;
-  // Compatibility for records made before OwnerKey was introduced or assigned by email.
-  const email = String(user?.email || '').trim().toLowerCase();
-  return !!email && String(record?.ownerEmail || '').trim().toLowerCase() === email;
+function identityAliases(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return [];
+  const aliases = new Set([normalized]);
+  const claimsValue = normalized.split('|').pop();
+  if (claimsValue) aliases.add(claimsValue);
+  return [...aliases];
 }
 
-export function createStarterTasks(projectKey) {
+export function isOwnedByUser(record, user) {
+  const userAliases = new Set([
+    ...identityAliases(userIdentityKey(user)),
+    ...identityAliases(user?.loginName),
+    ...identityAliases(user?.email),
+  ]);
+  const recordAliases = [
+    ...identityAliases(record?.ownerKey),
+    ...identityAliases(record?.ownerEmail),
+  ];
+  return recordAliases.some((alias) => userAliases.has(alias));
+}
+
+export function createStarterTasks(projectKey, owner = {}) {
   const templateProjectKey = seedData.projects[0]?.projectKey;
   return seedData.tasks
     .filter((task) => task.projectKey === templateProjectKey)
@@ -81,9 +94,9 @@ export function createStarterTasks(projectKey) {
       startDate: '',
       finishDate: '',
       dueDate: '',
-      ownerName: 'Unassigned',
-      ownerEmail: '',
-      ownerKey: '',
+      ownerName: owner.ownerName?.trim() || 'Unassigned',
+      ownerEmail: owner.ownerEmail || '',
+      ownerKey: owner.ownerKey || '',
       notes: '',
       blockedReason: '',
       sourceStartLabel: '',

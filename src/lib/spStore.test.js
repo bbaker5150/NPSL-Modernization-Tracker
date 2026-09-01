@@ -37,13 +37,28 @@ describe('SharePoint store', () => {
     expect(readiness.checks.every((check) => check.exists && check.missingFields.length > 0)).toBe(true);
   });
 
+  it('hides backing lists from Site Contents while preserving REST access', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.listExists = async () => true;
+    store.get = vi.fn(async (path) => path.includes('/fields')
+      ? { value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }
+      : { Hidden: false });
+    store.post = vi.fn(async () => ({}));
+
+    await store.provision();
+
+    const visibilityWrites = store.post.mock.calls.filter(([path, options]) => !path.includes('/fields') && options?.body?.Hidden === true);
+    expect(visibilityWrites).toHaveLength(CONTAINERS.length);
+    expect(visibilityWrites.every(([, options]) => options.headers['X-HTTP-Method'] === 'MERGE')).toBe(true);
+  });
+
   it('updates date fields through REST MERGE using locale-independent ISO values', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({}));
     const task = {
       spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'need-scope',
       order: 1, status: 'In Progress', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
-      ownerName: 'Engineer', ownerEmail: 'engineer@navy.mil', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
+      ownerName: 'Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
     };
     await store.saveTask(task);
     expect(store.post).toHaveBeenCalledWith(expect.stringContaining('/items(42)'), expect.objectContaining({

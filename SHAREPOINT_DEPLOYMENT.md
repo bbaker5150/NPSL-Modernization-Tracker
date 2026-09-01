@@ -34,6 +34,8 @@ With the default prefix, the automatic clean-slate provisioning creates:
 
 Provisioning is idempotent and additive. It creates missing lists and fields but does not delete, rename, retype, or import example records.
 
+The four backing lists are marked `Hidden` by default. This keeps each tracker page from adding four more entries to the normal **Site Contents** view while preserving full REST access for the application and site administrators. Existing visible tracker lists are hidden automatically the next time this build loads and completes its additive setup. A site owner can still reach a list by its direct URL or temporarily set `hideLists: false` in the page configuration if visible list administration is preferred.
+
 ### Project fields
 
 `RecordId`, `ProjectKey`, `MeasurementArea`, `Description`, `OwnerName`, `OwnerEmail`, `OwnerKey`, `ManagerName`, `ManagerEmail`, `Priority`, `Health`, `ProjectStatus`, `CurrentStageKey`, `PercentComplete`, `TargetFinish`, `NextMilestone`, `NextMilestoneDate`, `SourceNotes`, `ImportedBaseline`, and `TagsJson`.

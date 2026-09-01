@@ -93,7 +93,7 @@ p { color: var(--muted); line-height: 1.65; }
 .sidebar-user > div > strong, .sidebar-user > div > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 158px; }
 .sidebar-user > div > strong { font-size: 11px; }
 .sidebar-user > div > span { margin-top: 3px; color: #718ba1; font-size: 10px; }
-.sidebar-user > .avatar { margin: 0; max-width: none; overflow: visible; line-height: 1; font-size: 11px; }
+.sidebar-user > .avatar { display: grid; place-items: center; margin: 0; max-width: none; overflow: visible; line-height: normal; font-size: 11px; letter-spacing: 0; text-align: center; }
 .avatar { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; color: #d9edff; font-weight: 700; background: linear-gradient(145deg, #234a6c, #15314a); border: 1px solid #315979; }
 .avatar.small { width: 26px; height: 26px; font-size: 10px; }
 .avatar.tiny { width: 24px; height: 24px; margin-right: 7px; display: inline-grid; font-size: 9px; vertical-align: middle; }
@@ -174,7 +174,7 @@ p { color: var(--muted); line-height: 1.65; }
 .project-card-top, .project-card-bottom, .project-phase, .project-owner { display: flex; align-items: center; }
 .project-card-top { justify-content: space-between; }
 .project-menu-wrap { position: relative; }
-.project-menu { min-width: 28px; height: 25px; display: grid; place-items: center; padding: 0 5px 6px; border: 0; border-radius: 7px; color: var(--faint); background: transparent; font: inherit; font-size: 15px; letter-spacing: .08em; cursor: pointer; }
+.project-menu { min-width: 28px; height: 25px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--faint); background: transparent; cursor: pointer; }
 .project-menu:hover, .project-menu[aria-expanded="true"] { color: var(--ink); background: var(--surface-3); }
 .project-menu-popover { position: absolute; top: calc(100% + 5px); right: 0; z-index: 12; width: 132px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-lg); }
 .project-menu-popover button { width: 100%; padding: 8px 9px; border: 0; border-radius: 6px; color: var(--rose); background: transparent; font-size: 9px; font-weight: 700; text-align: left; cursor: pointer; }
@@ -194,9 +194,10 @@ p { color: var(--muted); line-height: 1.65; }
 .attention-list > button { width: 100%; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px 10px; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
 .attention-list > button:hover { background: var(--surface-2); }
 .health-pip { width: 7px; height: 30px; border-radius: 5px; background: var(--faint); }.health-pip.good { background: var(--mint); }.health-pip.warn { background: var(--amber); }.health-pip.bad { background: var(--rose); }
-.attention-list strong, .attention-list span { display: block; }
+.attention-list strong, .attention-list span, .attention-list small { display: block; }
 .attention-list strong { margin-bottom: 3px; font-size: 11px; }
-.attention-list > button > div:nth-child(2) span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+.attention-list > button > div:nth-child(2) .attention-owner { overflow: hidden; color: var(--ink); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+.attention-list > button > div:nth-child(2) small { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
 .attention-meta { display: flex; align-items: center; gap: 6px; }
 
 .badge { min-height: 21px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 8px; border-radius: 999px; color: var(--muted); background: var(--surface-3); border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent); font-size: 8px; font-weight: 750; line-height: 1; white-space: nowrap; }
@@ -332,7 +333,8 @@ p { color: var(--muted); line-height: 1.65; }
 @keyframes popIn { from { opacity: .5; transform: scale(.985) translateY(8px); } }
 .modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
 .modal > header h2 { margin-bottom: 4px; }.modal > header p { margin: 0; font-size: 10px; }
-.modal-body { overflow-y: auto; padding: 19px 22px; }
+.modal-body { overflow-y: auto; padding: 19px 22px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.modal-body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .field-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .field { display: grid; gap: 6px; }
@@ -341,7 +343,11 @@ p { color: var(--muted); line-height: 1.65; }
 .field input, .field select, .field textarea { width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); transition: .15s ease; }
 .field textarea { resize: vertical; line-height: 1.5; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 10%, transparent); }
+.field input:disabled { color: var(--faint); background: var(--surface-2); cursor: not-allowed; }
+.field-hint { margin-top: -2px; color: var(--muted); font-size: 8px; line-height: 1.35; }
 .field input[readonly] { color: var(--muted); background: var(--surface-2); cursor: default; }
+input[type='number'] { appearance: textfield; -moz-appearance: textfield; }
+input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
 .input-action { display: grid; grid-template-columns: 1fr auto; }
 .input-action input { border-radius: 9px 0 0 9px; }
 .input-action button { padding: 0 9px; border: 1px solid var(--line); border-left: 0; border-radius: 0 9px 9px 0; color: var(--blue); background: var(--blue-soft); font-size: 8px; font-weight: 700; cursor: pointer; }
@@ -354,7 +360,7 @@ p { color: var(--muted); line-height: 1.65; }
 .loading-mark { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 13px; color: white; background: var(--blue); font-size: 22px; font-weight: 800; animation: breathe 1.2s ease-in-out infinite alternate; }
 @keyframes breathe { to { transform: scale(1.04); box-shadow: 0 0 0 9px color-mix(in srgb, var(--blue) 10%, transparent); } }
 .loading-shell strong, .loading-shell span { display: block; }.loading-shell strong { font-size: 13px; }.loading-shell span { margin-top: 3px; color: var(--muted); font-size: 9px; }
-.toast { position: fixed; right: 22px; bottom: 22px; z-index: 200; display: flex; align-items: center; gap: 9px; max-width: 420px; padding: 12px 15px; color: var(--ink); background: var(--surface); border: 1px solid color-mix(in srgb, var(--mint) 35%, var(--line)); border-radius: 11px; box-shadow: var(--shadow-lg); font-size: 10px; animation: popIn .15s ease-out; }.toast svg { color: var(--mint); }.toast-bad { border-color: color-mix(in srgb, var(--rose) 40%, var(--line)); }.toast-bad svg { color: var(--rose); }
+.toast { position: fixed; right: 22px; bottom: 22px; z-index: 200; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: min(420px, calc(100vw - 32px)); padding: 12px 12px 12px 15px; color: var(--ink); background: var(--surface); border: 1px solid color-mix(in srgb, var(--mint) 35%, var(--line)); border-radius: 11px; box-shadow: var(--shadow-lg); font-size: 10px; animation: popIn .15s ease-out; }.toast > svg { color: var(--mint); }.toast-bad { border-color: color-mix(in srgb, var(--rose) 40%, var(--line)); }.toast-bad > svg { color: var(--rose); }.toast-info { border-color: color-mix(in srgb, var(--blue) 40%, var(--line)); }.toast-info > svg { color: var(--blue); }.toast > button { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }.toast > button:hover { color: var(--ink); background: var(--surface-3); }
 
 @media (max-width: 1180px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }

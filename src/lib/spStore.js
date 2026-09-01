@@ -108,10 +108,11 @@ function fromProject(item) {
 }
 
 function fromTask(item) {
+  const status = item.TaskStatus || 'Not Started';
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, wbs: item.WBS, title: item.TaskTitle,
-    phaseKey: item.PhaseKey, order: Number(item.SortOrder || 0), status: item.TaskStatus || 'Not Started',
-    startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate),
+    phaseKey: item.PhaseKey, order: Number(item.SortOrder || 0), status,
+    startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: ['Not Required', 'Not Applicable'].includes(status) ? '' : dateOnly(item.DueDate),
     ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
   };
@@ -121,10 +122,11 @@ const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: it
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 
 export class SharePointStore {
-  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch }) {
+  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true }) {
     this.webUrl = String(webUrl || '').replace(/\/+$/, '');
     this.prefix = prefix;
     this.fetchImpl = fetchImpl;
+    this.hideLists = hideLists;
     this.userPromise = null;
   }
 
@@ -140,12 +142,14 @@ export class SharePointStore {
   async readiness() {
     const checks = await Promise.all(CONTAINERS.map(async (container) => {
       const exists = await this.listExists(container.key);
-      if (!exists) return { key: container.key, exists, missingFields: container.fields.map((field) => field.name) };
+      if (!exists) return { key: container.key, exists, hidden: false, needsVisibilityChange: this.hideLists, missingFields: container.fields.map((field) => field.name) };
+      const list = await this.get(`${apiFor(this.prefix, container.key)}?$select=Hidden`);
+      const hidden = !!(list.Hidden ?? list.d?.Hidden);
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
       const existing = new Set((body.value || body.d?.results || []).map((field) => field.InternalName));
-      return { key: container.key, exists, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
+      return { key: container.key, exists, hidden, needsVisibilityChange: this.hideLists && !hidden, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
     }));
-    return { ready: checks.every((check) => check.exists && check.missingFields.length === 0), checks };
+    return { ready: checks.every((check) => check.exists && !check.needsVisibilityChange && check.missingFields.length === 0), checks };
   }
 
   async provision() {
@@ -164,6 +168,22 @@ export class SharePointStore {
           body: { parameters: { __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' }, SchemaXml: schemaXml(field), Options: ADD_FIELD.INTERNAL_NAME_HINT | (field.inView ? ADD_FIELD.TO_DEFAULT_VIEW : 0) } },
         });
         steps.push(`Added ${container.key}.${field.name}`);
+      }
+      if (this.hideLists) {
+        const list = await this.get(`${apiFor(this.prefix, container.key)}?$select=Hidden`);
+        if (!(list.Hidden ?? list.d?.Hidden)) {
+          try {
+            await this.post(apiFor(this.prefix, container.key), {
+              body: { Hidden: true },
+              headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+            });
+            steps.push(`Hidden ${titleFor(this.prefix, container.key)} from Site Contents`);
+          } catch (error) {
+            // Hiding a list requires Manage Lists. Contributors can still use
+            // the tracker if a site owner has not performed this cleanup yet.
+            if (!(error instanceof SharePointError) || ![401, 403].includes(error.status)) throw error;
+          }
+        }
       }
     }
     return steps;

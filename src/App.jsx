@@ -20,9 +20,13 @@ const displayDate = (value) => value ? new Intl.DateTimeFormat(undefined, { mont
 const compactDate = (value) => value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : '—';
 const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const cloneData = (value) => JSON.parse(JSON.stringify(value));
-const userInitials = (user) => {
-  const name = String(user?.title || '').trim();
+export const userInitials = (user) => {
+  const name = String(user?.title || '').replace(/\([^)]*\)/g, '').trim();
   if (name) {
+    if (name.includes(',')) {
+      const [lastName, givenNames = ''] = name.split(',', 2).map((part) => part.trim());
+      return `${lastName[0] || ''}${givenNames[0] || lastName[1] || ''}`.toUpperCase();
+    }
     const parts = name.split(/\s+/).filter(Boolean);
     return `${parts[0]?.[0] || ''}${parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || ''}`.toUpperCase();
   }
@@ -33,7 +37,7 @@ function phaseIndex(key) { return Math.max(0, seedData.phases.findIndex((phase) 
 function isClosedTask(task) { return CLOSED_TASK_STATUSES.includes(task.status); }
 function isOverdue(task) { return !isClosedTask(task) && task.dueDate && task.dueDate < todayIso(); }
 function statusTone(value) {
-  if (/complete|on track/i.test(value)) return 'good';
+  if (/complete|not required|not applicable|on track/i.test(value)) return 'good';
   if (/blocked|critical/i.test(value)) return 'bad';
   if (/risk|high|review|progress/i.test(value)) return 'warn';
   return 'neutral';
@@ -42,14 +46,13 @@ function statusTone(value) {
 function enrichProject(project, allTasks) {
   const tasks = allTasks.filter((task) => task.projectKey === project.projectKey);
   if (!tasks.length) return { ...project, tasks, blockedCount: 0, overdueCount: 0 };
-  const applicable = tasks.filter((task) => !['Not Required', 'Not Applicable'].includes(task.status));
-  const completed = applicable.filter((task) => task.status === 'Complete').length;
+  const completed = tasks.filter(isClosedTask).length;
   const latest = [...seedData.phases].reverse().find((phase) => tasks.some((task) => task.phaseKey === phase.key && task.status !== 'Not Started'));
   const nextTask = tasks.sort((a, b) => a.order - b.order).find((task) => !isClosedTask(task));
   return {
     ...project,
     tasks,
-    percentComplete: applicable.length ? Math.round((completed / applicable.length) * 100) : 0,
+    percentComplete: Math.round((completed / tasks.length) * 100),
     currentStageKey: latest?.key || project.currentStageKey,
     nextMilestone: nextTask?.title || project.nextMilestone || 'Final Report',
     nextMilestoneDate: nextTask?.dueDate || project.nextMilestoneDate,
@@ -87,7 +90,7 @@ function PipelineRail({ projects, selected, onSelect }) {
       return <button key={phase.key} className={`phase-node ${selected === phase.key ? 'selected' : ''}`} onClick={() => onSelect?.(selected === phase.key ? '' : phase.key)}>
         <div className="phase-top"><span className="phase-index">{String(index + 1).padStart(2, '0')}</span><strong>{count}</strong></div>
         <span className="phase-label">{phase.name}</span>
-        <div className="phase-bar"><span style={{ width: `${Math.max(8, (count / max) * 100)}%` }} /></div>
+        <div className="phase-bar"><span style={{ width: `${count ? Math.max(8, (count / max) * 100) : 0}%` }} /></div>
       </button>;
     })}
   </div>;
@@ -98,7 +101,7 @@ function ProjectCard({ project, onOpen, onDelete }) {
   const phase = seedData.phases.find((item) => item.key === project.currentStageKey);
   const openProject = () => onOpen(project);
   return <article className="project-card" role="button" tabIndex="0" onClick={openProject} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openProject(); } }}>
-    <div className="project-card-top"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><div className="project-menu-wrap"><button className="project-menu" aria-label={`Project actions for ${project.title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }}>•••</button>{menuOpen && <div className="project-menu-popover"><button onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onDelete(project); }}>Delete project</button></div>}</div></div>
+    <div className="project-card-top"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><div className="project-menu-wrap"><button className="project-menu" aria-label={`Project actions for ${project.title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }}><Icon name="more" size={16} /></button>{menuOpen && <div className="project-menu-popover"><button onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onDelete(project); }}>Delete project</button></div>}</div></div>
     <div><span className="eyebrow">{project.measurementArea}</span><h3>{project.title}</h3></div>
     <div className="project-owner"><span className="avatar small">{project.ownerName === 'Unassigned' ? '?' : project.ownerName.slice(0, 1)}</span><span>{project.ownerName}</span></div>
     <div className="project-phase"><span>Stage {phaseIndex(project.currentStageKey) + 1} of {seedData.phases.length}</span><strong>{phase?.short}</strong></div>
@@ -109,7 +112,7 @@ function ProjectCard({ project, onOpen, onDelete }) {
 
 function Overview({ projects, tasks, risks, onOpen, onDelete, phaseFilter, setPhaseFilter, mockMode, onToggleMock }) {
   const active = projects.filter((project) => project.status !== 'Complete').length;
-  const completedTasks = tasks.filter((task) => task.status === 'Complete').length;
+  const completedTasks = tasks.filter(isClosedTask).length;
   const attention = projects.filter((project) => ['At Risk', 'Blocked', 'Needs Review'].includes(project.health) || project.blockedCount).length;
   const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + project.percentComplete, 0) / projects.length) : 0;
   const filtered = phaseFilter ? projects.filter((project) => project.currentStageKey === phaseFilter) : projects;
@@ -119,7 +122,7 @@ function Overview({ projects, tasks, risks, onOpen, onDelete, phaseFilter, setPh
     <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>One view of every measurement area, milestone, and handoff across the modernization pipeline.</p></div><button className={`source-pill ${mockMode ? 'active' : ''}`} onClick={onToggleMock} aria-pressed={mockMode}><Icon name={mockMode ? 'database' : 'projects'} /><div><span>{mockMode ? 'Sample portfolio active' : 'Want to explore?'}</span><strong>{mockMode ? 'Return to live SharePoint data' : 'Open sample portfolio'}</strong></div></button></section>
     <section className="kpi-grid">
       <KpiCard icon="projects" label="Active projects" value={active} detail={`${projects.length} total measurement areas`} tone="blue" />
-      <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${completedTasks} of ${tasks.length} tasks complete`} tone="mint" />
+      <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${completedTasks} of ${tasks.length} tasks resolved`} tone="mint" />
       <KpiCard icon="alert" label="Needs attention" value={attention} detail={`${risks.filter((risk) => risk.status !== 'Closed').length} open risks`} tone="amber" />
       <KpiCard icon="clock" label="Blocked tasks" value={tasks.filter((task) => task.status === 'Blocked').length} detail="Across all project teams" tone="rose" />
     </section>
@@ -129,7 +132,7 @@ function Overview({ projects, tasks, risks, onOpen, onDelete, phaseFilter, setPh
         <div className="project-card-grid">{filtered.slice(0, 6).map((project) => <ProjectCard key={project.id} project={project} onOpen={onOpen} onDelete={onDelete} />)}</div>
       </div>
       <div className="panel attention-panel"><div className="panel-heading"><div><span className="section-kicker">Focus queue</span><h2>Attention needed</h2></div></div>
-        <div className="attention-list">{attentionProjects.map((project) => <button key={project.id} onClick={() => onOpen(project)}><span className={`health-pip ${statusTone(project.health)}`} /><div><strong>{project.title}</strong><span>{project.nextMilestone}</span></div><div className="attention-meta"><Badge tone={statusTone(project.health)}>{project.health}</Badge><Icon name="chevron" size={16} /></div></button>)}</div>
+        <div className="attention-list">{attentionProjects.map((project) => <button key={project.id} onClick={() => onOpen(project)}><span className={`health-pip ${statusTone(project.health)}`} /><div><strong>{project.title}</strong><span className="attention-owner">Owner: {project.ownerName || 'Unassigned'}</span><small>{project.nextMilestone}</small></div><div className="attention-meta"><Badge tone={statusTone(project.health)}>{project.health}</Badge><Icon name="chevron" size={16} /></div></button>)}</div>
       </div>
     </section>
   </div>;
@@ -195,8 +198,9 @@ function TaskEditor({ task, user, onClose, onSave }) {
     const ownerEmail = entered.includes('@') ? entered.split('|').pop() : '';
     setDraft((row) => ({ ...row, ownerKey, ownerEmail }));
   }
-  return <Modal title="Update task" subtitle={`WBS ${task.wbs} · ${seedData.phases.find((phase) => phase.key === task.phaseKey)?.name}`} onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" onClick={() => onSave(draft)}>Save task</button></>}>
-    <div className="field-grid"><Field label="Task" wide><input value={draft.title} onChange={set('title')} /></Field><Field label="Status"><select value={draft.status === 'Not Applicable' ? 'Not Required' : draft.status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Due date"><input type="date" value={draft.dueDate || ''} onChange={set('dueDate')} /></Field><Field label="Task owner"><input value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></Field><Field label="Owner email or SharePoint login"><div className="input-action"><input value={draft.ownerEmail || draft.ownerKey || ''} placeholder="Unassigned" onChange={setOwnerIdentity} /><button type="button" onClick={claim}>Assign me</button></div></Field><Field label="Notes" wide><textarea rows="4" value={draft.notes || ''} onChange={set('notes')} /></Field>{draft.status === 'Blocked' && <Field label="Blocked reason" wide><textarea rows="3" value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}</div>
+  const status = draft.status === 'Not Applicable' ? 'Not Required' : draft.status;
+  return <Modal title="Update task" subtitle={`${seedData.phases.find((phase) => phase.key === task.phaseKey)?.name || 'Modernization work breakdown'}`} onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.wbs?.trim() || !draft.title?.trim()} onClick={() => onSave({ ...draft, status })}>Save task</button></>}>
+    <div className="field-grid"><Field label="WBS code"><input aria-label="WBS code" value={draft.wbs || ''} onChange={set('wbs')} /></Field><Field label="Pipeline stage"><select aria-label="Pipeline stage" value={draft.phaseKey} onChange={set('phaseKey')}>{seedData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Task name" wide><input aria-label="Task name" value={draft.title} onChange={set('title')} /></Field><Field label="Status"><select value={status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Due date"><input type="date" value={status === 'Not Required' ? '' : (draft.dueDate || '')} disabled={status === 'Not Required'} title={status === 'Not Required' ? 'A due date is not needed for a task marked Not Required.' : ''} onChange={set('dueDate')} />{status === 'Not Required' && <small className="field-hint">No due date is needed.</small>}</Field><Field label="Task owner"><input value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></Field><Field label="Owner email or SharePoint login"><div className="input-action"><input value={draft.ownerEmail || draft.ownerKey || ''} placeholder="Unassigned" onChange={setOwnerIdentity} /><button type="button" onClick={claim}>Assign me</button></div></Field><Field label="Notes" wide><textarea rows="4" value={draft.notes || ''} onChange={set('notes')} /></Field>{status === 'Blocked' && <Field label="Blocked reason" wide><textarea rows="3" value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}</div>
   </Modal>;
 }
 
@@ -216,7 +220,7 @@ function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, 
     <nav className="drawer-tabs">{[['overview', 'Overview'], ['tasks', `Work breakdown (${projectTasks.length})`], ['updates', `Updates (${projectUpdates.length})`], ['risks', `Risks (${projectRisks.length})`]].map(([key, label]) => <button className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{label}</button>)}</nav></header>
     <div className="drawer-content">
       {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Owner</span><strong>{project.ownerName}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong><small>{project.status}</small></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Purpose</h3><p>{project.description || 'No project description has been added.'}</p></section>{sampleMode && project.sourceNotes && <section className="detail-block source-note"><h3>Sample source note</h3><p>{project.sourceNotes}</p></section>}{sampleMode && project.dataIssueCount > 0 && <section className="detail-block data-warning"><Icon name="alert" /><div><h3>{project.dataIssueCount} sample date issue{project.dataIssueCount === 1 ? '' : 's'}</h3><p>This example preserves irregular source dates for visualization testing; you can edit them while learning the workflow.</p></div></section>}<section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><span>{task.wbs}</span><div><strong>{task.title}</strong><small>{seedData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section></div>}
-      {tab === 'tasks' && <div className="wbs-list">{seedData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; return <section key={stage.key} className="wbs-stage"><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><Badge>{done}/{stageTasks.length}</Badge></header><div>{stageTasks.map((task) => <div key={task.id} className="wbs-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button className={`task-check ${task.status === 'Complete' ? 'checked' : ''}`} aria-label={`${task.status === 'Complete' ? 'Reopen' : 'Complete'} WBS ${task.wbs}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{task.status === 'Complete' && <Icon name="check" size={13} />}</button><span className="wbs-code">{task.wbs}</span><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{compactDate(task.dueDate)}</span></div>)}</div></section>; })}</div>}
+      {tab === 'tasks' && <div className="wbs-list">{seedData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; return <section key={stage.key} className="wbs-stage"><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><Badge>{done}/{stageTasks.length}</Badge></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="wbs-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} WBS ${task.wbs}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><span className="wbs-code">{task.wbs}</span><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
       {tab === 'updates' && <div className="drawer-section-stack"><section className="composer"><textarea rows="3" placeholder="Add a concise status update, decision, or handoff…" value={updateText} onChange={(event) => setUpdateText(event.target.value)} /><div><span>{sampleMode ? 'Saved for this sample session only' : 'Visible to everyone with access to this SharePoint workspace'}</span><button className="button primary small-button" disabled={!updateText.trim()} onClick={() => { onAddUpdate(project, updateText); setUpdateText(''); }}>Post update</button></div></section><section className="timeline-list">{projectUpdates.map((item) => <article key={item.id}><span className="timeline-dot" /><div><header><strong>{item.authorName}</strong><span>{displayDate(item.entryDate)}</span></header><Badge>{item.type}</Badge><p>{item.summary}</p></div></article>)}{!projectUpdates.length && <EmptyState title="No updates yet" message="Post the first status update to establish the project history." />}</section></div>}
       {tab === 'risks' && <div className="drawer-section-stack"><section className="risk-composer"><div className="field-grid"><Field label="Risk or issue"><input value={riskDraft.title} onChange={(event) => setRiskDraft((row) => ({ ...row, title: event.target.value }))} /></Field><Field label="Severity"><select value={riskDraft.severity} onChange={(event) => setRiskDraft((row) => ({ ...row, severity: event.target.value }))}>{['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Mitigation" wide><textarea rows="3" value={riskDraft.mitigation} onChange={(event) => setRiskDraft((row) => ({ ...row, mitigation: event.target.value }))} /></Field></div><button className="button primary small-button" disabled={!riskDraft.title.trim()} onClick={() => { onAddRisk(project, riskDraft); setRiskDraft({ title: '', severity: 'Medium', probability: 'Possible', mitigation: '' }); }}>Add risk</button></section><section className="risk-list">{projectRisks.map((risk) => <article key={risk.id}><div><Badge tone={statusTone(risk.severity)}>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3>{risk.title}</h3><p>{risk.mitigation || 'No mitigation has been documented.'}</p><span>{risk.ownerName || 'Unassigned'}</span></article>)}{!projectRisks.length && <EmptyState title="No open risks" message="Capture risks and mitigation actions here as the project advances." />}</section></div>}
     </div>
@@ -224,7 +228,7 @@ function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, 
   </aside></div>;
 }
 
-function Toast({ toast }) { if (!toast) return null; return <div className={`toast toast-${toast.tone || 'good'}`}><Icon name={toast.tone === 'bad' ? 'alert' : 'check'} /><span>{toast.message}</span></div>; }
+function Toast({ toast, onClose }) { if (!toast) return null; return <div className={`toast toast-${toast.tone || 'good'}`} role={toast.tone === 'bad' ? 'alert' : 'status'} aria-live={toast.tone === 'bad' ? 'assertive' : 'polite'}><Icon name={toast.tone === 'bad' ? 'alert' : toast.tone === 'info' ? 'clock' : 'check'} /><span>{toast.message}</span><button type="button" aria-label="Dismiss notification" onClick={onClose}><Icon name="close" size={13} /></button></div>; }
 
 export function App() {
   const repoRef = useRef(null);
@@ -271,35 +275,50 @@ export function App() {
   const openProject = enriched.find((project) => project.id === openProjectId);
 
   async function saveProject(project) {
+    const source = mockMode ? mockData : data;
+    const prepared = { ...project, ownerName: project.ownerName?.trim() || 'Unassigned' };
+    const creating = !prepared.spId && !source.projects.some((row) => row.id === prepared.id);
+    const template = creating ? createStarterTasks(prepared.projectKey, prepared) : [];
+    const updateProjects = (state, saved, starterTasks = []) => ({
+      ...state,
+      projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved],
+      tasks: starterTasks.length ? [...state.tasks.filter((row) => !starterTasks.some((task) => task.id === row.id)), ...starterTasks] : state.tasks,
+    });
+
+    if (mockMode) {
+      setMockData((state) => updateProjects(state, prepared, template));
+      setOpenProjectId(prepared.id);
+      setProjectEditor(null);
+      setToast({ message: `${prepared.title} saved.` });
+      return;
+    }
+
+    setData((state) => updateProjects(state, prepared));
+    setOpenProjectId(prepared.id);
+    setProjectEditor(null);
+    setToast({ tone: 'info', message: creating ? `${prepared.title} saved. Setting up its work breakdown…` : `Saving ${prepared.title}…` });
     try {
-      const source = mockMode ? mockData : data;
-      const prepared = { ...project, ownerName: project.ownerName?.trim() || 'Unassigned' };
-      const creating = !prepared.spId && !source.projects.some((row) => row.id === prepared.id);
-      const saved = mockMode ? prepared : await repo.store.saveProject(prepared);
+      const saved = await repo.store.saveProject(prepared);
       const starterTasks = [];
       if (creating) {
-        const template = createStarterTasks(saved.projectKey);
-        if (mockMode) starterTasks.push(...template);
-        else {
-          for (let index = 0; index < template.length; index += 5) {
-            starterTasks.push(...await Promise.all(template.slice(index, index + 5).map((task) => repo.store.saveTask(task))));
-          }
+        for (let index = 0; index < template.length; index += 10) {
+          starterTasks.push(...await Promise.all(template.slice(index, index + 10).map((task) => repo.store.saveTask(task))));
         }
       }
-      const updateState = (state) => ({
-        ...state,
-        projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved],
-        tasks: starterTasks.length ? [...state.tasks, ...starterTasks] : state.tasks,
-      });
-      if (mockMode) setMockData(updateState); else setData(updateState);
-      setOpenProjectId(saved.id); setProjectEditor(null); setToast({ message: `${saved.title} saved.` });
-    } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
+      setData((state) => updateProjects(state, saved, starterTasks));
+      setToast({ message: `${saved.title} is ready.` });
+    } catch (caught) {
+      try { setData(await repo.store.load()); } catch { setData(source); }
+      setOpenProjectId('');
+      setToast({ tone: 'bad', message: caught.message || `${prepared.title} could not be saved.` });
+    }
   }
 
   async function saveTask(task) {
     try {
       const status = task.status === 'Not Applicable' ? 'Not Required' : task.status;
-      const normalized = { ...task, status, ownerName: task.ownerName?.trim() || 'Unassigned', finishDate: status === 'Complete' ? (task.finishDate || todayIso()) : '' };
+      const resolved = CLOSED_TASK_STATUSES.includes(status);
+      const normalized = { ...task, status, ownerName: task.ownerName?.trim() || 'Unassigned', dueDate: status === 'Not Required' ? '' : task.dueDate, finishDate: resolved ? (task.finishDate || todayIso()) : '' };
       const saved = mockMode ? normalized : await repo.store.saveTask(normalized);
       const updateState = (state) => ({ ...state, tasks: state.tasks.map((row) => row.id === saved.id ? saved : row) });
       if (mockMode) setMockData(updateState); else setData(updateState);
@@ -330,36 +349,39 @@ export function App() {
   async function claimProject(project) { await saveProject({ ...project, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) }); }
 
   async function toggleTaskComplete(task) {
-    await saveTask({ ...task, status: task.status === 'Complete' ? 'Not Started' : 'Complete' });
+    await saveTask({ ...task, status: isClosedTask(task) ? 'Not Started' : 'Complete' });
   }
 
   async function deleteProject(project) {
-    if (!window.confirm(`Delete “${project.title}” and all of its tasks, updates, and risks?`)) return;
     const source = mockMode ? mockData : data;
     const belongsToProject = (row) => row.projectKey === project.projectKey;
+    const removeProject = (state) => ({
+      ...state,
+      projects: state.projects.filter((row) => row.id !== project.id),
+      tasks: state.tasks.filter((row) => !belongsToProject(row)),
+      updates: state.updates.filter((row) => !belongsToProject(row)),
+      risks: state.risks.filter((row) => !belongsToProject(row)),
+    });
+    if (mockMode) setMockData(removeProject); else setData(removeProject);
+    setOpenProjectId('');
+    setToast({ tone: mockMode ? 'good' : 'info', message: mockMode ? `${project.title} deleted.` : `Deleting ${project.title}…` });
+
+    if (mockMode) return;
     try {
-      if (!mockMode) {
-        const related = [
-          ...source.tasks.filter(belongsToProject).map((row) => ['tasks', row]),
-          ...source.updates.filter(belongsToProject).map((row) => ['updates', row]),
-          ...source.risks.filter(belongsToProject).map((row) => ['risks', row]),
-        ];
-        for (let index = 0; index < related.length; index += 6) {
-          await Promise.all(related.slice(index, index + 6).map(([collection, row]) => repo.store.recycle(collection, row.spId, row.id)));
-        }
-        await repo.store.recycle('projects', project.spId, project.id);
+      const related = [
+        ...source.tasks.filter(belongsToProject).map((row) => ['tasks', row]),
+        ...source.updates.filter(belongsToProject).map((row) => ['updates', row]),
+        ...source.risks.filter(belongsToProject).map((row) => ['risks', row]),
+      ];
+      for (let index = 0; index < related.length; index += 10) {
+        await Promise.all(related.slice(index, index + 10).map(([collection, row]) => repo.store.recycle(collection, row.spId, row.id)));
       }
-      const updateState = (state) => ({
-        ...state,
-        projects: state.projects.filter((row) => row.id !== project.id),
-        tasks: state.tasks.filter((row) => !belongsToProject(row)),
-        updates: state.updates.filter((row) => !belongsToProject(row)),
-        risks: state.risks.filter((row) => !belongsToProject(row)),
-      });
-      if (mockMode) setMockData(updateState); else setData(updateState);
-      setOpenProjectId('');
+      await repo.store.recycle('projects', project.spId, project.id);
       setToast({ message: `${project.title} deleted.` });
-    } catch (caught) { setToast({ tone: 'bad', message: caught.message || 'Project could not be deleted.' }); }
+    } catch (caught) {
+      try { setData(await repo.store.load()); } catch { setData(source); }
+      setToast({ tone: 'bad', message: caught.message || 'Project could not be deleted.' });
+    }
   }
 
   function toggleMock() {
@@ -396,7 +418,7 @@ export function App() {
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{visibleData.tasks.filter((task) => isOwnedByUser(task, user) && !isClosedTask(task)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
+    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
     <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button><button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button></div></header>
       <main>
         {view === 'overview' && <Overview projects={filteredProjects} tasks={visibleData.tasks} risks={visibleData.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={deleteProject} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} mockMode={mockMode} onToggleMock={toggleMock} />}
@@ -409,6 +431,6 @@ export function App() {
     {openProject && <ProjectDrawer project={openProject} user={user} tasks={visibleData.tasks} updates={visibleData.updates} risks={visibleData.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} sampleMode={mockMode} />}
     {projectEditor && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
     {taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
-    <Toast toast={toast} />
+    <Toast toast={toast} onClose={() => setToast(null)} />
   </div>;
 }

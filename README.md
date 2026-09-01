@@ -49,7 +49,8 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 <script>
   window.MOD_TRACKER_CONFIG = {
     listPrefix: 'Modernization',
-    webUrl: 'https://tenant.sharepoint.com/sites/Modernization'
+    webUrl: 'https://tenant.sharepoint.com/sites/Modernization',
+    hideLists: true
   };
 </script>
 ```
@@ -60,7 +61,8 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 | `webUrl` | Auto-detected | Target SharePoint web URL. |
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
+| `hideLists` | `true` | Hide the four backing lists from the normal Site Contents view without affecting API access. |
 
-On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. SharePoint permissions are the access boundary—there is no separate manager allowlist in the app.
+On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. It also hides its four backing lists from the normal Site Contents view to keep sites with multiple tracker pages organized. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. SharePoint permissions are the access boundary—there is no separate manager allowlist in the app.
 
 See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and deployment behavior.

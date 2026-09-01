@@ -11,7 +11,7 @@ describe('portfolio Excel export', () => {
       updates: seedData.updates,
       risks: seedData.risks,
       phases: seedData.phases,
-      user: { title: 'Test Engineer', email: 'engineer@navy.mil' },
+      user: { title: 'Test Engineer', email: 'engineer@example.invalid' },
       sourceLabel: 'Editable sample portfolio',
     });
     const bytes = await workbook.xlsx.writeBuffer();
