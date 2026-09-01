@@ -1,8 +1,10 @@
 import { workflowData } from '../data/workflow';
+import { DEFAULT_ACRONYM_VERSION, defaultAcronyms } from '../data/defaultAcronyms';
 import { resolveWebUrl } from './spContext';
 import { SharePointStore } from './spStore';
 
 const STORAGE_KEY = 'modernization-project-tracker:v2';
+const ACRONYM_DEFAULTS_KEY = `${STORAGE_KEY}:acronyms:${DEFAULT_ACRONYM_VERSION}`;
 const EMPTY_DATA = { projects: [], tasks: [], updates: [], risks: [], acronyms: [] };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -14,6 +16,12 @@ class LocalStore {
     this.data.updates ||= [];
     this.data.risks ||= [];
     this.data.acronyms ||= [];
+    if (!localStorage.getItem(ACRONYM_DEFAULTS_KEY)) {
+      const existing = new Set(this.data.acronyms.map((entry) => String(entry.acronym || '').toUpperCase()));
+      this.data.acronyms.push(...defaultAcronyms.filter((entry) => !existing.has(entry.acronym.toUpperCase())));
+      localStorage.setItem(ACRONYM_DEFAULTS_KEY, '1');
+      this.persist();
+    }
   }
 
   persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); }

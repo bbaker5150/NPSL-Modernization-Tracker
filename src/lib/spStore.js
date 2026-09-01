@@ -1,4 +1,5 @@
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
+import { defaultAcronyms } from '../data/defaultAcronyms';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
@@ -46,7 +47,7 @@ export const CONTAINERS = [
   {
     key: 'acronyms', suffix: 'Acronyms', description: 'Shared modernization acronym glossary.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['Acronym', 'Acronym', FIELD.TEXT, true],
-      ['FullTerm', 'Full Term', FIELD.TEXT], ['Definition', 'Definition', FIELD.NOTE],
+      ['FullTerm', 'Full Term', FIELD.TEXT], ['Definition', 'Definition', FIELD.NOTE], ['SeedVersion', 'Seed Version', FIELD.TEXT],
     ],
   },
 ].map((container) => ({
@@ -118,7 +119,7 @@ const riskFields = (row) => ({
 });
 
 const acronymFields = (row) => ({
-  Title: row.acronym, RecordId: row.id, Acronym: row.acronym, FullTerm: row.term, Definition: row.definition,
+  Title: row.acronym, RecordId: row.id, Acronym: row.acronym, FullTerm: row.term, Definition: row.definition, SeedVersion: row.seedVersion || '',
 });
 
 function fromProject(item) {
@@ -146,7 +147,7 @@ function fromTask(item) {
 
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
-const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '' });
+const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
 export class SharePointStore {
   constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true }) {
@@ -186,13 +187,30 @@ export class SharePointStore {
       }
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
       const existing = new Set((body.value || []).map((field) => field.InternalName));
-      for (const field of container.fields) {
-        if (existing.has(field.name)) continue;
+      const seedMarker = container.key === 'acronyms' ? container.fields.find((field) => field.name === 'SeedVersion') : null;
+      const addField = async (field) => {
         await this.post(`${apiFor(this.prefix, container.key)}/fields/createfieldasxml`, {
           verbose: true,
           body: { parameters: { __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' }, SchemaXml: schemaXml(field), Options: ADD_FIELD.INTERNAL_NAME_HINT | (field.inView ? ADD_FIELD.TO_DEFAULT_VIEW : 0) } },
         });
         steps.push(`Added ${container.key}.${field.name}`);
+      };
+      for (const field of container.fields) {
+        if (existing.has(field.name) || field === seedMarker) continue;
+        await addField(field);
+      }
+      if (seedMarker && !existing.has(seedMarker.name)) {
+        const fieldsBeforeMarker = container.fields.filter((field) => field !== seedMarker).map((field) => field.name);
+        const existingRows = await this.listItems('acronyms', fieldsBeforeMarker, fromAcronym);
+        const existingAcronyms = new Set(existingRows.map((entry) => String(entry.acronym || '').toUpperCase()));
+        const missing = defaultAcronyms.filter((entry) => !existingAcronyms.has(entry.acronym.toUpperCase()));
+        for (const entry of missing) {
+          const fields = acronymFields(entry);
+          delete fields.SeedVersion;
+          await this.create('acronyms', fields);
+        }
+        if (missing.length) steps.push(`Added ${missing.length} default acronyms`);
+        await addField(seedMarker);
       }
     }
     return steps;

@@ -8,7 +8,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Engineer-focused **My work** queues tied to the signed-in SharePoint login identity
 - Project WBS tasks, updates, risks, ownership, health, and milestones
 - Full portfolio access for every user who has permission to the hosting SharePoint site and lists
-- A shared acronym glossary with add/remove controls backed by SharePoint
+- The original 37-entry acronym reference, with shared add/remove controls backed by SharePoint
 - Styled multi-sheet Excel export including the current acronym reference
 - Light and dark themes with the NAVAIR seal in the tracker identity
 - A Forge-compatible single HTML build with no external runtime requests

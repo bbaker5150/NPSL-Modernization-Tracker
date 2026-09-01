@@ -20,7 +20,11 @@ describe('repository selection and SharePoint identity', () => {
     window.MOD_TRACKER_CONFIG = { forceLocal: true };
     const repo = createRepository();
     expect(repo.mode).toBe('local');
-    await expect(repo.store.load()).resolves.toEqual({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
+    const data = await repo.store.load();
+    expect(data.projects).toEqual([]);
+    expect(data.tasks).toEqual([]);
+    expect(data.acronyms).toHaveLength(37);
+    expect(data.acronyms.find((entry) => entry.acronym === 'CSS')?.term).toBe('Calibration Standard Specification');
   });
 
   it('keys My Work to the signed-in SharePoint login with legacy email fallback', () => {

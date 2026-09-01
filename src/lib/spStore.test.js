@@ -9,7 +9,7 @@ describe('SharePoint store', () => {
     expect(projects.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(tasks.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(updates.fields.map((field) => field.name)).toContain('AuthorKey');
-    expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition']);
+    expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition', 'SeedVersion']);
   });
 
   it('follows SharePoint pagination links so exports include every item', async () => {
@@ -78,7 +78,7 @@ describe('SharePoint store', () => {
     const saved = await store.saveAcronym({ id: 'acronym-css', acronym: 'CSS', term: 'Calibration Standard Specification', definition: 'Technical requirements.' });
 
     expect(store.create).toHaveBeenCalledWith('acronyms', {
-      Title: 'CSS', RecordId: 'acronym-css', Acronym: 'CSS', FullTerm: 'Calibration Standard Specification', Definition: 'Technical requirements.',
+      Title: 'CSS', RecordId: 'acronym-css', Acronym: 'CSS', FullTerm: 'Calibration Standard Specification', Definition: 'Technical requirements.', SeedVersion: '',
     });
     expect(saved.spId).toBe(81);
   });

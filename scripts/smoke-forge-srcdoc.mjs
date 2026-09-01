@@ -43,11 +43,12 @@ try {
   if (await frame.getByText('Open sample portfolio').count()) errors.push('Sample portfolio control remained visible');
 
   await frame.getByRole('button', { name: /Acronym glossary/ }).click();
-  await frame.getByLabel('Acronym', { exact: true }).fill('CSS');
-  await frame.getByLabel('Full term').fill('Calibration Standard Specification');
-  await frame.getByLabel('Definition').fill('Technical requirements for a calibration standard.');
-  await frame.getByRole('button', { name: 'Add acronym' }).click();
   await frame.getByText('Calibration Standard Specification').waitFor();
+  await frame.getByLabel('Acronym', { exact: true }).fill('SMK');
+  await frame.getByLabel('Full term').fill('Smoke Test Glossary Entry');
+  await frame.getByLabel('Definition').fill('Validates shared glossary creation.');
+  await frame.getByRole('button', { name: 'Add acronym' }).click();
+  await frame.getByText('Smoke Test Glossary Entry').waitFor();
 
   await frame.getByRole('button', { name: /Portfolio/, exact: true }).click();
   await frame.getByRole('button', { name: /New project/ }).click();

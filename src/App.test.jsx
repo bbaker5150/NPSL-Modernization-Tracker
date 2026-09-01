@@ -64,7 +64,7 @@ describe('application shell', () => {
 
     const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent.includes('Acronym glossary'));
     await act(async () => glossaryButton.click());
-    expect(document.body.textContent).toContain('No acronyms yet');
+    expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
 
   it('adds and removes shared glossary acronyms', async () => {
@@ -73,23 +73,24 @@ describe('application shell', () => {
     await act(async () => glossaryButton.click());
 
     await act(async () => {
-      changeValue(document.querySelector('input[aria-label="Acronym"]'), 'css');
-      changeValue(document.querySelector('input[aria-label="Full term"]'), 'Calibration Standard Specification');
-      changeValue(document.querySelector('input[aria-label="Definition"]'), 'Technical requirements for a calibration standard.');
+      changeValue(document.querySelector('input[aria-label="Acronym"]'), 'abc');
+      changeValue(document.querySelector('input[aria-label="Full term"]'), 'Added By Collaborator');
+      changeValue(document.querySelector('input[aria-label="Definition"]'), 'A shared glossary entry.');
     });
     await act(async () => {
       document.querySelector('.glossary-composer').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    expect(document.body.textContent).toContain('Calibration Standard Specification');
+    expect(document.body.textContent).toContain('Added By Collaborator');
     expect(document.querySelector('input[aria-label="Acronym"]').value).toBe('');
 
     await act(async () => {
-      document.querySelector('button[aria-label="Remove CSS"]').click();
+      document.querySelector('button[aria-label="Remove ABC"]').click();
       await Promise.resolve();
     });
-    expect(window.confirm).toHaveBeenCalledWith('Remove CSS from the shared glossary?');
-    expect(document.body.textContent).toContain('No acronyms yet');
+    expect(window.confirm).toHaveBeenCalledWith('Remove ABC from the shared glossary?');
+    expect(document.body.textContent).not.toContain('Added By Collaborator');
+    expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
 
   it('counts owned projects in My Work and assigns their starter tasks to the project owner', async () => {
