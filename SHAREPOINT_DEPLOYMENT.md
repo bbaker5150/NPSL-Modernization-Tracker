@@ -17,7 +17,7 @@ The output contains React, Excel export support, styles, the editable sample dat
 
 ## Authentication and access
 
-The app has no separate sign-in or role database. It uses the current Microsoft 365 session and resolves the user through `/_api/web/currentuser`. Writes use a time-limited form digest from `/_api/contextinfo`.
+The app has no separate sign-in or role database. It uses the current Microsoft 365 session and resolves the user through `/_api/web/currentuser`. Writes use a time-limited form digest from `/_api/contextinfo`. Existing-item updates use SharePoint's validation endpoint, avoiding REST method-override MERGE requests and their repetitive host notifications.
 
 Every user who can open the HTML and access the lists receives the complete portfolio UI. SharePoint site/list permissions are the security boundary and determine who can read or edit data. The **My work** view matches the signed-in SharePoint `LoginName` stored in `OwnerKey`; email is used only as a compatibility fallback for older records.
 
@@ -34,7 +34,7 @@ With the default prefix, the automatic clean-slate provisioning creates:
 
 Provisioning is idempotent and additive. It creates missing lists and fields but does not delete, rename, retype, or import example records.
 
-The four backing lists are marked `Hidden` by default. This keeps each tracker page from adding four more entries to the normal **Site Contents** view while preserving full REST access for the application and site administrators. Existing visible tracker lists are hidden automatically the next time this build loads and completes its additive setup. A site owner can still reach a list by its direct URL or temporarily set `hideLists: false` in the page configuration if visible list administration is preferred.
+New backing lists are marked `Hidden` in the same request that creates them. This keeps each tracker page from adding four more entries to the normal **Site Contents** view while preserving full REST access for the application and site administrators. Existing lists retain their current visibility so normal startup never performs a separate visibility MERGE. A site owner can still reach a hidden list by its direct URL or set `hideLists: false` before a new workspace is provisioned.
 
 ### Project fields
 

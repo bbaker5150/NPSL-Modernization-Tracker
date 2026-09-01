@@ -37,38 +37,36 @@ describe('SharePoint store', () => {
     expect(readiness.checks.every((check) => check.exists && check.missingFields.length > 0)).toBe(true);
   });
 
-  it('hides backing lists from Site Contents while preserving REST access', async () => {
+  it('creates backing lists hidden without follow-up MERGE operations', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
-    store.listExists = async () => true;
-    store.get = vi.fn(async (path) => path.includes('/fields')
-      ? { value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }
-      : { Hidden: false });
+    store.listExists = async () => false;
+    store.get = vi.fn(async () => ({ value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }));
     store.post = vi.fn(async () => ({}));
 
     await store.provision();
 
-    const visibilityWrites = store.post.mock.calls.filter(([path, options]) => !path.includes('/fields') && options?.body?.Hidden === true);
-    expect(visibilityWrites).toHaveLength(CONTAINERS.length);
-    expect(visibilityWrites.every(([, options]) => options.headers['X-HTTP-Method'] === 'MERGE')).toBe(true);
+    const listCreates = store.post.mock.calls.filter(([path]) => path === '/_api/web/lists');
+    expect(listCreates).toHaveLength(CONTAINERS.length);
+    expect(listCreates.every(([, options]) => options.body.Hidden === true)).toBe(true);
+    expect(JSON.stringify(store.post.mock.calls)).not.toContain('X-HTTP-Method');
   });
 
-  it('updates date fields through REST MERGE using locale-independent ISO values', async () => {
+  it('updates date fields through prompt-free validation posts using ISO values', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
-    store.post = vi.fn(async () => ({}));
+    store.post = vi.fn(async () => ({ value: [] }));
     const task = {
-      spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'need-scope',
+      spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'requirement',
       order: 1, status: 'In Progress', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
       ownerName: 'Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
     };
     await store.saveTask(task);
-    expect(store.post).toHaveBeenCalledWith(expect.stringContaining('/items(42)'), expect.objectContaining({
-      headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
-      body: expect.objectContaining({
-        StartDate: '2026-09-01T12:00:00Z',
-        DueDate: '2026-09-30T12:00:00Z',
-        FinishDate: null,
-      }),
-    }));
-    expect(store.post.mock.calls[0][0]).not.toContain('ValidateUpdateListItem');
+    expect(store.post.mock.calls[0][0]).toContain('/items(42)/validateupdatelistitem');
+    const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
+    expect(values).toMatchObject({
+      StartDate: '2026-09-01T12:00:00Z',
+      DueDate: '2026-09-30T12:00:00Z',
+      FinishDate: '',
+    });
+    expect(JSON.stringify(store.post.mock.calls[0])).not.toContain('X-HTTP-Method');
   });
 });

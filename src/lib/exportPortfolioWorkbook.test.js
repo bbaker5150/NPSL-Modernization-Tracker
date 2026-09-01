@@ -11,6 +11,7 @@ describe('portfolio Excel export', () => {
       updates: seedData.updates,
       risks: seedData.risks,
       phases: seedData.phases,
+      glossary: seedData.glossary,
       user: { title: 'Test Engineer', email: 'engineer@example.invalid' },
       sourceLabel: 'Editable sample portfolio',
     });
@@ -23,14 +24,15 @@ describe('portfolio Excel export', () => {
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);
     expect(reopened.worksheets.map((sheet) => sheet.name)).toEqual([
-      'Portfolio Summary', 'Projects', 'WBS Tasks', 'Risks', 'Updates', 'Pipeline Reference',
+      'Portfolio Summary', 'Projects', 'WBS Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
     ]);
     expect(reopened.getWorksheet('Projects').rowCount).toBe(seedData.projects.length + 1);
     expect(reopened.getWorksheet('WBS Tasks').rowCount).toBe(seedData.tasks.length + 1);
     expect(reopened.getWorksheet('Projects').getCell('A1').font.bold).toBe(true);
     expect(reopened.getWorksheet('Projects').getCell('A1').fill.fgColor.argb).toBe('0B2942');
-    expect(reopened.getWorksheet('Projects').getCell('L2').numFmt).toBe('0%');
+    expect(reopened.getWorksheet('Projects').getCell('M2').numFmt).toBe('0%');
     expect(reopened.getWorksheet('Pipeline Reference').rowCount).toBe(seedData.phases.length + 1);
+    expect(reopened.getWorksheet('Acronym Glossary').rowCount).toBe(seedData.glossary.length + 1);
     expect(reopened.getWorksheet('Portfolio Summary').getCell('A1').value).toBe('Modernization Project Tracker');
   }, 20_000);
 });

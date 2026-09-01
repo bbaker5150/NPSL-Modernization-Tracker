@@ -32,11 +32,11 @@ describe('repository selection and SharePoint identity', () => {
     expect(isOwnedByUser({ ownerKey: 'i:0#.f|membership|engineer@example.invalid' }, { email: 'engineer@example.invalid' })).toBe(true);
   });
 
-  it('creates a clean seven-stage WBS when a live project is added', () => {
+  it('creates a clean five-phase WBS when a live project is added', () => {
     const owner = { ownerName: 'Doe, Jordan T CIV (USA)', ownerEmail: 'engineer@example.invalid', ownerKey: 'i:0#.f|membership|engineer@example.invalid' };
     const tasks = createStarterTasks('new-project', owner);
-    expect(tasks).toHaveLength(34);
-    expect(new Set(tasks.map((task) => task.phaseKey))).toHaveLength(7);
+    expect(tasks).toHaveLength(5);
+    expect(new Set(tasks.map((task) => task.phaseKey))).toHaveLength(5);
     expect(tasks.every((task) => task.projectKey === 'new-project' && task.status === 'Not Started')).toBe(true);
     expect(tasks.every((task) => !task.dueDate && task.ownerKey === owner.ownerKey && task.ownerEmail === owner.ownerEmail && task.ownerName === owner.ownerName && !task.dataIssue)).toBe(true);
   });

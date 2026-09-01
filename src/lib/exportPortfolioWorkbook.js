@@ -196,7 +196,7 @@ function addSummary(workbook, { projects, tasks, updates, risks, phases, user, s
   return sheet;
 }
 
-export function createPortfolioWorkbook({ projects, tasks, updates, risks, phases, user, sourceLabel = 'Live SharePoint portfolio' }) {
+export function createPortfolioWorkbook({ projects, tasks, updates, risks, phases, glossary = [], user, sourceLabel = 'Live SharePoint portfolio' }) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Modernization Project Tracker';
   workbook.lastModifiedBy = user?.title || user?.email || 'SharePoint user';
@@ -209,9 +209,9 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
 
   addSummary(workbook, { projects, tasks, updates, risks, phases, user, sourceLabel });
   addDataSheet(workbook, {
-    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [8, 9, 10],
+    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [9, 10, 11],
     columns: [
-      { header: 'Project ID', width: 22 }, { header: 'Project', width: 32, wrap: true }, { header: 'Measurement Area', width: 22 },
+      { header: 'Project ID', width: 22 }, { header: 'Tracking ID', width: 15 }, { header: 'Project', width: 32, wrap: true }, { header: 'Measurement Area', width: 22 },
       { header: 'Description', width: 42, wrap: true }, { header: 'Owner', width: 22 }, { header: 'Owner Email', width: 30 },
       { header: 'Owner Identity Key', width: 36 }, { header: 'Health', width: 16 }, { header: 'Priority', width: 12 },
       { header: 'Status', width: 16 }, { header: 'Pipeline Stage', width: 28 }, { header: 'Progress', width: 12, numFmt: '0%' },
@@ -219,7 +219,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Tasks', width: 14 }, { header: 'Overdue Tasks', width: 14 },
     ],
     rows: projects.map((project) => [
-      project.projectKey || project.id, project.title, project.measurementArea, project.description || '', project.ownerName || 'Unassigned',
+      project.projectKey || project.id, project.trackingId || '', project.title, project.measurementArea, project.description || '', project.ownerName || 'Unassigned',
       project.ownerEmail || '', project.ownerKey || '', project.health, project.priority, project.status, phaseName(phases, project.currentStageKey),
       Number(project.percentComplete || 0) / 100, toDate(project.targetFinish), project.nextMilestone || '', toDate(project.nextMilestoneDate),
       Number(project.blockedCount || 0), Number(project.overdueCount || 0),
@@ -261,8 +261,13 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
   });
   addDataSheet(workbook, {
     name: 'Pipeline Reference', tableName: 'PipelineTable',
-    columns: [{ header: 'Stage', width: 10 }, { header: 'Key', width: 24 }, { header: 'Pipeline Step', width: 34 }, { header: 'Short Label', width: 22 }],
-    rows: phases.map((phase, index) => [index + 1, phase.key, phase.name, phase.short || '']),
+    columns: [{ header: 'Stage', width: 10 }, { header: 'Key', width: 24 }, { header: 'Pipeline Step', width: 34 }, { header: 'Acronym', width: 14 }, { header: 'Description', width: 54, wrap: true }],
+    rows: phases.map((phase, index) => [index + 1, phase.key, phase.name, phase.short || '', phase.description || '']),
+  });
+  addDataSheet(workbook, {
+    name: 'Acronym Glossary', tableName: 'AcronymGlossaryTable',
+    columns: [{ header: 'Acronym', width: 18 }, { header: 'Full Term', width: 44, wrap: true }, { header: 'Definition', width: 76, wrap: true }],
+    rows: glossary.map((entry) => [entry.acronym, entry.term, entry.definition]),
   });
   return workbook;
 }

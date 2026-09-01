@@ -41,7 +41,7 @@ try {
   const emptyBarWidths = await frame.locator('.phase-bar span').evaluateAll((bars) => bars.map((bar) => bar.style.width));
   if (emptyBarWidths.some((width) => width !== '0%')) errors.push(`Empty pipeline stages displayed progress: ${emptyBarWidths.join(', ')}`);
   await frame.getByRole('button', { name: /Open sample portfolio/ }).first().click();
-  await frame.getByText('14 total measurement areas').waitFor();
+  await frame.getByText('28 total measurement areas').waitFor();
   await frame.locator('.attention-owner').first().waitFor();
   await frame.getByRole('button', { name: /Pipeline board/ }).click();
   await frame.getByRole('heading', { name: 'Pipeline board' }).waitFor();

@@ -63,6 +63,16 @@ function schemaXml(field) {
 
 const dateOnly = (value) => value ? String(value).slice(0, 10) : '';
 const sharePointDate = (value) => value ? `${dateOnly(value)}T12:00:00Z` : null;
+const LEGACY_PHASE_KEYS = {
+  'need-scope': 'requirement',
+  'research-tds': 'development',
+  'requirements-acquisition': 'acquisition',
+  'procurement-support': 'production-procurement',
+  'test-evaluation': 'development',
+  'integration-deployment': 'operation-sustainment',
+  'sustainment-closeout': 'operation-sustainment',
+};
+const phaseKey = (value) => LEGACY_PHASE_KEYS[value] || value || 'requirement';
 const safeJson = (value, fallback) => {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 };
@@ -101,7 +111,7 @@ function fromProject(item) {
     measurementArea: item.MeasurementArea || item.Title, description: item.Description || '', ownerName: item.OwnerName || 'Unassigned',
     ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', managerName: item.ManagerName || 'Unassigned', managerEmail: item.ManagerEmail || '',
     priority: item.Priority || 'Medium', health: item.Health || 'Needs Review', status: item.ProjectStatus || 'Planned',
-    currentStageKey: item.CurrentStageKey || 'need-scope', percentComplete: Number(item.PercentComplete || 0),
+    currentStageKey: phaseKey(item.CurrentStageKey), percentComplete: Number(item.PercentComplete || 0),
     targetFinish: dateOnly(item.TargetFinish), nextMilestone: item.NextMilestone || '', nextMilestoneDate: dateOnly(item.NextMilestoneDate),
     sourceNotes: item.SourceNotes || '', importedBaseline: !!item.ImportedBaseline, tags: safeJson(item.TagsJson, []),
   };
@@ -111,7 +121,7 @@ function fromTask(item) {
   const status = item.TaskStatus || 'Not Started';
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, wbs: item.WBS, title: item.TaskTitle,
-    phaseKey: item.PhaseKey, order: Number(item.SortOrder || 0), status,
+    phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
     startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: ['Not Required', 'Not Applicable'].includes(status) ? '' : dateOnly(item.DueDate),
     ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
@@ -142,21 +152,19 @@ export class SharePointStore {
   async readiness() {
     const checks = await Promise.all(CONTAINERS.map(async (container) => {
       const exists = await this.listExists(container.key);
-      if (!exists) return { key: container.key, exists, hidden: false, needsVisibilityChange: this.hideLists, missingFields: container.fields.map((field) => field.name) };
-      const list = await this.get(`${apiFor(this.prefix, container.key)}?$select=Hidden`);
-      const hidden = !!(list.Hidden ?? list.d?.Hidden);
+      if (!exists) return { key: container.key, exists, missingFields: container.fields.map((field) => field.name) };
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
       const existing = new Set((body.value || body.d?.results || []).map((field) => field.InternalName));
-      return { key: container.key, exists, hidden, needsVisibilityChange: this.hideLists && !hidden, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
+      return { key: container.key, exists, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
     }));
-    return { ready: checks.every((check) => check.exists && !check.needsVisibilityChange && check.missingFields.length === 0), checks };
+    return { ready: checks.every((check) => check.exists && check.missingFields.length === 0), checks };
   }
 
   async provision() {
     const steps = [];
     for (const container of CONTAINERS) {
       if (!(await this.listExists(container.key))) {
-        await this.post('/_api/web/lists', { body: { Title: titleFor(this.prefix, container.key), Description: container.description, BaseTemplate: 100, AllowContentTypes: false, ContentTypesEnabled: false } });
+        await this.post('/_api/web/lists', { body: { Title: titleFor(this.prefix, container.key), Description: container.description, BaseTemplate: 100, AllowContentTypes: false, ContentTypesEnabled: false, Hidden: this.hideLists } });
         steps.push(`Created ${titleFor(this.prefix, container.key)}`);
       }
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
@@ -168,22 +176,6 @@ export class SharePointStore {
           body: { parameters: { __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' }, SchemaXml: schemaXml(field), Options: ADD_FIELD.INTERNAL_NAME_HINT | (field.inView ? ADD_FIELD.TO_DEFAULT_VIEW : 0) } },
         });
         steps.push(`Added ${container.key}.${field.name}`);
-      }
-      if (this.hideLists) {
-        const list = await this.get(`${apiFor(this.prefix, container.key)}?$select=Hidden`);
-        if (!(list.Hidden ?? list.d?.Hidden)) {
-          try {
-            await this.post(apiFor(this.prefix, container.key), {
-              body: { Hidden: true },
-              headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
-            });
-            steps.push(`Hidden ${titleFor(this.prefix, container.key)} from Site Contents`);
-          } catch (error) {
-            // Hiding a list requires Manage Lists. Contributors can still use
-            // the tracker if a site owner has not performed this cleanup yet.
-            if (!(error instanceof SharePointError) || ![401, 403].includes(error.status)) throw error;
-          }
-        }
       }
     }
     return steps;
@@ -223,16 +215,23 @@ export class SharePointStore {
   }
 
   async update(key, spId, fields) {
-    await this.post(`${apiFor(this.prefix, key)}/items(${spId})`, {
-      body: fields,
-      headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+    const serialize = (value) => value == null ? '' : typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
+    const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/validateupdatelistitem`, {
+      body: {
+        formValues: Object.entries(fields).map(([FieldName, value]) => ({ FieldName, FieldValue: serialize(value) })),
+        bNewDocumentUpdate: true,
+      },
     });
+    const rows = result?.value || result?.d?.ValidateUpdateListItem?.results || [];
+    const failed = rows.find((row) => row.HasException || row.ErrorMessage);
+    if (failed) throw new SharePointError(`SharePoint rejected ${failed.FieldName || 'a field'}: ${failed.ErrorMessage || 'validation failed'}`, 400, failed);
   }
 
   async recycle(key, spId) { await this.post(`${apiFor(this.prefix, key)}/items(${spId})/recycle()`, {}); }
 
   async saveProject(row) { return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) }; }
   async saveTask(row) { return row.spId ? (await this.update('tasks', row.spId, taskFields(row)), row) : { ...row, spId: await this.create('tasks', taskFields(row)) }; }
+  async saveTasks(rows) { return Promise.all(rows.map((row) => this.saveTask(row))); }
   async saveUpdate(row) { return { ...row, spId: await this.create('updates', updateFields(row)) }; }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
 

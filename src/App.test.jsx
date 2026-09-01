@@ -58,7 +58,7 @@ describe('application shell', () => {
 
     const mockButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Open sample portfolio'));
     await act(async () => mockButton.click());
-    expect(document.body.textContent).toContain('14 total measurement areas');
+    expect(document.body.textContent).toContain('28 total measurement areas');
     expect(document.body.textContent).toContain('Return to live SharePoint data');
     expect(document.body.textContent).not.toContain('Read-only');
     expect(document.querySelector('.attention-owner')?.textContent).toMatch(/^Owner: /);
@@ -66,7 +66,11 @@ describe('application shell', () => {
     const boardButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Pipeline board'));
     await act(async () => boardButton.click());
     expect(document.body.textContent).toContain('Scan where every project sits');
-    expect(document.querySelectorAll('.kanban-column')).toHaveLength(7);
+    expect(document.querySelectorAll('.kanban-column')).toHaveLength(5);
+
+    const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent.includes('Acronym glossary'));
+    await act(async () => glossaryButton.click());
+    expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
 
   it('counts owned projects in My Work and assigns their starter tasks to the project owner', async () => {
@@ -89,7 +93,7 @@ describe('application shell', () => {
     expect(myWork.querySelector('.badge').textContent).toBe('1');
     await act(async () => myWork.click());
     expect(document.body.textContent).toContain('Owned modernization project');
-    expect(document.body.textContent).toContain('34');
+    expect(document.body.textContent).toContain('5');
   });
 
   it('lets users practice task edits and project deletion in the sample portfolio', async () => {
@@ -97,13 +101,20 @@ describe('application shell', () => {
     const sampleButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Open sample portfolio'));
     await act(async () => sampleButton.click());
 
-    const firstCard = document.querySelector('.project-card');
+    const firstCard = [...document.querySelectorAll('.project-card')].find((card) => !card.textContent.includes('No target date'));
     expect(firstCard.textContent).not.toContain('No target date');
     expect(firstCard.querySelector('[title^="Target completion:"]')).not.toBeNull();
     await act(async () => firstCard.click());
 
     const tasksTab = [...document.querySelectorAll('.drawer-tabs button')].find((button) => button.textContent.includes('Work breakdown'));
     await act(async () => tasksTab.click());
+    const phaseButton = document.querySelector('.phase-required-button:not(:disabled)');
+    const phaseSection = phaseButton.closest('.wbs-stage');
+    await act(async () => { phaseButton.click(); await Promise.resolve(); });
+    expect(phaseSection.classList.contains('phase-not-required')).toBe(true);
+    expect(phaseSection.textContent).toContain('Restore phase');
+    await act(async () => { phaseSection.querySelector('.phase-required-button').click(); await Promise.resolve(); });
+    expect(phaseSection.classList.contains('phase-not-required')).toBe(false);
     const checkbox = document.querySelector('.task-check:not(.checked)');
     const wbs = checkbox.getAttribute('aria-label').replace('Complete WBS ', '');
     await act(async () => { checkbox.click(); await Promise.resolve(); });
@@ -135,7 +146,7 @@ describe('application shell', () => {
     const deleteButton = [...document.querySelectorAll('.project-menu-popover button')].find((button) => button.textContent.includes('Delete project'));
     await act(async () => { deleteButton.click(); await Promise.resolve(); });
     expect(window.confirm).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('13 total measurement areas');
+    expect(document.body.textContent).toContain('27 total measurement areas');
     expect(document.querySelector('[role="status"]')?.textContent).toContain('deleted');
   });
 });
