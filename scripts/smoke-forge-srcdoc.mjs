@@ -67,7 +67,7 @@ try {
   const beforeDelete = await frame.locator('.project-card').count();
   await frame.locator('.project-card .project-menu').first().click();
   await frame.getByRole('button', { name: 'Delete project' }).first().click();
-  await frame.locator('.project-card').first().waitFor();
+  await frame.locator('.project-card').nth(beforeDelete - 1).waitFor({ state: 'detached' });
   const afterDelete = await frame.locator('.project-card').count();
   if (afterDelete !== beforeDelete - 1) errors.push(`Prompt-free project deletion did not update immediately (${beforeDelete} -> ${afterDelete})`);
   if (dialogs.length) errors.push(`Native browser dialog(s) displayed: ${dialogs.join(' | ')}`);
