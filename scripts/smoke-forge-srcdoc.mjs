@@ -47,8 +47,9 @@ try {
   const quickComplete = frame.locator('.task-check:not(.checked)').first();
   const quickCompleteLabel = await quickComplete.getAttribute('aria-label');
   await quickComplete.click();
-  await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete WBS', 'Reopen WBS') }).waitFor();
-  await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete WBS', 'Reopen WBS') }).locator('..').click();
+  const reopenedTask = frame.getByRole('button', { name: quickCompleteLabel.replace('Complete WBS', 'Reopen WBS'), exact: true });
+  await reopenedTask.waitFor();
+  await reopenedTask.locator('xpath=..').click({ position: { x: 110, y: 12 } });
   await frame.getByRole('heading', { name: 'Update task' }).waitFor();
   await frame.getByRole('option', { name: 'Not Required' }).waitFor();
   await frame.locator('.modal button[aria-label="Close"]').click();
