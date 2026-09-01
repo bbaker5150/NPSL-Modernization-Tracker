@@ -13,7 +13,7 @@ npm run verify:singlefile
 
 Upload `build-singlefile/modernization-project-tracker.html` to the SharePoint site that will own the tracker lists. The GitHub Actions workflow performs the same build on every push to `main`, smoke-tests the actual Forge `iframe srcdoc` runtime, uploads a workflow artifact, and publishes the HTML plus its SHA-256 checksum as a release.
 
-The output contains React, Excel export support, styles, the read-only mock dataset, the NAVAIR seal, and the vendored Forge runtime in one HTML file. It has no external scripts, stylesheets, fonts, or images.
+The output contains React, Excel export support, styles, the editable sample dataset, the NAVAIR seal, and the vendored Forge runtime in one HTML file. It has no external scripts, stylesheets, fonts, or images.
 
 ## Authentication and access
 
@@ -50,9 +50,9 @@ Provisioning is idempotent and additive. It creates missing lists and fields but
 
 `RecordId`, `ProjectKey`, `RiskTitle`, `Severity`, `Probability`, `Mitigation`, `OwnerName`, `OwnerKey`, `RiskStatus`, and `DueDate`.
 
-## Mock preview
+## Sample portfolio
 
-The workbook-derived records are bundled only for the read-only **Preview mock portfolio** mode. Toggling the preview swaps the visible in-memory dataset and never calls the SharePoint write API or browser persistence. Return to live data to create and edit actual projects.
+The workbook-derived records are bundled only for **Open sample portfolio** mode. Users can edit projects and tasks, post updates, add risks, and practice deleting records; those changes remain in memory for the current page session and never call the SharePoint write API or browser persistence. Return to live data to work with actual projects.
 
 ## Forge compatibility
 

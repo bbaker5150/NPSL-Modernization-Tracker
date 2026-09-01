@@ -25,7 +25,6 @@ function safeSheetName(name) {
 function styleDataSheet(sheet, columns, statusColumns = []) {
   sheet.views = [{ state: 'frozen', ySplit: 1, xSplit: 1 }];
   sheet.properties.defaultRowHeight = 20;
-  sheet.autoFilter = { from: 'A1', to: sheet.getCell(1, columns.length).address };
   sheet.getRow(1).height = 28;
   sheet.getRow(1).eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -82,6 +81,7 @@ function addDataSheet(workbook, { name, tableName, columns, rows, statusColumns 
       name: tableName,
       ref: 'A1',
       headerRow: true,
+      totalsRow: false,
       style: { theme: 'TableStyleMedium2', showRowStripes: true },
       columns: headers.map((header) => ({ name: header, filterButton: true })),
       rows,

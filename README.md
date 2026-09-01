@@ -8,7 +8,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Engineer-focused **My work** queues tied to the signed-in SharePoint login identity
 - Project WBS tasks, updates, risks, ownership, health, and milestones
 - Full portfolio access for every user who has permission to the hosting SharePoint site and lists
-- A read-only mock portfolio toggle for onboarding and visualization; mock records are never written to SharePoint
+- An editable sample portfolio for onboarding and visualization; sample changes stay in memory and are never written to SharePoint
 - Styled multi-sheet Excel export for projects, tasks, risks, updates, and pipeline reference data
 - Light and dark themes with the NAVAIR seal in the tracker identity
 - A Forge-compatible single HTML build with no external runtime requests
@@ -22,7 +22,7 @@ npm install
 npm run dev
 ```
 
-Local development uses clean-slate browser storage. Use **Preview mock portfolio** in the app to view the example pipeline without persisting mock records.
+Local development uses clean-slate browser storage. Use **Open sample portfolio** in the app to practice with the example pipeline without persisting those changes.
 
 ## Build
 

@@ -60,7 +60,7 @@ export function isOwnedByUser(record, user) {
   const identity = userIdentityKey(user);
   const recordKey = String(record?.ownerKey || '').trim().toLowerCase();
   if (identity && recordKey) return identity === recordKey;
-  // Compatibility for records made before OwnerKey was introduced.
+  // Compatibility for records made before OwnerKey was introduced or assigned by email.
   const email = String(user?.email || '').trim().toLowerCase();
   return !!email && String(record?.ownerEmail || '').trim().toLowerCase() === email;
 }

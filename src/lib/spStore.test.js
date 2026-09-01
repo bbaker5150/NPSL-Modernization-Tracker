@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CONTAINERS, SharePointStore } from './spStore';
 
 describe('SharePoint store', () => {
@@ -35,5 +35,25 @@ describe('SharePoint store', () => {
     const readiness = await store.readiness();
     expect(readiness.ready).toBe(false);
     expect(readiness.checks.every((check) => check.exists && check.missingFields.length > 0)).toBe(true);
+  });
+
+  it('updates date fields through REST MERGE using locale-independent ISO values', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({}));
+    const task = {
+      spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'need-scope',
+      order: 1, status: 'In Progress', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
+      ownerName: 'Engineer', ownerEmail: 'engineer@navy.mil', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
+    };
+    await store.saveTask(task);
+    expect(store.post).toHaveBeenCalledWith(expect.stringContaining('/items(42)'), expect.objectContaining({
+      headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+      body: expect.objectContaining({
+        StartDate: '2026-09-01T12:00:00Z',
+        DueDate: '2026-09-30T12:00:00Z',
+        FinishDate: null,
+      }),
+    }));
+    expect(store.post.mock.calls[0][0]).not.toContain('ValidateUpdateListItem');
   });
 });

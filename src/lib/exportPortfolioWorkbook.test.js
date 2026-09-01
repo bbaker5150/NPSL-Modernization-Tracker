@@ -12,10 +12,13 @@ describe('portfolio Excel export', () => {
       risks: seedData.risks,
       phases: seedData.phases,
       user: { title: 'Test Engineer', email: 'engineer@navy.mil' },
-      sourceLabel: 'Read-only mock portfolio preview',
+      sourceLabel: 'Editable sample portfolio',
     });
     const bytes = await workbook.xlsx.writeBuffer();
     expect(bytes.byteLength).toBeGreaterThan(25_000);
+    const projectsSheet = workbook.getWorksheet('Projects');
+    expect(projectsSheet.autoFilter).toBeNull();
+    expect(projectsSheet.getTable('ProjectsTable').table.totalsRow).toBe(false);
 
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);

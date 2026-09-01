@@ -61,20 +61,8 @@ function schemaXml(field) {
   return `<Field ${Object.entries(attrs).map(([key, value]) => `${key}="${escapeXml(value)}"`).join(' ')} />`;
 }
 
-function toFormValues(fields) {
-  return Object.entries(fields).map(([FieldName, value]) => ({
-    FieldName,
-    FieldValue: value === null || value === undefined ? '' : typeof value === 'boolean' ? (value ? '1' : '0') : String(value),
-  }));
-}
-
-function assertUpdate(result, context) {
-  const rows = result?.value || result?.d?.ValidateUpdateListItem?.results || [];
-  const failures = rows.filter((row) => row?.HasException || row?.ErrorMessage);
-  if (failures.length) throw new SharePointError(`${context}: ${failures.map((row) => row.ErrorMessage).join('; ')}`, 400);
-}
-
 const dateOnly = (value) => value ? String(value).slice(0, 10) : '';
+const sharePointDate = (value) => value ? `${dateOnly(value)}T12:00:00Z` : null;
 const safeJson = (value, fallback) => {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 };
@@ -83,28 +71,28 @@ const projectFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
   Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', ManagerName: row.managerName,
   ManagerEmail: row.managerEmail || '', Priority: row.priority, Health: row.health, ProjectStatus: row.status,
-  CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, TargetFinish: row.targetFinish || null,
-  NextMilestone: row.nextMilestone, NextMilestoneDate: row.nextMilestoneDate || null, SourceNotes: row.sourceNotes,
+  CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, TargetFinish: sharePointDate(row.targetFinish),
+  NextMilestone: row.nextMilestone, NextMilestoneDate: sharePointDate(row.nextMilestoneDate), SourceNotes: row.sourceNotes,
   ImportedBaseline: !!row.importedBaseline, TagsJson: JSON.stringify(row.tags || []),
 });
 
 const taskFields = (row) => ({
   Title: `${row.wbs} ${row.title}`, RecordId: row.id, ProjectKey: row.projectKey, WBS: row.wbs,
   TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
-  StartDate: row.startDate || null, FinishDate: row.finishDate || null, DueDate: row.dueDate || null,
+  StartDate: sharePointDate(row.startDate), FinishDate: sharePointDate(row.finishDate), DueDate: sharePointDate(row.dueDate),
   OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', Notes: row.notes, BlockedReason: row.blockedReason,
   SourceStartLabel: row.sourceStartLabel, DataIssue: row.dataIssue,
 });
 
 const updateFields = (row) => ({
   Title: `${row.projectKey} update`, RecordId: row.id, ProjectKey: row.projectKey, UpdateType: row.type,
-  Summary: row.summary, EntryDate: row.entryDate, AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
+  Summary: row.summary, EntryDate: sharePointDate(row.entryDate), AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
 });
 
 const riskFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, RiskTitle: row.title, Severity: row.severity,
   Probability: row.probability, Mitigation: row.mitigation, OwnerName: row.ownerName, OwnerKey: row.ownerKey || '', RiskStatus: row.status,
-  DueDate: row.dueDate || null,
+  DueDate: sharePointDate(row.dueDate),
 });
 
 function fromProject(item) {
@@ -215,8 +203,10 @@ export class SharePointStore {
   }
 
   async update(key, spId, fields) {
-    const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/ValidateUpdateListItem()`, { body: { formValues: toFormValues(fields), bNewDocumentUpdate: false } });
-    assertUpdate(result, `Updating ${key} item ${spId}`);
+    await this.post(`${apiFor(this.prefix, key)}/items(${spId})`, {
+      body: fields,
+      headers: { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+    });
   }
 
   async recycle(key, spId) { await this.post(`${apiFor(this.prefix, key)}/items(${spId})/recycle()`, {}); }
