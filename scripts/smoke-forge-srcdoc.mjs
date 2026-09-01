@@ -51,7 +51,7 @@ try {
   await reopenedTask.waitFor();
   await reopenedTask.locator('xpath=..').click({ position: { x: 110, y: 12 } });
   await frame.getByRole('heading', { name: 'Update task' }).waitFor();
-  await frame.getByRole('option', { name: 'Not Required' }).waitFor();
+  await frame.locator('.modal select option', { hasText: 'Not Required' }).waitFor({ state: 'attached' });
   await frame.locator('.modal button[aria-label="Close"]').click();
   await frame.locator('.project-drawer .icon-button').first().click();
   const overlays = await frame.locator('#pdc-open, #test-recorder-launcher, #test-recorder-panel, .test-recorder-ui').evaluateAll((elements) => elements.filter((element) => getComputedStyle(element).display !== 'none').length);
