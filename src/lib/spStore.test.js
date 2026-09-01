@@ -63,10 +63,29 @@ describe('SharePoint store', () => {
     expect(store.post.mock.calls[0][0]).toContain('/items(42)/validateupdatelistitem');
     const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
     expect(values).toMatchObject({
-      StartDate: '2026-09-01T12:00:00Z',
-      DueDate: '2026-09-30T12:00:00Z',
+      StartDate: '9/1/2026',
+      DueDate: '9/30/2026',
       FinishDate: '',
     });
     expect(JSON.stringify(store.post.mock.calls[0])).not.toContain('X-HTTP-Method');
+  });
+
+  it('serializes every full-phase Not Required update with SharePoint form dates', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ value: [] }));
+    const rows = [1, 2].map((spId) => ({
+      spId, id: `task-${spId}`, projectKey: 'project', wbs: `RP-0${spId}`, title: 'Requirement task', phaseKey: 'requirement',
+      order: spId, status: 'Not Required', startDate: '', dueDate: '', finishDate: '2026-09-01',
+      ownerName: 'Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
+    }));
+
+    await store.saveTasks(rows);
+
+    expect(store.post).toHaveBeenCalledTimes(2);
+    for (const [, options] of store.post.mock.calls) {
+      const values = Object.fromEntries(options.body.formValues.map((field) => [field.FieldName, field.FieldValue]));
+      expect(values).toMatchObject({ TaskStatus: 'Not Required', StartDate: '', DueDate: '', FinishDate: '9/1/2026' });
+      expect(JSON.stringify(values)).not.toMatch(/T12:00:00Z/);
+    }
   });
 });

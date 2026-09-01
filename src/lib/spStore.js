@@ -63,6 +63,12 @@ function schemaXml(field) {
 
 const dateOnly = (value) => value ? String(value).slice(0, 10) : '';
 const sharePointDate = (value) => value ? `${dateOnly(value)}T12:00:00Z` : null;
+const DATE_FIELDS = new Set(['TargetFinish', 'NextMilestoneDate', 'StartDate', 'FinishDate', 'DueDate', 'EntryDate']);
+const sharePointFormDate = (value) => {
+  if (!value) return '';
+  const [year, month, day] = dateOnly(value).split('-').map(Number);
+  return year && month && day ? `${month}/${day}/${year}` : '';
+};
 const LEGACY_PHASE_KEYS = {
   'need-scope': 'requirement',
   'research-tds': 'development',
@@ -215,10 +221,16 @@ export class SharePointStore {
   }
 
   async update(key, spId, fields) {
-    const serialize = (value) => value == null ? '' : typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
+    // ValidateUpdateListItem parses field values as if they came from a
+    // SharePoint edit form. Unlike normal REST item payloads, its DateTime
+    // parser rejects ISO-8601 strings, so date fields use the site's standard
+    // numeric form representation while empty values remain clearable.
+    const serialize = (fieldName, value) => DATE_FIELDS.has(fieldName)
+      ? sharePointFormDate(value)
+      : value == null ? '' : typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
     const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/validateupdatelistitem`, {
       body: {
-        formValues: Object.entries(fields).map(([FieldName, value]) => ({ FieldName, FieldValue: serialize(value) })),
+        formValues: Object.entries(fields).map(([FieldName, value]) => ({ FieldName, FieldValue: serialize(FieldName, value) })),
         bNewDocumentUpdate: true,
       },
     });
