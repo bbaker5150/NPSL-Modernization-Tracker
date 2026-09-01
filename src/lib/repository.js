@@ -1,9 +1,9 @@
-import { seedData } from '../data/seed';
+import { workflowData } from '../data/workflow';
 import { resolveWebUrl } from './spContext';
 import { SharePointStore } from './spStore';
 
 const STORAGE_KEY = 'modernization-project-tracker:v2';
-const EMPTY_DATA = { projects: [], tasks: [], updates: [], risks: [] };
+const EMPTY_DATA = { projects: [], tasks: [], updates: [], risks: [], acronyms: [] };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -13,6 +13,7 @@ class LocalStore {
     this.data = stored ? JSON.parse(stored) : clone(EMPTY_DATA);
     this.data.updates ||= [];
     this.data.risks ||= [];
+    this.data.acronyms ||= [];
   }
 
   persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); }
@@ -24,6 +25,7 @@ class LocalStore {
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }
   async saveUpdate(row) { return this.upsert('updates', row, 'update'); }
   async saveRisk(row) { return this.upsert('risks', row, 'risk'); }
+  async saveAcronym(row) { return this.upsert('acronyms', row, 'acronym'); }
   async upsert(collection, row, prefix) {
     const record = { ...row, id: row.id || uid(prefix) };
     const index = this.data[collection].findIndex((item) => item.id === record.id);
@@ -79,9 +81,7 @@ export function isOwnedByUser(record, user) {
 }
 
 export function createStarterTasks(projectKey, owner = {}) {
-  const templateProjectKey = seedData.projects[0]?.projectKey;
-  return seedData.tasks
-    .filter((task) => task.projectKey === templateProjectKey)
+  return [...workflowData.taskTemplates]
     .sort((a, b) => a.order - b.order)
     .map((task, index) => ({
       id: uid('task'),
@@ -104,4 +104,4 @@ export function createStarterTasks(projectKey, owner = {}) {
     }));
 }
 
-export { seedData };
+export { workflowData };

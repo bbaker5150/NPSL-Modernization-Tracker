@@ -43,6 +43,12 @@ export const CONTAINERS = [
       ['DueDate', 'Due Date', FIELD.DATE],
     ],
   },
+  {
+    key: 'acronyms', suffix: 'Acronyms', description: 'Shared modernization acronym glossary.', fields: [
+      ['RecordId', 'Record ID', FIELD.TEXT, true], ['Acronym', 'Acronym', FIELD.TEXT, true],
+      ['FullTerm', 'Full Term', FIELD.TEXT], ['Definition', 'Definition', FIELD.NOTE],
+    ],
+  },
 ].map((container) => ({
   ...container,
   fields: container.fields.map(([name, title, type, indexed = false]) => ({ name, title, type, indexed, inView: type !== FIELD.NOTE })),
@@ -111,6 +117,10 @@ const riskFields = (row) => ({
   DueDate: sharePointDate(row.dueDate),
 });
 
+const acronymFields = (row) => ({
+  Title: row.acronym, RecordId: row.id, Acronym: row.acronym, FullTerm: row.term, Definition: row.definition,
+});
+
 function fromProject(item) {
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.Title,
@@ -136,6 +146,7 @@ function fromTask(item) {
 
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
+const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '' });
 
 export class SharePointStore {
   constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true }) {
@@ -206,13 +217,14 @@ export class SharePointStore {
   }
 
   async load() {
-    const [projects, tasks, updates, risks] = await Promise.all([
+    const [projects, tasks, updates, risks, acronyms] = await Promise.all([
       this.listItems('projects', CONTAINERS[0].fields.map((field) => field.name), fromProject),
       this.listItems('tasks', CONTAINERS[1].fields.map((field) => field.name), fromTask),
       this.listItems('updates', CONTAINERS[2].fields.map((field) => field.name), fromUpdate),
       this.listItems('risks', CONTAINERS[3].fields.map((field) => field.name), fromRisk),
+      this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
     ]);
-    return { projects, tasks, updates, risks };
+    return { projects, tasks, updates, risks, acronyms };
   }
 
   async create(key, fields) {
@@ -246,6 +258,7 @@ export class SharePointStore {
   async saveTasks(rows) { return Promise.all(rows.map((row) => this.saveTask(row))); }
   async saveUpdate(row) { return { ...row, spId: await this.create('updates', updateFields(row)) }; }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
+  async saveAcronym(row) { return row.spId ? (await this.update('acronyms', row.spId, acronymFields(row)), row) : { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }
 
 }
 

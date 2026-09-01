@@ -9,6 +9,7 @@ describe('SharePoint store', () => {
     expect(projects.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(tasks.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(updates.fields.map((field) => field.name)).toContain('AuthorKey');
+    expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition']);
   });
 
   it('follows SharePoint pagination links so exports include every item', async () => {
@@ -51,7 +52,7 @@ describe('SharePoint store', () => {
     expect(JSON.stringify(store.post.mock.calls)).not.toContain('X-HTTP-Method');
   });
 
-  it('updates date fields through prompt-free validation posts using ISO values', async () => {
+  it('updates date fields through prompt-free validation posts using SharePoint form values', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ value: [] }));
     const task = {
@@ -68,6 +69,18 @@ describe('SharePoint store', () => {
       FinishDate: '',
     });
     expect(JSON.stringify(store.post.mock.calls[0])).not.toContain('X-HTTP-Method');
+  });
+
+  it('creates acronyms in the shared SharePoint glossary list', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.create = vi.fn(async () => 81);
+
+    const saved = await store.saveAcronym({ id: 'acronym-css', acronym: 'CSS', term: 'Calibration Standard Specification', definition: 'Technical requirements.' });
+
+    expect(store.create).toHaveBeenCalledWith('acronyms', {
+      Title: 'CSS', RecordId: 'acronym-css', Acronym: 'CSS', FullTerm: 'Calibration Standard Specification', Definition: 'Technical requirements.',
+    });
+    expect(saved.spId).toBe(81);
   });
 
   it('serializes every full-phase Not Required update with SharePoint form dates', async () => {

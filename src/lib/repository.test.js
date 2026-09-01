@@ -20,7 +20,7 @@ describe('repository selection and SharePoint identity', () => {
     window.MOD_TRACKER_CONFIG = { forceLocal: true };
     const repo = createRepository();
     expect(repo.mode).toBe('local');
-    await expect(repo.store.load()).resolves.toEqual({ projects: [], tasks: [], updates: [], risks: [] });
+    await expect(repo.store.load()).resolves.toEqual({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
   });
 
   it('keys My Work to the signed-in SharePoint login with legacy email fallback', () => {

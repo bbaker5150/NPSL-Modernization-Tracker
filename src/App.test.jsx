@@ -54,14 +54,8 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('Demo workspace');
     expect(document.body.textContent).not.toContain('SharePoint workspace');
     expect(document.body.textContent).not.toContain('historical baseline');
+    expect(document.body.textContent).not.toContain('Open sample portfolio');
     expect([...document.querySelectorAll('.phase-bar span')].every((bar) => bar.style.width === '0%')).toBe(true);
-
-    const mockButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Open sample portfolio'));
-    await act(async () => mockButton.click());
-    expect(document.body.textContent).toContain('28 total measurement areas');
-    expect(document.body.textContent).toContain('Return to live SharePoint data');
-    expect(document.body.textContent).not.toContain('Read-only');
-    expect(document.querySelector('.attention-owner')?.textContent).toMatch(/^Owner: /);
 
     const boardButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Pipeline board'));
     await act(async () => boardButton.click());
@@ -70,7 +64,32 @@ describe('application shell', () => {
 
     const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent.includes('Acronym glossary'));
     await act(async () => glossaryButton.click());
+    expect(document.body.textContent).toContain('No acronyms yet');
+  });
+
+  it('adds and removes shared glossary acronyms', async () => {
+    await renderApp();
+    const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent.includes('Acronym glossary'));
+    await act(async () => glossaryButton.click());
+
+    await act(async () => {
+      changeValue(document.querySelector('input[aria-label="Acronym"]'), 'css');
+      changeValue(document.querySelector('input[aria-label="Full term"]'), 'Calibration Standard Specification');
+      changeValue(document.querySelector('input[aria-label="Definition"]'), 'Technical requirements for a calibration standard.');
+    });
+    await act(async () => {
+      document.querySelector('.glossary-composer').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
     expect(document.body.textContent).toContain('Calibration Standard Specification');
+    expect(document.querySelector('input[aria-label="Acronym"]').value).toBe('');
+
+    await act(async () => {
+      document.querySelector('button[aria-label="Remove CSS"]').click();
+      await Promise.resolve();
+    });
+    expect(window.confirm).toHaveBeenCalledWith('Remove CSS from the shared glossary?');
+    expect(document.body.textContent).toContain('No acronyms yet');
   });
 
   it('counts owned projects in My Work and assigns their starter tasks to the project owner', async () => {
@@ -96,15 +115,16 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('5');
   });
 
-  it('lets users practice task edits and project deletion in the sample portfolio', async () => {
+  it('lets users edit tasks and delete projects without sample data', async () => {
     await renderApp();
-    const sampleButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Open sample portfolio'));
-    await act(async () => sampleButton.click());
-
-    const firstCard = [...document.querySelectorAll('.project-card')].find((card) => !card.textContent.includes('No target date'));
-    expect(firstCard.textContent).not.toContain('No target date');
-    expect(firstCard.querySelector('[title^="Target completion:"]')).not.toBeNull();
-    await act(async () => firstCard.click());
+    const newProject = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('New project'));
+    await act(async () => newProject.click());
+    await act(async () => changeValue(document.querySelector('.modal .field input'), 'Task workflow project'));
+    const saveProject = [...document.querySelectorAll('.modal button')].find((button) => button.textContent.includes('Save project'));
+    await act(async () => {
+      saveProject.click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     const tasksTab = [...document.querySelectorAll('.drawer-tabs button')].find((button) => button.textContent.includes('Work breakdown'));
     await act(async () => tasksTab.click());
@@ -146,7 +166,7 @@ describe('application shell', () => {
     const deleteButton = [...document.querySelectorAll('.project-menu-popover button')].find((button) => button.textContent.includes('Delete project'));
     await act(async () => { deleteButton.click(); await Promise.resolve(); });
     expect(window.confirm).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('27 total measurement areas');
+    expect(document.body.textContent).toContain('0 total measurement areas');
     expect(document.querySelector('[role="status"]')?.textContent).toContain('deleted');
   });
 });

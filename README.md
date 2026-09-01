@@ -8,12 +8,10 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Engineer-focused **My work** queues tied to the signed-in SharePoint login identity
 - Project WBS tasks, updates, risks, ownership, health, and milestones
 - Full portfolio access for every user who has permission to the hosting SharePoint site and lists
-- An editable sample portfolio for onboarding and visualization; sample changes stay in memory and are never written to SharePoint
-- Searchable acronym glossary and styled multi-sheet Excel export with the same reference data
+- A shared acronym glossary with add/remove controls backed by SharePoint
+- Styled multi-sheet Excel export including the current acronym reference
 - Light and dark themes with the NAVAIR seal in the tracker identity
 - A Forge-compatible single HTML build with no external runtime requests
-
-The bundled mock portfolio was normalized from the August 2026 modernization review workbook. Its 28 projects and 161 phase/action tasks preserve the source's discipline mix, pipeline distribution, action coverage, due-date coverage, and risk states; project details and personnel are replaced with neutral scenarios and consistent role aliases. The live SharePoint workspace always starts empty.
 
 ## Local development
 
@@ -22,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Local development uses clean-slate browser storage. Use **Open sample portfolio** in the app to practice with the example pipeline without persisting those changes.
+Local development uses clean-slate browser storage and the same empty portfolio behavior as SharePoint.
 
 ## Build
 
@@ -57,11 +55,11 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `listPrefix` | `Modernization` | Prefix for the four SharePoint List titles. |
+| `listPrefix` | `Modernization` | Prefix for the five SharePoint List titles. |
 | `webUrl` | Auto-detected | Target SharePoint web URL. |
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
-| `hideLists` | `true` | Hide the four backing lists from the normal Site Contents view without affecting API access. |
+| `hideLists` | `true` | Hide the five backing lists from the normal Site Contents view without affecting API access. |
 
 On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. Newly created backing lists are hidden from the normal Site Contents view in their initial create request, so startup does not issue follow-up MERGE operations. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. SharePoint permissions are the access boundary—there is no separate manager allowlist in the app.
 

@@ -278,7 +278,7 @@ export async function downloadPortfolioWorkbook(options) {
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `${options.mock ? 'modernization-mock-portfolio' : 'modernization-portfolio'}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = `modernization-portfolio-${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();

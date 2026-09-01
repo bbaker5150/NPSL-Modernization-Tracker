@@ -40,12 +40,19 @@ try {
   await frame.getByText('Your modernization portfolio is ready').waitFor();
   const emptyBarWidths = await frame.locator('.phase-bar span').evaluateAll((bars) => bars.map((bar) => bar.style.width));
   if (emptyBarWidths.some((width) => width !== '0%')) errors.push(`Empty pipeline stages displayed progress: ${emptyBarWidths.join(', ')}`);
-  await frame.getByRole('button', { name: /Open sample portfolio/ }).first().click();
-  await frame.getByText('28 total measurement areas').waitFor();
-  await frame.locator('.attention-owner').first().waitFor();
-  await frame.getByRole('button', { name: /Pipeline board/ }).click();
-  await frame.getByRole('heading', { name: 'Pipeline board' }).waitFor();
-  await frame.locator('.project-card').first().click();
+  if (await frame.getByText('Open sample portfolio').count()) errors.push('Sample portfolio control remained visible');
+
+  await frame.getByRole('button', { name: /Acronym glossary/ }).click();
+  await frame.getByLabel('Acronym', { exact: true }).fill('CSS');
+  await frame.getByLabel('Full term').fill('Calibration Standard Specification');
+  await frame.getByLabel('Definition').fill('Technical requirements for a calibration standard.');
+  await frame.getByRole('button', { name: 'Add acronym' }).click();
+  await frame.getByText('Calibration Standard Specification').waitFor();
+
+  await frame.getByRole('button', { name: /Portfolio/, exact: true }).click();
+  await frame.getByRole('button', { name: /New project/ }).click();
+  await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
+  await frame.getByRole('button', { name: /Save project/ }).click();
   await frame.locator('.project-drawer').waitFor();
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.locator('.wbs-task').first().waitFor();
@@ -85,6 +92,6 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log('Forge srcdoc smoke test passed: app booted, WBS edits worked, Not Required cleared its due date, and deletion completed without browser prompts.');
+console.log('Forge srcdoc smoke test passed: clean data booted, glossary writes worked, WBS edits worked, Not Required cleared its due date, and deletion completed without browser prompts.');
 await browser.close();
 server.close();
