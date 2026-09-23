@@ -150,6 +150,8 @@ function fromTask(item) {
   };
 }
 
+const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole === 'Manager' ? 'Manager' : 'User' });
+
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
@@ -246,7 +248,7 @@ export class SharePointStore {
       this.listItems('updates', CONTAINERS[2].fields.map((field) => field.name), fromUpdate),
       this.listItems('risks', CONTAINERS[3].fields.map((field) => field.name), fromRisk),
       this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
-      this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole === 'Manager' ? 'Manager' : 'User' })),
+      this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
     return { projects, tasks, updates, risks, acronyms, users };
   }
@@ -270,7 +272,7 @@ export class SharePointStore {
         bNewDocumentUpdate: true,
       },
     });
-    const rows = result?.value || result?.d?.ValidateUpdateListItem?.results || [];
+    const rows = result?.value || result?.ValidateUpdateListItem?.results || result?.ValidateUpdateListItem || result?.d?.ValidateUpdateListItem?.results || [];
     const failed = rows.find((row) => row.HasException || row.ErrorMessage);
     if (failed) throw new SharePointError(`SharePoint rejected ${failed.FieldName || 'a field'}: ${failed.ErrorMessage || 'validation failed'}`, 400, failed);
   }
@@ -279,7 +281,16 @@ export class SharePointStore {
 
   async saveUser(row) {
     const fields = { Title: row.title, RecordId: row.id, LoginKey: row.loginName, Email: row.email || '', AppRole: row.role };
-    return row.spId ? (await this.update('users', row.spId, fields), row) : { ...row, spId: await this.create('users', fields) };
+    let spId = row.spId;
+    if (spId) await this.update('users', spId, fields);
+    else spId = await this.create('users', fields);
+    if (!spId) throw new Error('SharePoint did not return a user record ID. Your role could not be verified.');
+    const response = await this.get(`${apiFor(this.prefix, 'users')}/items(${spId})?$select=Id,RecordId,Title,LoginKey,Email,AppRole`);
+    const item = response?.d || response;
+    if (item?.RecordId !== row.id || item?.LoginKey !== row.loginName || item?.AppRole !== row.role) {
+      throw new Error(`SharePoint did not confirm the requested ${row.role} role. Check edit permission on ${titleFor(this.prefix, 'users')} and try again. Current stored role: ${item?.AppRole || 'unknown'}.`);
+    }
+    return fromUser(item);
   }
 
   async saveProject(row) { return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) }; }

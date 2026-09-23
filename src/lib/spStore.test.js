@@ -118,3 +118,26 @@ describe('tasking schema round trip', () => {
     expect(store.get.mock.calls.every(([path]) => !path.includes('WBS'))).toBe(true);
   });
 });
+
+describe('SharePoint user role verification', () => {
+  const row = { spId: 7, id: 'u7', title: 'Engineer', loginName: 'i:0#.f|membership|engineer@example.test', email: 'engineer@example.test', role: 'Manager' };
+  it('reads the saved SharePoint role back before confirming a manager', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ value: [{ FieldName: 'AppRole', HasException: false, ErrorMessage: null }] }));
+    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, Title: row.title, LoginKey: row.loginName, Email: row.email, AppRole: 'Manager' }));
+    expect(await store.saveUser(row)).toEqual(row);
+    expect(store.post.mock.calls[0][1].body.formValues).toContainEqual({ FieldName: 'AppRole', FieldValue: 'Manager' });
+    expect(store.get.mock.calls[0][0]).toContain('/items(7)?$select=');
+  });
+  it('rejects a successful HTTP response when the stored role is still User', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ value: [] }));
+    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, LoginKey: row.loginName, AppRole: 'User' }));
+    await expect(store.saveUser(row)).rejects.toThrow('Current stored role: User');
+  });
+  it('surfaces SharePoint field validation errors instead of claiming success', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ ValidateUpdateListItem: [{ FieldName: 'AppRole', HasException: true, ErrorMessage: 'Access denied' }] }));
+    await expect(store.saveUser(row)).rejects.toThrow('Access denied');
+  });
+});

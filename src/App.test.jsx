@@ -237,11 +237,11 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
     expect(document.querySelector('.directory-row button')).toBeNull();
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'wrong'));
-    await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Enable manager access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('incorrect');
     expect(document.body.textContent).not.toContain('New project');
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
-    await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Enable manager access').click());
     expect(document.body.textContent).toContain('New project');
     expect(document.querySelector('input[type="password"]')).toBeNull();
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('Manager');
@@ -267,6 +267,18 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('button')].find((row) => row.textContent === 'Clear filter').click());
     expect(rows()).toHaveLength(3);
     expect(document.querySelector('.topbar input')).toBeNull();
+  });
+
+  it('shows a persistent activation error when the directory write fails', async () => {
+    await renderApp(false);
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
+    await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
+    await act(async () => [...document.querySelectorAll('.directory-form button')].find((row) => row.textContent === 'Enable manager access').click());
+    expect(document.querySelector('[role="alert"]').textContent).toContain('403');
+    expect(document.body.textContent).not.toContain('New project');
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('User');
+    expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
 
 });
