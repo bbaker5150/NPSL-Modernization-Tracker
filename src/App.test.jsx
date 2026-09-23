@@ -240,7 +240,7 @@ describe('application shell', () => {
     await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(document.querySelector('[role="alert"]').textContent).toContain('incorrect');
     expect(document.body.textContent).not.toContain('New project');
-    await act(async () => changeValue(document.querySelector('input[type="password"]'), 'Modernization-Test!2026'));
+    await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
     await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(document.body.textContent).toContain('New project');
     expect(document.querySelector('input[type="password"]')).toBeNull();

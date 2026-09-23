@@ -63,8 +63,8 @@ describe('role and task authorization', () => {
     expect((await store.load()).users).toHaveLength(1);
     expect((await store.load()).users[0].role).toBe('User');
     await expect(store.activateTestingManager('wrong')).rejects.toThrow('incorrect');
-    await expect(authorizedStore(raw, { testingManagerPassword: false }).activateTestingManager('Modernization-Test!2026')).rejects.toThrow('disabled');
-    await store.activateTestingManager('Modernization-Test!2026');
+    await expect(authorizedStore(raw, { testingManagerPassword: false }).activateTestingManager('admin123')).rejects.toThrow('disabled');
+    await store.activateTestingManager('admin123');
     await store.registerCurrentUser();
     const loaded = await createRepository().store.load();
     expect(loaded.users).toHaveLength(1);
