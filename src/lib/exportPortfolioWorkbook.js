@@ -204,7 +204,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
   workbook.modified = new Date();
   workbook.subject = sourceLabel;
   workbook.title = 'Modernization Portfolio Export';
-  workbook.description = 'Portfolio, project, WBS task, risk, update, and pipeline reference data.';
+  workbook.description = 'Portfolio, project, pipeline task, risk, update, and pipeline reference data.';
   workbook.calcProperties.fullCalcOnLoad = true;
 
   addSummary(workbook, { projects, tasks, updates, risks, phases, user, sourceLabel });
@@ -226,19 +226,20 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     ]),
   });
   addDataSheet(workbook, {
-    name: 'WBS Tasks', tableName: 'TasksTable', statusColumns: [8],
+    name: 'Tasks', tableName: 'TasksTable', statusColumns: [7],
     columns: [
-      { header: 'Task ID', width: 22 }, { header: 'Project ID', width: 22 }, { header: 'Project', width: 30 }, { header: 'WBS', width: 10 },
+      { header: 'Task ID', width: 22 }, { header: 'Project ID', width: 22 }, { header: 'Project', width: 30 },
       { header: 'Task', width: 46, wrap: true }, { header: 'Pipeline Stage', width: 26 }, { header: 'Sort Order', width: 11 },
       { header: 'Status', width: 16 }, { header: 'Owner', width: 22 }, { header: 'Owner Email', width: 30 }, { header: 'Owner Identity Key', width: 36 },
       { header: 'Start Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Due Date', width: 15, numFmt: 'mmm d, yyyy' },
       { header: 'Finish Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Reason', width: 36, wrap: true },
       { header: 'Notes / Data Issue', width: 44, wrap: true },
+      { header: 'Deferred Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 44, wrap: true }, { header: 'Not Required Justification', width: 44, wrap: true },
     ],
     rows: tasks.map((task) => [
-      task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.wbs, task.title,
+      task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.title,
       phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, task.ownerName || 'Unassigned', task.ownerEmail || '', task.ownerKey || '',
-      toDate(task.startDate), toDate(['Not Required', 'Not Applicable'].includes(task.status) ? '' : task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '),
+      toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '',
     ]),
   });
   addDataSheet(workbook, {

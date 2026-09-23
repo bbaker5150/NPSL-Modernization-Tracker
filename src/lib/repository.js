@@ -13,6 +13,7 @@ class LocalStore {
   constructor() {
     const stored = localStorage.getItem(STORAGE_KEY);
     this.data = stored ? JSON.parse(stored) : clone(EMPTY_DATA);
+    this.data.users ||= [];
     this.data.updates ||= [];
     this.data.risks ||= [];
     this.data.acronyms ||= [];
@@ -25,10 +26,11 @@ class LocalStore {
   }
 
   persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); }
-  async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local' }; }
+  async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
   async load() { return clone(this.data); }
+  async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row) { return this.upsert('projects', row, 'project'); }
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }
   async saveUpdate(row) { return this.upsert('updates', row, 'update'); }
@@ -42,7 +44,7 @@ class LocalStore {
     return clone(record);
   }
   async recycle(collection, spId, id) {
-    this.data[collection] = this.data[collection].filter((item) => item.id !== id && item.spId !== spId);
+    this.data[collection] = this.data[collection].filter((item) => item.id !== id && (spId == null || item.spId !== spId));
     this.persist();
   }
 }
@@ -94,7 +96,6 @@ export function createStarterTasks(projectKey, owner = {}) {
     .map((task, index) => ({
       id: uid('task'),
       projectKey,
-      wbs: task.wbs,
       title: task.title,
       phaseKey: task.phaseKey,
       order: index + 1,

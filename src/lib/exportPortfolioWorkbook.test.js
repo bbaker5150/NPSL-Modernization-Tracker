@@ -27,10 +27,10 @@ describe('portfolio Excel export', () => {
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);
     expect(reopened.worksheets.map((sheet) => sheet.name)).toEqual([
-      'Portfolio Summary', 'Projects', 'WBS Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
+      'Portfolio Summary', 'Projects', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
     ]);
     expect(reopened.getWorksheet('Projects').rowCount).toBe(projects.length + 1);
-    expect(reopened.getWorksheet('WBS Tasks').rowCount).toBe(tasks.length + 1);
+    expect(reopened.getWorksheet('Tasks').rowCount).toBe(tasks.length + 1);
     expect(reopened.getWorksheet('Projects').getCell('A1').font.bold).toBe(true);
     expect(reopened.getWorksheet('Projects').getCell('A1').fill.fgColor.argb).toBe('0B2942');
     expect(reopened.getWorksheet('Projects').getCell('M2').numFmt).toBe('0%');

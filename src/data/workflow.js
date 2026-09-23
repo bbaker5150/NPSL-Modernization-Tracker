@@ -37,10 +37,10 @@ export const workflowData = {
     },
   ],
   taskTemplates: [
-    { wbs: 'RP-01', title: 'Complete ICP and workload analysis', phaseKey: 'requirement', order: 1 },
-    { wbs: 'DP-01', title: 'Complete design, development, and technical documentation', phaseKey: 'development', order: 2 },
-    { wbs: 'AP-01', title: 'Complete acquisition and contract-award activities', phaseKey: 'acquisition', order: 3 },
-    { wbs: 'OS-01', title: 'Publish PMSD/METBUL and transition to sustainment', phaseKey: 'operation-sustainment', order: 4 },
-    { wbs: 'PP-01', title: 'Complete production/procurement and acceptance testing', phaseKey: 'production-procurement', order: 5 },
+    { title: 'Complete ICP and workload analysis', phaseKey: 'requirement', order: 1 },
+    { title: 'Complete design, development, and technical documentation', phaseKey: 'development', order: 2 },
+    { title: 'Complete acquisition and contract-award activities', phaseKey: 'acquisition', order: 3 },
+    { title: 'Publish PMSD/METBUL and transition to sustainment', phaseKey: 'operation-sustainment', order: 4 },
+    { title: 'Complete production/procurement and acceptance testing', phaseKey: 'production-procurement', order: 5 },
   ],
 };
