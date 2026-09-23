@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { createRepository, createStarterTasks, isOwnedByUser, workflowData, userIdentityKey } from './lib/repository';
 import { downloadPortfolioWorkbook } from './lib/exportPortfolioWorkbook';
+import { authorizedStore, isManager, validateTask } from './lib/access';
 import navairSeal from './assets/navair-seal-384.webp';
 
 const NAV = [
   ['overview', 'Portfolio', 'overview'],
   ['board', 'Pipeline board', 'board'],
-  ['projects', 'All projects', 'projects'],
   ['my-work', 'My work', 'tasks'],
   ['glossary', 'Acronym glossary', 'book'],
 ];
@@ -79,8 +79,8 @@ function Skeleton() {
   return <div className="loading-shell"><div className="loading-mark">M</div><div><strong>Modernization Tracker</strong><span>Loading portfolio data…</span></div></div>;
 }
 
-function KpiCard({ icon, label, value, detail, tone = 'blue' }) {
-  return <article className={`kpi-card kpi-${tone}`}><div className="kpi-icon"><Icon name={icon} /></div><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></article>;
+function KpiCard({ icon, label, value, detail, tone = 'blue', onClick }) {
+  return <article className={`kpi-card kpi-${tone}`} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick} onKeyDown={(event) => { if (onClick && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onClick(); } }}><div className="kpi-icon"><Icon name={icon} /></div><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></article>;
 }
 
 function PipelineRail({ projects, selected, onSelect }) {
@@ -102,7 +102,7 @@ function ProjectCard({ project, onOpen, onDelete }) {
   const phase = workflowData.phases.find((item) => item.key === project.currentStageKey);
   const openProject = () => onOpen(project);
   return <article className="project-card" role="button" tabIndex="0" onClick={openProject} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openProject(); } }}>
-    <div className="project-card-top"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><div className="project-menu-wrap"><button className="project-menu" aria-label={`Project actions for ${project.title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }}><Icon name="more" size={16} /></button>{menuOpen && <div className="project-menu-popover"><button onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onDelete(project); }}>Delete project</button></div>}</div></div>
+    <div className="project-card-top"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><div className="project-menu-wrap" hidden={!onDelete}><button className="project-menu" aria-label={`Project actions for ${project.title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }}><Icon name="more" size={16} /></button>{menuOpen && onDelete && <div className="project-menu-popover"><button onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onDelete(project); }}>Delete project</button></div>}</div></div>
     <div><span className="eyebrow">{project.measurementArea}</span><h3>{project.title}</h3></div>
     <div className="project-owner"><span className="avatar small">{project.ownerName === 'Unassigned' ? '?' : project.ownerName.slice(0, 1)}</span><span>{project.ownerName}</span></div>
     <div className="project-phase"><span>Stage {phaseIndex(project.currentStageKey) + 1} of {workflowData.phases.length}</span><strong>{phase?.short}</strong></div>
@@ -111,32 +111,33 @@ function ProjectCard({ project, onOpen, onDelete }) {
   </article>;
 }
 
-function Overview({ projects, tasks, risks, onOpen, onDelete, phaseFilter, setPhaseFilter }) {
-  const active = projects.filter((project) => project.status !== 'Complete').length;
-  const completedTasks = tasks.filter(isClosedTask).length;
-  const attention = projects.filter((project) => ['At Risk', 'Blocked', 'Needs Review'].includes(project.health) || project.blockedCount).length;
-  const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + project.percentComplete, 0) / projects.length) : 0;
+function Overview({ projects, tasks, onOpen, phaseFilter, setPhaseFilter, onAttention }) {
+  const active = projects.filter((project) => project.status !== 'Complete');
+  const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + (project.percentComplete || 0), 0) / projects.length) : 0;
   const filtered = phaseFilter ? projects.filter((project) => project.currentStageKey === phaseFilter) : projects;
-  const attentionProjects = [...projects].sort((a, b) => (b.blockedCount + b.overdueCount + (b.health === 'At Risk' ? 2 : 0)) - (a.blockedCount + a.overdueCount + (a.health === 'At Risk' ? 2 : 0))).slice(0, 5);
-
   return <div className="page-stack">
-    <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>One view of every measurement area, milestone, and handoff across the modernization pipeline.</p></div></section>
+    <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>Measurement areas, milestones, and handoffs across the modernization pipeline.</p></div></section>
     <section className="kpi-grid">
-      <KpiCard icon="projects" label="Active projects" value={active} detail={`${projects.length} total measurement areas`} tone="blue" />
-      <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${completedTasks} of ${tasks.length} tasks resolved`} tone="mint" />
-      <KpiCard icon="alert" label="Needs attention" value={attention} detail={`${risks.filter((risk) => risk.status !== 'Closed').length} open risks`} tone="amber" />
-      <KpiCard icon="clock" label="Blocked tasks" value={tasks.filter((task) => task.status === 'Blocked').length} detail="Across all project teams" tone="rose" />
+      <KpiCard icon="projects" label="Active projects" value={active.length} detail={`${projects.length} total measurement areas`} />
+      <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${tasks.filter(isClosedTask).length} of ${tasks.length} tasks resolved`} tone="mint" />
+      <KpiCard icon="alert" label="Needs attention" value={active.length} detail="Review unfinished projects and task exceptions" tone="amber" onClick={onAttention} />
     </section>
-    <section className="panel pipeline-panel"><div className="panel-heading"><div><span className="section-kicker">Portfolio flow</span><h2>Projects by pipeline stage</h2></div>{phaseFilter && <button className="text-button" onClick={() => setPhaseFilter('')}>Clear filter</button>}</div><PipelineRail projects={projects} selected={phaseFilter} onSelect={setPhaseFilter} /></section>
-    <section className="dashboard-grid">
-      <div className="panel project-showcase"><div className="panel-heading"><div><span className="section-kicker">In motion</span><h2>{phaseFilter ? `${workflowData.phases.find((p) => p.key === phaseFilter)?.name} projects` : 'Portfolio projects'}</h2></div><span className="count-label">{filtered.length} projects</span></div>
-        <div className="project-card-grid">{filtered.slice(0, 6).map((project) => <ProjectCard key={project.id} project={project} onOpen={onOpen} onDelete={onDelete} />)}</div>
-      </div>
-      <div className="panel attention-panel"><div className="panel-heading"><div><span className="section-kicker">Focus queue</span><h2>Attention needed</h2></div></div>
-        <div className="attention-list">{attentionProjects.map((project) => <button key={project.id} onClick={() => onOpen(project)}><span className={`health-pip ${statusTone(project.health)}`} /><div><strong>{project.title}</strong><span className="attention-owner">Owner: {project.ownerName || 'Unassigned'}</span><small>{project.nextMilestone}</small></div><div className="attention-meta"><Badge tone={statusTone(project.health)}>{project.health}</Badge><Icon name="chevron" size={16} /></div></button>)}</div>
-      </div>
-    </section>
+    <section className="panel pipeline-panel"><div className="panel-heading"><h2>Projects by pipeline stage</h2>{phaseFilter && <button className="text-button" onClick={() => setPhaseFilter('')}>Clear filter</button>}</div><PipelineRail projects={projects} selected={phaseFilter} onSelect={setPhaseFilter} /></section>
+    <ProjectsTable projects={filtered} onOpen={onOpen} />
   </div>;
+}
+
+function Attention({ projects, onOpen }) {
+  const rows = projects.filter((project) => project.status !== 'Complete');
+  return <div className="page-stack"><section className="page-heading"><h1>Needs attention</h1><p>All unfinished projects, pending tasks, and documented exceptions.</p></section>{rows.map((project) => <section className="panel attention-project" key={project.id}>
+    <button className="text-button" onClick={() => onOpen(project)}><h2>{project.title}</h2></button><p>Owner: {project.ownerName || 'Unassigned'}</p>
+    {project.tasks.filter((task) => !isClosedTask(task) || task.deferredDate || ['Not Required', 'Not Applicable'].includes(task.status)).map((task) => <article className="attention-task" key={task.id}>
+      <div><strong>{task.title}</strong><p>Task owner: {task.ownerName || project.ownerName || 'Unassigned'}</p></div>
+      <Badge tone={statusTone(task.status)}>{task.status}</Badge> {isOverdue(task) && <Badge tone="bad">Overdue · {displayDate(task.dueDate)}</Badge>}
+      {task.deferredDate && <div><Badge tone="warn">Deferred · {displayDate(task.deferredDate)}</Badge><p>{task.deferredJustification}</p></div>}
+      {['Not Required', 'Not Applicable'].includes(task.status) && <div><Badge tone="warn">Not required</Badge><p>{task.notRequiredJustification || 'Legacy task — justification not recorded'}</p></div>}
+    </article>)}{!project.tasks.some((task) => !isClosedTask(task)) && <p>No pending tasks. Review project closeout.</p>}
+  </section>)}{!rows.length && <EmptyState title="No unfinished projects" message="All projects have been closed out." />}</div>;
 }
 
 function Board({ projects, onOpen, onDelete }) {
@@ -151,7 +152,7 @@ function Board({ projects, onOpen, onDelete }) {
 function ProjectsTable({ projects, onOpen }) {
   const [health, setHealth] = useState('');
   const rows = health ? projects.filter((project) => project.health === health) : projects;
-  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Portfolio register</span><h1>All projects</h1><p>Detailed ownership, health, stage, and milestone visibility.</p></div><label className="select-wrap"><Icon name="filter" /><select value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></section>
+  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Portfolio register</span><h1>Portfolio projects</h1><p>Detailed ownership, health, stage, and milestone visibility.</p></div><label className="select-wrap"><Icon name="filter" /><select value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></section>
     <section className="panel table-panel"><div className="project-table" role="table"><div className="project-table-row table-header" role="row"><span>Project</span><span>Owner</span><span>Stage</span><span>Health</span><span>Progress</span><span>Next milestone</span><span /></div>{rows.map((project) => <button className="project-table-row" role="row" key={project.id} onClick={() => onOpen(project)}><span><strong>{project.title}</strong><small>{project.measurementArea}</small></span><span><span className="avatar tiny">{project.ownerName === 'Unassigned' ? '?' : project.ownerName[0]}</span>{project.ownerName}</span><span>{workflowData.phases.find((phase) => phase.key === project.currentStageKey)?.short}</span><span><Badge tone={statusTone(project.health)} dot>{project.health}</Badge></span><span><strong>{project.percentComplete}%</strong><Progress value={project.percentComplete} compact /></span><span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></span><span><Icon name="chevron" /></span></button>)}</div></section>
   </div>;
 }
@@ -160,12 +161,12 @@ function MyWork({ projects, tasks, user, onOpen, onTask, onDelete }) {
   const assigned = projects.filter((project) => isOwnedByUser(project, user));
   const myTasks = tasks.filter((task) => isOwnedByUser(task, user) && !isClosedTask(task)).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
   return <div className="page-stack"><section className="page-heading"><div><span className="section-kicker">Personal workspace</span><h1>My work</h1><p>Projects and actions assigned to {user?.title || user?.email || 'you'}.</p></div></section>
-    <section className="dashboard-grid my-work-grid"><div className="panel"><div className="panel-heading"><div><span className="section-kicker">Ownership</span><h2>My projects</h2></div><Badge>{assigned.length}</Badge></div>{assigned.length ? <div className="project-card-grid one-column">{assigned.map((project) => <ProjectCard key={project.id} project={project} onOpen={onOpen} onDelete={onDelete} />)}</div> : <EmptyState title="No assigned projects" message="Open an unassigned project and choose Claim project to make it yours." />}</div>
-    <div className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>My task queue</h2></div><Badge>{myTasks.length}</Badge></div><div className="task-queue">{myTasks.slice(0, 14).map((task) => <button key={task.id} onClick={() => onTask(task)}><span className={`task-state ${statusTone(task.status)}`}><Icon name={task.status === 'Blocked' ? 'alert' : 'task'} size={16} /></span><div><strong>{task.title}</strong><span>{projects.find((project) => project.projectKey === task.projectKey)?.title} · WBS {task.wbs}</span></div><div><Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{task.dueDate ? compactDate(task.dueDate) : 'No due date'}</Badge></div></button>)}{!myTasks.length && <EmptyState title="Queue clear" message="No open tasks are assigned to your signed-in SharePoint identity." />}</div></div></section>
+    <section className="dashboard-grid my-work-grid"><div className="panel"><div className="panel-heading"><div><span className="section-kicker">Ownership</span><h2>My projects</h2></div><Badge>{assigned.length}</Badge></div>{assigned.length ? <div className="project-card-grid one-column">{assigned.map((project) => <ProjectCard key={project.id} project={project} onOpen={onOpen} onDelete={onDelete} />)}</div> : <EmptyState title="No assigned projects" message="Your manager can assign projects to you." />}</div>
+    <div className="panel"><div className="panel-heading"><div><span className="section-kicker">Next actions</span><h2>My task queue</h2></div><Badge>{myTasks.length}</Badge></div><div className="task-queue">{myTasks.slice(0, 14).map((task) => <button key={task.id} onClick={() => onTask(task)}><span className={`task-state ${statusTone(task.status)}`}><Icon name={task.status === 'Blocked' ? 'alert' : 'task'} size={16} /></span><div><strong>{task.title}</strong><span>{projects.find((project) => project.projectKey === task.projectKey)?.title}</span></div><div><Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{task.dueDate ? compactDate(task.dueDate) : 'No due date'}</Badge></div></button>)}{!myTasks.length && <EmptyState title="Queue clear" message="No open tasks are assigned to your signed-in SharePoint identity." />}</div></div></section>
   </div>;
 }
 
-function Glossary({ acronyms, onAdd, onDelete }) {
+function Glossary({ manager, acronyms, onAdd, onDelete }) {
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState({ acronym: '', term: '', definition: '' });
   const normalizedQuery = query.trim().toLowerCase();
@@ -179,9 +180,9 @@ function Glossary({ acronyms, onAdd, onDelete }) {
     const saved = await onAdd(draft);
     if (saved) setDraft({ acronym: '', term: '', definition: '' });
   };
-  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Modernization reference</span><h1>Acronym glossary</h1><p>A shared SharePoint reference that everyone with access can maintain.</p></div><label className="select-wrap glossary-search"><Icon name="search" /><input aria-label="Search acronym glossary" placeholder="Search terms or definitions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></section>
-    <form className="panel glossary-composer" onSubmit={submit}><label><span>Acronym</span><input aria-label="Acronym" placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label><label><span>Full term</span><input aria-label="Full term" placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label><label className="glossary-definition"><span>Definition</span><input aria-label="Definition" placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label><button className="button primary" type="submit" disabled={!draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button></form>
-    <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span><span>Actions</span></div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p><button className="glossary-delete" type="button" aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button></div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>
+  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Modernization reference</span><h1>Acronym glossary</h1><p>A shared modernization reference maintained by managers.</p></div><label className="select-wrap glossary-search"><Icon name="search" /><input aria-label="Search acronym glossary" placeholder="Search terms or definitions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></section>
+    {manager && <form className="panel glossary-composer" onSubmit={submit}><label><span>Acronym</span><input aria-label="Acronym" placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label><label><span>Full term</span><input aria-label="Full term" placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label><label className="glossary-definition"><span>Definition</span><input aria-label="Definition" placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label><button className="button primary" type="submit" disabled={!draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button></form>}
+    <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span><span>Actions</span></div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p>{manager && <button className="glossary-delete" type="button" aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button>}</div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>
   </div>;
 }
 
@@ -192,7 +193,7 @@ function Modal({ title, subtitle, onClose, children, actions, wide = false }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true"><header><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></header><div className="modal-body">{children}</div>{actions && <footer>{actions}</footer>}</section></div>;
 }
 
-function ProjectEditor({ project, user, onClose, onSave }) {
+function ProjectEditor({ project, user, users, onClose, onSave }) {
   const [draft, setDraft] = useState({ title: '', measurementArea: '', description: '', ownerName: 'Unassigned', ownerEmail: '', ownerKey: '', priority: 'Medium', health: 'Needs Review', status: 'Planned', currentStageKey: 'requirement', targetFinish: '', ...project });
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
   function claim() { setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
@@ -203,29 +204,53 @@ function ProjectEditor({ project, user, onClose, onSave }) {
     const ownerEmail = entered.includes('@') ? entered.split('|').pop() : '';
     setDraft((row) => ({ ...row, ownerKey, ownerEmail }));
   }
-  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim()} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || draft.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
-    <div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Project owner"><input value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></Field><Field label="Owner email or SharePoint login"><div className="input-action"><input value={draft.ownerEmail || draft.ownerKey || ''} placeholder="Unassigned" onChange={setOwnerIdentity} /><button type="button" onClick={claim}>Assign me</button></div></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target completion"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
+  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim()} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || uid('project-key'), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
+    <UserPicker users={users} label="Assign project owner" onSelect={(entry) => setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email, ownerKey: userIdentityKey(entry) }))} /><UserPicker users={users.filter((entry) => entry.role === 'Manager')} label="Project manager" onSelect={(entry) => setDraft((row) => ({ ...row, managerName: entry.title, managerEmail: entry.email || entry.loginName }))} /><p>Manager: {draft.managerName || 'Unassigned'}</p><div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Project owner"><input value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></Field><Field label="Owner email or SharePoint login"><div className="input-action"><input value={draft.ownerEmail || draft.ownerKey || ''} placeholder="Unassigned" onChange={setOwnerIdentity} /><button type="button" onClick={claim}>Assign me</button></div></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={set('status')}>{['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target completion"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
   </Modal>;
 }
 
-function TaskEditor({ task, user, onClose, onSave }) {
+function TaskEditor({ task, manager, users = [], onClose, onSave, onDelete }) {
   const [draft, setDraft] = useState(task);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
-  function claim() { setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
-  function setOwnerIdentity(event) {
-    const entered = event.target.value.trim();
-    const isLoginKey = !!entered && (entered.includes('|') || !entered.includes('@'));
-    const ownerKey = isLoginKey ? entered : '';
-    const ownerEmail = entered.includes('@') ? entered.split('|').pop() : '';
-    setDraft((row) => ({ ...row, ownerKey, ownerEmail }));
-  }
   const status = draft.status === 'Not Applicable' ? 'Not Required' : draft.status;
-  return <Modal title="Update task" subtitle={`${workflowData.phases.find((phase) => phase.key === task.phaseKey)?.name || 'Modernization work breakdown'}`} onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.wbs?.trim() || !draft.title?.trim()} onClick={() => onSave({ ...draft, status })}>Save task</button></>}>
-    <div className="field-grid"><Field label="WBS code"><input aria-label="WBS code" value={draft.wbs || ''} onChange={set('wbs')} /></Field><Field label="Pipeline stage"><select aria-label="Pipeline stage" value={draft.phaseKey} onChange={set('phaseKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Task name" wide><input aria-label="Task name" value={draft.title} onChange={set('title')} /></Field><Field label="Status"><select value={status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Due date"><input type="date" value={status === 'Not Required' ? '' : (draft.dueDate || '')} disabled={status === 'Not Required'} title={status === 'Not Required' ? 'A due date is not needed for a task marked Not Required.' : ''} onChange={set('dueDate')} />{status === 'Not Required' && <small className="field-hint">No due date is needed.</small>}</Field><Field label="Task owner"><input value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></Field><Field label="Owner email or SharePoint login"><div className="input-action"><input value={draft.ownerEmail || draft.ownerKey || ''} placeholder="Unassigned" onChange={setOwnerIdentity} /><button type="button" onClick={claim}>Assign me</button></div></Field><Field label="Notes" wide><textarea rows="4" value={draft.notes || ''} onChange={set('notes')} /></Field>{status === 'Blocked' && <Field label="Blocked reason" wide><textarea rows="3" value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}</div>
+  async function save() {
+    try { validateTask({ ...draft, status }); setSaving(true); if (await onSave({ ...draft, status })) onClose(); }
+    catch (caught) { setError(caught.message); }
+    finally { setSaving(false); }
+  }
+  return <Modal title={task.title ? 'Update task' : 'Add task'} onClose={onClose} actions={<>{manager && onDelete && <button className="button secondary" disabled={saving} onClick={async () => { if (await onDelete(task)) onClose(); }}>Delete task</button>}<button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save task'}</button></>}>
+    {error && <p className="inline-error" role="alert">{error}</p>}
+    {manager && <UserPicker users={users} label="Assign task owner" onSelect={(entry) => setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email, ownerKey: userIdentityKey(entry) }))} />}
+    <div className="field-grid"><Field label="Pipeline stage"><select disabled={!manager} value={draft.phaseKey} onChange={set('phaseKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field>
+    <Field label="Task name" wide><input aria-label="Task name" disabled={!manager} value={draft.title} onChange={set('title')} /></Field>
+    <Field label="Status"><select value={status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
+    <Field label="Original due date"><input type="date" disabled={!manager} value={draft.dueDate || ''} onChange={set('dueDate')} /></Field>
+    <Field label="Deferred date"><input type="date" value={draft.deferredDate || ''} onChange={set('deferredDate')} /></Field>
+    <Field label="Deferral justification" wide><textarea value={draft.deferredJustification || ''} onChange={set('deferredJustification')} /></Field>
+    {status === 'Not Required' && <Field label="Not required justification" wide><textarea value={draft.notRequiredJustification || ''} onChange={set('notRequiredJustification')} /></Field>}
+    <Field label="Task owner"><input disabled={!manager} value={draft.ownerName || ''} onChange={set('ownerName')} /></Field>
+    {manager && <Field label="Notes" wide><textarea value={draft.notes || ''} onChange={set('notes')} /></Field>}
+    </div>
   </Modal>;
 }
 
-function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, onSaveTask, onToggleTask, onSetPhaseRequired, onAddUpdate, onAddRisk, onClaim }) {
+function UserPicker({ users, label, onSelect }) {
+  return <Field label={label}><select value="" onChange={(event) => { const entry = users.find((row) => row.id === event.target.value); if (entry) onSelect(entry); }}><option value="">Select a saved user…</option>{users.map((entry) => <option key={entry.id} value={entry.id}>{entry.title} — {entry.email || entry.loginName} ({entry.role})</option>)}</select></Field>;
+}
+
+function UserDirectory({ users, onSave }) {
+  const empty = { title: '', email: '', loginName: '', role: 'User' };
+  const [draft, setDraft] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  return <section className="page-stack"><h1>Users and managers</h1><p>Save SharePoint identities for assignment and application roles.</p><form className="panel directory-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { if (await onSave({ ...draft, id: draft.id || uid('user'), loginName: draft.loginName.trim() || draft.email.trim() })) setDraft(empty); } finally { setSaving(false); } }}>
+    {['title', 'email', 'loginName'].map((key) => <Field key={key} label={{ title: 'Name', email: 'Email', loginName: 'SharePoint login' }[key]}><input required={key === 'title'} value={draft[key]} onChange={(event) => setDraft((row) => ({ ...row, [key]: event.target.value }))} /></Field>)}
+    <Field label="Role"><select value={draft.role} onChange={(event) => setDraft((row) => ({ ...row, role: event.target.value }))}><option>User</option><option>Manager</option></select></Field><button className="button primary" disabled={saving || !(draft.loginName.trim() || draft.email.trim())}>Save user</button>{draft.id && <button type="button" className="button secondary" onClick={() => setDraft(empty)}>Cancel edit</button>}
+    </form>{users.map((entry) => <article className="panel directory-row" key={entry.id}><strong>{entry.title}</strong><span>{entry.email || entry.loginName}</span><Badge>{entry.role}</Badge><button className="button secondary" onClick={() => setDraft(entry)}>Edit</button></article>)}</section>;
+}
+
+function ProjectDrawer({ project, user, manager, users, onDeleteTask, tasks, updates, risks, onClose, onEdit, onSaveTask, onToggleTask, onSetPhaseRequired, onAddUpdate, onAddRisk, onClaim }) {
   const [tab, setTab] = useState('overview');
   const [taskEditor, setTaskEditor] = useState(null);
   const [updateText, setUpdateText] = useState('');
@@ -235,17 +260,17 @@ function ProjectDrawer({ project, user, tasks, updates, risks, onClose, onEdit, 
   const projectRisks = risks.filter((item) => item.projectKey === project.projectKey);
   const phase = workflowData.phases.find((item) => item.key === project.currentStageKey);
   return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="project-drawer" role="dialog" aria-modal="true"><header className="drawer-header"><div className="drawer-title-row"><div><span className="section-kicker">{project.measurementArea}</span><h2>{project.title}</h2><div className="drawer-badges"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><Badge>{project.priority} priority</Badge><Badge>{project.status}</Badge></div></div><button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div>
-    <div className="drawer-actions"><button className="button secondary" onClick={() => onEdit(project)}>Edit project</button>{!project.ownerKey && <button className="button primary" onClick={() => onClaim(project)}>Claim project</button>}</div>
+    {manager && <div className="drawer-actions"><button className="button secondary" onClick={() => onEdit(project)}>Edit project</button>{!project.ownerKey && <button className="button primary" onClick={() => onClaim(project)}>Claim project</button>}</div>}
     <div className="drawer-progress"><div><span>{project.percentComplete}% complete</span><strong>{phase?.name}</strong></div><Progress value={project.percentComplete} /></div>
     <div className="mini-pipeline">{workflowData.phases.map((item, index) => <span key={item.key} className={index < phaseIndex(project.currentStageKey) ? 'done' : item.key === project.currentStageKey ? 'current' : ''} title={item.name}>{index + 1}</span>)}</div>
     <nav className="drawer-tabs">{[['overview', 'Overview'], ['tasks', `Work breakdown (${projectTasks.length})`], ['updates', `Updates (${projectUpdates.length})`], ['risks', `Risks (${projectRisks.length})`]].map(([key, label]) => <button className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{label}</button>)}</nav></header>
     <div className="drawer-content">
-      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Owner</span><strong>{project.ownerName}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong><small>{project.status}</small></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Purpose</h3><p>{project.description || 'No project description has been added.'}</p></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><span>{task.wbs}</span><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section></div>}
-      {tab === 'tasks' && <div className="wbs-list">{workflowData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; const allNotRequired = stageTasks.length > 0 && stageTasks.every((task) => ['Not Required', 'Not Applicable'].includes(task.status)); return <section key={stage.key} className={`wbs-stage ${allNotRequired ? 'phase-not-required' : ''}`}><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><div className="phase-header-actions"><Badge>{done}/{stageTasks.length}</Badge><button type="button" className={`phase-required-button ${allNotRequired ? 'active' : ''}`} disabled={!stageTasks.length} aria-label={`${allNotRequired ? 'Restore' : 'Mark'} ${stage.name} ${allNotRequired ? '' : 'not required'}`.trim()} onClick={() => onSetPhaseRequired(project, stage.key, !allNotRequired)}><Icon name={allNotRequired ? 'refresh' : 'ban'} size={13} />{allNotRequired ? 'Restore phase' : 'Not required'}</button></div></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="wbs-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} WBS ${task.wbs}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><span className="wbs-code">{task.wbs}</span><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
-      {tab === 'updates' && <div className="drawer-section-stack"><section className="composer"><textarea rows="3" placeholder="Add a concise status update, decision, or handoff…" value={updateText} onChange={(event) => setUpdateText(event.target.value)} /><div><span>Visible to everyone with access to this SharePoint workspace</span><button className="button primary small-button" disabled={!updateText.trim()} onClick={() => { onAddUpdate(project, updateText); setUpdateText(''); }}>Post update</button></div></section><section className="timeline-list">{projectUpdates.map((item) => <article key={item.id}><span className="timeline-dot" /><div><header><strong>{item.authorName}</strong><span>{displayDate(item.entryDate)}</span></header><Badge>{item.type}</Badge><p>{item.summary}</p></div></article>)}{!projectUpdates.length && <EmptyState title="No updates yet" message="Post the first status update to establish the project history." />}</section></div>}
-      {tab === 'risks' && <div className="drawer-section-stack"><section className="risk-composer"><div className="field-grid"><Field label="Risk or issue"><input value={riskDraft.title} onChange={(event) => setRiskDraft((row) => ({ ...row, title: event.target.value }))} /></Field><Field label="Severity"><select value={riskDraft.severity} onChange={(event) => setRiskDraft((row) => ({ ...row, severity: event.target.value }))}>{['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Mitigation" wide><textarea rows="3" value={riskDraft.mitigation} onChange={(event) => setRiskDraft((row) => ({ ...row, mitigation: event.target.value }))} /></Field></div><button className="button primary small-button" disabled={!riskDraft.title.trim()} onClick={() => { onAddRisk(project, riskDraft); setRiskDraft({ title: '', severity: 'Medium', probability: 'Possible', mitigation: '' }); }}>Add risk</button></section><section className="risk-list">{projectRisks.map((risk) => <article key={risk.id}><div><Badge tone={statusTone(risk.severity)}>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3>{risk.title}</h3><p>{risk.mitigation || 'No mitigation has been documented.'}</p><span>{risk.ownerName || 'Unassigned'}</span></article>)}{!projectRisks.length && <EmptyState title="No open risks" message="Capture risks and mitigation actions here as the project advances." />}</section></div>}
+      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Owner</span><strong>{project.ownerName}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong><small>{project.status}</small></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Purpose</h3><p>{project.description || 'No project description has been added.'}</p></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section></div>}
+      {tab === 'tasks' && <div className="phase-task-list">{workflowData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; const allNotRequired = stageTasks.length > 0 && stageTasks.every((task) => ['Not Required', 'Not Applicable'].includes(task.status)); return <section key={stage.key} className={`task-stage ${allNotRequired ? 'phase-not-required' : ''}`}><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><div className="phase-header-actions"><Badge>{done}/{stageTasks.length}</Badge>{manager && <button className="button secondary small-button" onClick={() => setTaskEditor({ id: uid('task'), projectKey: project.projectKey, title: '', phaseKey: stage.key, order: Math.max(0, ...projectTasks.map((task) => task.order || 0)) + 1, status: 'Not Started', ownerName: project.ownerName, ownerKey: project.ownerKey, ownerEmail: project.ownerEmail, dueDate: '' })}>Add task</button>}{manager && <button type="button" className={`phase-required-button ${allNotRequired ? 'active' : ''}`} disabled={!stageTasks.length} aria-label={`${allNotRequired ? 'Restore' : 'Mark'} ${stage.name} ${allNotRequired ? '' : 'not required'}`.trim()} onClick={() => onSetPhaseRequired(project, stage.key, !allNotRequired)}><Icon name={allNotRequired ? 'refresh' : 'ban'} size={13} />{allNotRequired ? 'Restore phase' : 'Not required'}</button>}</div></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="phase-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} ${task.title}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
+      {tab === 'updates' && <div className="drawer-section-stack">{manager && <section className="composer"><textarea rows="3" placeholder="Add a concise status update, decision, or handoff…" value={updateText} onChange={(event) => setUpdateText(event.target.value)} /><div><span>Visible to everyone with access to this SharePoint workspace</span><button className="button primary small-button" disabled={!updateText.trim()} onClick={() => { onAddUpdate(project, updateText); setUpdateText(''); }}>Post update</button></div></section>}<section className="timeline-list">{projectUpdates.map((item) => <article key={item.id}><span className="timeline-dot" /><div><header><strong>{item.authorName}</strong><span>{displayDate(item.entryDate)}</span></header><Badge>{item.type}</Badge><p>{item.summary}</p></div></article>)}{!projectUpdates.length && <EmptyState title="No updates yet" message="Post the first status update to establish the project history." />}</section></div>}
+      {tab === 'risks' && <div className="drawer-section-stack">{manager && <section className="risk-composer"><div className="field-grid"><Field label="Risk or issue"><input value={riskDraft.title} onChange={(event) => setRiskDraft((row) => ({ ...row, title: event.target.value }))} /></Field><Field label="Severity"><select value={riskDraft.severity} onChange={(event) => setRiskDraft((row) => ({ ...row, severity: event.target.value }))}>{['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Mitigation" wide><textarea rows="3" value={riskDraft.mitigation} onChange={(event) => setRiskDraft((row) => ({ ...row, mitigation: event.target.value }))} /></Field></div><button className="button primary small-button" disabled={!riskDraft.title.trim()} onClick={() => { onAddRisk(project, riskDraft); setRiskDraft({ title: '', severity: 'Medium', probability: 'Possible', mitigation: '' }); }}>Add risk</button></section>}<section className="risk-list">{projectRisks.map((risk) => <article key={risk.id}><div><Badge tone={statusTone(risk.severity)}>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3>{risk.title}</h3><p>{risk.mitigation || 'No mitigation has been documented.'}</p><span>{risk.ownerName || 'Unassigned'}</span></article>)}{!projectRisks.length && <EmptyState title="No open risks" message="Capture risks and mitigation actions here as the project advances." />}</section></div>}
     </div>
-    {taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={(task) => { onSaveTask(task); setTaskEditor(null); }} />}
+    {taskEditor && <TaskEditor task={taskEditor} manager={manager} users={users} onClose={() => setTaskEditor(null)} onSave={onSaveTask} onDelete={projectTasks.some((row) => row.id === taskEditor.id) ? onDeleteTask : undefined} />}
   </aside></div>;
 }
 
@@ -253,7 +278,7 @@ function Toast({ toast, onClose }) { if (!toast) return null; return <div classN
 
 export function App() {
   const repoRef = useRef(null);
-  if (!repoRef.current) repoRef.current = createRepository();
+  if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store) }; }
   const repo = repoRef.current;
   const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   const [view, setView] = useState('overview');
@@ -284,6 +309,7 @@ export function App() {
     finally { setLoading(false); }
   }
 
+  const manager = isManager(user, data.users);
   const enriched = useMemo(() => data.projects.map((project) => enrichProject(project, data.tasks)), [data.projects, data.tasks]);
   const filteredProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -296,7 +322,8 @@ export function App() {
     const source = data;
     const prepared = { ...project, ownerName: project.ownerName?.trim() || 'Unassigned' };
     const creating = !prepared.spId && !source.projects.some((row) => row.id === prepared.id);
-    const template = creating ? createStarterTasks(prepared.projectKey, prepared) : [];
+    const previous = source.projects.find((row) => row.id === prepared.id);
+    const template = creating ? createStarterTasks(prepared.projectKey, prepared) : source.tasks.filter((task) => task.projectKey === prepared.projectKey && previous && (previous.ownerKey !== prepared.ownerKey || previous.ownerEmail !== prepared.ownerEmail || previous.ownerName !== prepared.ownerName) && task.ownerKey === previous.ownerKey && task.ownerEmail === previous.ownerEmail).map((task) => ({ ...task, ownerName: prepared.ownerName, ownerKey: prepared.ownerKey, ownerEmail: prepared.ownerEmail }));
     const updateProjects = (state, saved, starterTasks = []) => ({
       ...state,
       projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved],
@@ -310,7 +337,7 @@ export function App() {
     try {
       const saved = await repo.store.saveProject(prepared);
       const starterTasks = [];
-      if (creating) {
+      if (template.length) {
         for (let index = 0; index < template.length; index += 10) {
           starterTasks.push(...await Promise.all(template.slice(index, index + 10).map((task) => repo.store.saveTask(task))));
         }
@@ -328,12 +355,24 @@ export function App() {
     try {
       const status = task.status === 'Not Applicable' ? 'Not Required' : task.status;
       const resolved = CLOSED_TASK_STATUSES.includes(status);
-      const normalized = { ...task, status, ownerName: task.ownerName?.trim() || 'Unassigned', dueDate: status === 'Not Required' ? '' : task.dueDate, finishDate: resolved ? (task.finishDate || todayIso()) : '' };
+      const normalized = { ...task, status, ownerName: task.ownerName?.trim() || 'Unassigned', finishDate: resolved ? (task.finishDate || todayIso()) : '' };
       const saved = await repo.store.saveTask(normalized);
-      const updateState = (state) => ({ ...state, tasks: state.tasks.map((row) => row.id === saved.id ? saved : row) });
+      const updateState = (state) => ({ ...state, tasks: state.tasks.some((row) => row.id === saved.id) ? state.tasks.map((row) => row.id === saved.id ? saved : row) : [...state.tasks, saved] });
       setData(updateState);
-      setTaskEditor(null); setToast({ message: `WBS ${saved.wbs} updated.` });
-    } catch (caught) { setToast({ tone: 'bad', message: caught.message }); }
+      setToast({ message: `${saved.title} updated.` });
+      return true;
+    } catch (caught) { setToast({ tone: 'bad', message: caught.message }); return false; }
+  }
+
+  async function deleteTask(task) {
+    if (!window.confirm(`Delete task “${task.title}”?`)) return false;
+    try { await repo.store.recycle('tasks', task.spId, task.id); setData((state) => ({ ...state, tasks: state.tasks.filter((row) => row.id !== task.id) })); return true; }
+    catch (caught) { setToast({ tone: 'bad', message: caught.message }); return false; }
+  }
+
+  async function saveUser(row) {
+    try { const saved = await repo.store.saveUser(row); setData((state) => ({ ...state, users: (state.users || []).some((entry) => entry.id === saved.id) ? state.users.map((entry) => entry.id === saved.id ? saved : entry) : [...(state.users || []), saved] })); setToast({ message: 'User saved.' }); return true; }
+    catch (caught) { setToast({ tone: 'bad', message: caught.message }); return false; }
   }
 
   async function addUpdate(project, summary) {
@@ -366,10 +405,12 @@ export function App() {
     const source = data;
     const affected = source.tasks.filter((task) => task.projectKey === project.projectKey && task.phaseKey === phaseKey);
     if (!affected.length) return;
+    const justification = notRequired ? window.prompt('Why is this phase not required?')?.trim() : '';
+    if (notRequired && !justification) return;
     const changed = affected.map((task) => ({
       ...task,
       status: notRequired ? 'Not Required' : 'Not Started',
-      dueDate: notRequired ? '' : task.dueDate,
+      notRequiredJustification: notRequired ? justification : task.notRequiredJustification,
       finishDate: notRequired ? (task.finishDate || todayIso()) : '',
       blockedReason: notRequired ? '' : task.blockedReason,
     }));
@@ -477,20 +518,21 @@ export function App() {
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{NAV.map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
-    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button><button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button></div></header>
+    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{[...NAV, ...(manager ? [['users', 'Users and managers', 'tasks']] : [])].map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
+    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{manager && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}</div></header>
       <main>
-        {view === 'overview' && <Overview projects={filteredProjects} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={deleteProject} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} />}
-        {view === 'board' && <Board projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} onDelete={deleteProject} />}
-        {view === 'projects' && <ProjectsTable projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} />}
-        {view === 'my-work' && <MyWork projects={filteredProjects} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={deleteProject} />}
-        {view === 'glossary' && <Glossary acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
-        {!data.projects.length && view === 'overview' && <EmptyState title="Your modernization portfolio is ready" message="Add the first project to begin tracking modernization work." action={<div className="empty-actions"><button className="button primary" onClick={() => setProjectEditor({})}>Add first project</button></div>} />}
+        {view === 'overview' && <Overview projects={filteredProjects} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} onAttention={() => setView('attention')} />}
+        {view === 'board' && <Board projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} />}
+        {view === 'attention' && <Attention projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} />}
+        {view === 'users' && manager && <UserDirectory users={data.users || []} onSave={saveUser} />}
+        {view === 'my-work' && <MyWork projects={filteredProjects} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
+        {view === 'glossary' && <Glossary manager={manager} acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
+        {manager && !data.projects.length && view === 'overview' && <EmptyState title="Your modernization portfolio is ready" message="Add the first project to begin tracking modernization work." action={<div className="empty-actions"><button className="button primary" onClick={() => setProjectEditor({})}>Add first project</button></div>} />}
       </main>
     </div>
-    {openProject && <ProjectDrawer project={openProject} user={user} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} />}
-    {projectEditor && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
-    {taskEditor && <TaskEditor task={taskEditor} user={user} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
+    {openProject && <ProjectDrawer project={openProject} user={user} manager={manager} users={data.users || []} onDeleteTask={deleteTask} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} />}
+    {manager && projectEditor && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} users={data.users || []} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
+    {taskEditor && <TaskEditor task={taskEditor} manager={manager} users={data.users || []} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
     <Toast toast={toast} onClose={() => setToast(null)} />
   </div>;
 }

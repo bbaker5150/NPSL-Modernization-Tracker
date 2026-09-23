@@ -19,14 +19,15 @@ export const CONTAINERS = [
     ],
   },
   {
-    key: 'tasks', suffix: 'Tasks', description: 'WBS tasks for every modernization project.', fields: [
+    key: 'tasks', suffix: 'Tasks', description: 'Pipeline tasks for every modernization project.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
-      ['WBS', 'WBS', FIELD.TEXT], ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
+      ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
       ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
       ['StartDate', 'Start Date', FIELD.DATE], ['FinishDate', 'Finish Date', FIELD.DATE], ['DueDate', 'Due Date', FIELD.DATE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['Notes', 'Notes', FIELD.NOTE],
       ['BlockedReason', 'Blocked Reason', FIELD.NOTE], ['SourceStartLabel', 'Source Start Label', FIELD.TEXT],
       ['DataIssue', 'Data Issue', FIELD.NOTE],
+      ['DeferredDate', 'Deferred Date', FIELD.DATE], ['DeferredJustification', 'Deferral Justification', FIELD.NOTE], ['NotRequiredJustification', 'Not Required Justification', FIELD.NOTE],
     ],
   },
   {
@@ -50,6 +51,9 @@ export const CONTAINERS = [
       ['FullTerm', 'Full Term', FIELD.TEXT], ['Definition', 'Definition', FIELD.NOTE], ['SeedVersion', 'Seed Version', FIELD.TEXT],
     ],
   },
+  { key: 'users', suffix: 'Users', description: 'Tracker user directory and application roles.', fields: [
+    ['RecordId', 'Record ID', FIELD.TEXT, true], ['LoginKey', 'Login Key', FIELD.TEXT, true], ['Email', 'Email', FIELD.TEXT], ['AppRole', 'Application Role', FIELD.TEXT],
+  ] },
 ].map((container) => ({
   ...container,
   fields: container.fields.map(([name, title, type, indexed = false]) => ({ name, title, type, indexed, inView: type !== FIELD.NOTE })),
@@ -70,7 +74,7 @@ function schemaXml(field) {
 
 const dateOnly = (value) => value ? String(value).slice(0, 10) : '';
 const sharePointDate = (value) => value ? `${dateOnly(value)}T12:00:00Z` : null;
-const DATE_FIELDS = new Set(['TargetFinish', 'NextMilestoneDate', 'StartDate', 'FinishDate', 'DueDate', 'EntryDate']);
+const DATE_FIELDS = new Set(['TargetFinish', 'NextMilestoneDate', 'StartDate', 'FinishDate', 'DueDate', 'DeferredDate', 'EntryDate']);
 const sharePointFormDate = (value) => {
   if (!value) return '';
   const [year, month, day] = dateOnly(value).split('-').map(Number);
@@ -100,11 +104,12 @@ const projectFields = (row) => ({
 });
 
 const taskFields = (row) => ({
-  Title: `${row.wbs} ${row.title}`, RecordId: row.id, ProjectKey: row.projectKey, WBS: row.wbs,
+  Title: row.title, RecordId: row.id, ProjectKey: row.projectKey,
   TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
   StartDate: sharePointDate(row.startDate), FinishDate: sharePointDate(row.finishDate), DueDate: sharePointDate(row.dueDate),
   OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', Notes: row.notes, BlockedReason: row.blockedReason,
   SourceStartLabel: row.sourceStartLabel, DataIssue: row.dataIssue,
+  DeferredDate: sharePointDate(row.deferredDate), DeferredJustification: row.deferredJustification || '', NotRequiredJustification: row.notRequiredJustification || '',
 });
 
 const updateFields = (row) => ({
@@ -137,9 +142,9 @@ function fromProject(item) {
 function fromTask(item) {
   const status = item.TaskStatus || 'Not Started';
   return {
-    spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, wbs: item.WBS, title: item.TaskTitle,
+    spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.TaskTitle,
     phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
-    startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: ['Not Required', 'Not Applicable'].includes(status) ? '' : dateOnly(item.DueDate),
+    startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate), deferredDate: dateOnly(item.DeferredDate), deferredJustification: item.DeferredJustification || '', notRequiredJustification: item.NotRequiredJustification || '',
     ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
   };
@@ -235,14 +240,15 @@ export class SharePointStore {
   }
 
   async load() {
-    const [projects, tasks, updates, risks, acronyms] = await Promise.all([
+    const [projects, tasks, updates, risks, acronyms, users] = await Promise.all([
       this.listItems('projects', CONTAINERS[0].fields.map((field) => field.name), fromProject),
       this.listItems('tasks', CONTAINERS[1].fields.map((field) => field.name), fromTask),
       this.listItems('updates', CONTAINERS[2].fields.map((field) => field.name), fromUpdate),
       this.listItems('risks', CONTAINERS[3].fields.map((field) => field.name), fromRisk),
       this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
+      this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole === 'Manager' ? 'Manager' : 'User' })),
     ]);
-    return { projects, tasks, updates, risks, acronyms };
+    return { projects, tasks, updates, risks, acronyms, users };
   }
 
   async create(key, fields) {
@@ -270,6 +276,11 @@ export class SharePointStore {
   }
 
   async recycle(key, spId) { await this.post(`${apiFor(this.prefix, key)}/items(${spId})/recycle()`, {}); }
+
+  async saveUser(row) {
+    const fields = { Title: row.title, RecordId: row.id, LoginKey: row.loginName, Email: row.email || '', AppRole: row.role };
+    return row.spId ? (await this.update('users', row.spId, fields), row) : { ...row, spId: await this.create('users', fields) };
+  }
 
   async saveProject(row) { return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) }; }
   async saveTask(row) { return row.spId ? (await this.update('tasks', row.spId, taskFields(row)), row) : { ...row, spId: await this.create('tasks', taskFields(row)) }; }

@@ -102,3 +102,19 @@ describe('SharePoint store', () => {
     }
   });
 });
+
+describe('tasking schema round trip', () => {
+  it('persists deferrals and exceptions with original deadlines and loads directory roles', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ value: [] }));
+    await store.saveTask({ spId: 9, id: 't9', title: 'Review', projectKey: 'p', phaseKey: 'requirement', status: 'Not Required', dueDate: '2026-09-01', deferredDate: '2026-10-01', deferredJustification: 'Parts delayed', notRequiredJustification: 'Scope changed' });
+    const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((row) => [row.FieldName, row.FieldValue]));
+    expect(values).toMatchObject({ Title: 'Review', DueDate: '9/1/2026', DeferredDate: '10/1/2026', DeferredJustification: 'Parts delayed', NotRequiredJustification: 'Scope changed' });
+    expect(values).not.toHaveProperty('WBS');
+    store.get = vi.fn(async (path) => ({ value: path.includes('ModernizationTasks') ? [{ Id: 9, RecordId: 't9', TaskTitle: 'Review', TaskStatus: 'Not Required', DueDate: '2026-09-01T12:00:00Z', DeferredDate: '2026-10-01T12:00:00Z', DeferredJustification: 'Parts delayed', NotRequiredJustification: 'Scope changed' }] : path.includes('ModernizationUsers') ? [{ Id: 1, RecordId: 'u1', Title: 'Manager', LoginKey: 'manager@example.test', AppRole: 'Manager' }] : [] }));
+    const loaded = await store.load();
+    expect(loaded.tasks[0]).toMatchObject({ dueDate: '2026-09-01', deferredDate: '2026-10-01', deferredJustification: 'Parts delayed', notRequiredJustification: 'Scope changed' });
+    expect(loaded.users[0]).toMatchObject({ role: 'Manager', loginName: 'manager@example.test' });
+    expect(store.get.mock.calls.every(([path]) => !path.includes('WBS'))).toBe(true);
+  });
+});

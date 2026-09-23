@@ -57,7 +57,7 @@ export async function getCurrentUser(webUrl, fetchImpl = fetch) {
 
   const promise = spGet(
     webUrl,
-    '/_api/web/currentuser?$select=Id,LoginName,Email,Title',
+    '/_api/web/currentuser?$select=Id,LoginName,Email,Title,IsSiteAdmin',
     fetchImpl,
   ).then((body) => {
     const source = body?.d || body || {};
@@ -70,6 +70,7 @@ export async function getCurrentUser(webUrl, fetchImpl = fetch) {
     }
     return {
       id,
+      isSiteAdmin: source.IsSiteAdmin === true,
       loginName: source.LoginName || '',
       email: source.Email || '',
       title: source.Title || source.Email || source.LoginName || `User ${id}`,
