@@ -19,7 +19,13 @@ The output contains React, Excel export support, styles, the NAVAIR seal, and th
 
 The app uses a saved `ModernizationUsers` directory for application roles, without a separate sign-in. It uses the current Microsoft 365 session and resolves the user through `/_api/web/currentuser`. Writes use a time-limited form digest from `/_api/contextinfo`. Existing-item updates use SharePoint's validation endpoint, avoiding REST method-override MERGE requests and their repetitive host notifications.
 
-SharePoint site administrators (`IsSiteAdmin`) have manager access and should perform the first load after deployment to provision the additive schema changes. They can then use **Users and managers** to save each person's SharePoint login or email and select Manager or User. There is no first-visitor promotion; unknown identities default to User. Local development uses a site-admin test identity.
+All new identities default to User, including SharePoint site administrators and the local development identity. A site administrator still needs to perform the first upgraded load to provision missing lists/fields, but this no longer automatically grants the Manager app role. Existing saved Manager roles are preserved.
+
+Every sign-in upserts the current SharePoint name, email, and login into `ModernizationUsers`, preserving its saved role. Standard users can open only My work, Acronym glossary, and Users and managers. The directory is visible to all users; only managers may edit other users or create assignments.
+
+For the requested testing workflow, open **Users and managers**, enter `Modernization-Test!2026`, and choose **Enable manager access**. The password applies only to the currently signed-in identity, and the Manager role is persisted in the directory. Configure `testingManagerPassword` before the bundle runs to override this default or set it to `false` to disable the flow. A disabled flow leaves existing roles intact. This password is bundled client-side and is not a production security control.
+
+Testing self-registration and promotion require permission to add/update directory items under the current SharePoint session. If list permissions reject the write, the app displays the error and does not grant access. This change does not elevate SharePoint permissions. A production deployment must replace this convenience workflow with trusted registration/promotion and apply the list controls below.
 
 Managers see the full application, create/assign projects and deadlines, maintain the directory, and add/delete phase tasks. Standard users see projects they own or have assigned tasks in; only their task rows are exposed when they do not own the project. Their repository writes are restricted to status and exception fields. Exports use the same scoped data. Project-owner changes also move tasks that still match the previous owner, while preserving separately assigned tasks.
 

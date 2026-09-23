@@ -88,7 +88,7 @@ function PipelineRail({ projects, selected, onSelect }) {
   return <div className="pipeline-rail">
     {workflowData.phases.map((phase, index) => {
       const count = projects.filter((project) => project.currentStageKey === phase.key).length;
-      return <button key={phase.key} className={`phase-node ${selected === phase.key ? 'selected' : ''}`} onClick={() => onSelect?.(selected === phase.key ? '' : phase.key)}>
+      return <button key={phase.key} className={`phase-node ${selected.includes(phase.key) ? 'selected' : ''}`} aria-pressed={selected.includes(phase.key)} onClick={(event) => onSelect?.(event.ctrlKey || event.metaKey ? (selected.includes(phase.key) ? selected.filter((key) => key !== phase.key) : [...selected, phase.key]) : (selected.length === 1 && selected[0] === phase.key ? [] : [phase.key]))}>
         <div className="phase-top"><span className="phase-index">{String(index + 1).padStart(2, '0')}</span><strong>{count}</strong></div>
         <span className="phase-label">{phase.name}</span>
         <div className="phase-bar"><span style={{ width: `${count ? Math.max(8, (count / max) * 100) : 0}%` }} /></div>
@@ -114,7 +114,7 @@ function ProjectCard({ project, onOpen, onDelete }) {
 function Overview({ projects, tasks, onOpen, phaseFilter, setPhaseFilter, onAttention }) {
   const active = projects.filter((project) => project.status !== 'Complete');
   const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + (project.percentComplete || 0), 0) / projects.length) : 0;
-  const filtered = phaseFilter ? projects.filter((project) => project.currentStageKey === phaseFilter) : projects;
+  const filtered = phaseFilter.length ? projects.filter((project) => phaseFilter.includes(project.currentStageKey)) : projects;
   return <div className="page-stack">
     <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>Measurement areas, milestones, and handoffs across the modernization pipeline.</p></div></section>
     <section className="kpi-grid">
@@ -122,8 +122,8 @@ function Overview({ projects, tasks, onOpen, phaseFilter, setPhaseFilter, onAtte
       <KpiCard icon="trend" label="Portfolio progress" value={`${avg}%`} detail={`${tasks.filter(isClosedTask).length} of ${tasks.length} tasks resolved`} tone="mint" />
       <KpiCard icon="alert" label="Needs attention" value={active.length} detail="Review unfinished projects and task exceptions" tone="amber" onClick={onAttention} />
     </section>
-    <section className="panel pipeline-panel"><div className="panel-heading"><h2>Projects by pipeline stage</h2>{phaseFilter && <button className="text-button" onClick={() => setPhaseFilter('')}>Clear filter</button>}</div><PipelineRail projects={projects} selected={phaseFilter} onSelect={setPhaseFilter} /></section>
-    <ProjectsTable projects={filtered} onOpen={onOpen} />
+    <section className="panel pipeline-panel"><div className="panel-heading"><h2>Projects by pipeline stage</h2>{phaseFilter.length > 0 && <button className="text-button" onClick={() => setPhaseFilter([])}>Clear filter</button>}</div><p className="pipeline-hint">Click a stage to filter. Ctrl-click (or ⌘-click) to select multiple stages.</p><PipelineRail projects={projects} selected={phaseFilter} onSelect={setPhaseFilter} /></section>
+    {projects.length > 0 && <ProjectsTable projects={filtered} onOpen={onOpen} />}
   </div>;
 }
 
@@ -151,9 +151,11 @@ function Board({ projects, onOpen, onDelete }) {
 
 function ProjectsTable({ projects, onOpen }) {
   const [health, setHealth] = useState('');
-  const rows = health ? projects.filter((project) => project.health === health) : projects;
-  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Portfolio register</span><h1>Portfolio projects</h1><p>Detailed ownership, health, stage, and milestone visibility.</p></div><label className="select-wrap"><Icon name="filter" /><select value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></section>
-    <section className="panel table-panel"><div className="project-table" role="table"><div className="project-table-row table-header" role="row"><span>Project</span><span>Owner</span><span>Stage</span><span>Health</span><span>Progress</span><span>Next milestone</span><span /></div>{rows.map((project) => <button className="project-table-row" role="row" key={project.id} onClick={() => onOpen(project)}><span><strong>{project.title}</strong><small>{project.measurementArea}</small></span><span><span className="avatar tiny">{project.ownerName === 'Unassigned' ? '?' : project.ownerName[0]}</span>{project.ownerName}</span><span>{workflowData.phases.find((phase) => phase.key === project.currentStageKey)?.short}</span><span><Badge tone={statusTone(project.health)} dot>{project.health}</Badge></span><span><strong>{project.percentComplete}%</strong><Progress value={project.percentComplete} compact /></span><span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></span><span><Icon name="chevron" /></span></button>)}</div></section>
+  const [search, setSearch] = useState('');
+  const query = search.trim().toLowerCase();
+  const rows = projects.filter((project) => (!health || project.health === health) && (!query || [project.title, project.measurementArea, project.ownerName, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query))));
+  return <div className="panel portfolio-register"><section className="portfolio-heading"><div><span className="section-kicker">Portfolio register</span><h2>Portfolio projects</h2><p>Detailed ownership, health, stage, and milestone visibility.</p></div><div className="portfolio-filters"><label className="search-box"><Icon name="search" /><input aria-label="Search portfolio projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><label className="select-wrap"><Icon name="filter" /><select aria-label="Filter by health" value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></div></section>
+    <section className="table-panel"><div className="project-table" role="table"><div className="project-table-row table-header" role="row"><span>Project</span><span>Owner</span><span>Stage</span><span>Health</span><span>Progress</span><span>Next milestone</span><span /></div>{rows.map((project) => <button className="project-table-row" role="row" key={project.id} onClick={() => onOpen(project)}><span><strong>{project.title}</strong><small>{project.measurementArea}</small></span><span><span className="avatar tiny">{project.ownerName === 'Unassigned' ? '?' : project.ownerName[0]}</span>{project.ownerName}</span><span>{workflowData.phases.find((phase) => phase.key === project.currentStageKey)?.short}</span><span><Badge tone={statusTone(project.health)} dot>{project.health}</Badge></span><span><strong>{project.percentComplete}%</strong><Progress value={project.percentComplete} compact /></span><span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></span><span><Icon name="chevron" /></span></button>)}</div>{!rows.length && <p className="portfolio-no-results">No projects match the selected filters.</p>}</section>
   </div>;
 }
 
@@ -240,14 +242,16 @@ function UserPicker({ users, label, onSelect }) {
   return <Field label={label}><select value="" onChange={(event) => { const entry = users.find((row) => row.id === event.target.value); if (entry) onSelect(entry); }}><option value="">Select a saved user…</option>{users.map((entry) => <option key={entry.id} value={entry.id}>{entry.title} — {entry.email || entry.loginName} ({entry.role})</option>)}</select></Field>;
 }
 
-function UserDirectory({ users, onSave }) {
+function UserDirectory({ users, manager, testingEnabled, onActivate, onSave }) {
+  const [password, setPassword] = useState('');
+  const [activationError, setActivationError] = useState('');
   const empty = { title: '', email: '', loginName: '', role: 'User' };
   const [draft, setDraft] = useState(empty);
   const [saving, setSaving] = useState(false);
-  return <section className="page-stack"><h1>Users and managers</h1><p>Save SharePoint identities for assignment and application roles.</p><form className="panel directory-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { if (await onSave({ ...draft, id: draft.id || uid('user'), loginName: draft.loginName.trim() || draft.email.trim() })) setDraft(empty); } finally { setSaving(false); } }}>
+  return <section className="page-stack"><h1>Users and managers</h1><p>Signed-in users and their application roles.</p>{!manager && testingEnabled && <form className="panel directory-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); setActivationError(''); try { await onActivate(password); setPassword(''); } catch (error) { setActivationError(error.message); } finally { setSaving(false); } }}><h2>Testing manager access</h2><p>Testing only: enter the shared testing password to grant your signed-in account manager access.</p><Field label="Testing password"><input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>{activationError && <p role="alert" className="inline-error">{activationError}</p>}<button className="button primary" disabled={saving || !password}>Enable manager access</button></form>}{manager && <form className="panel directory-form" onSubmit={async (event) => { event.preventDefault(); setSaving(true); try { if (await onSave({ ...draft, id: draft.id || uid('user'), loginName: draft.loginName.trim() || draft.email.trim() })) setDraft(empty); } finally { setSaving(false); } }}>
     {['title', 'email', 'loginName'].map((key) => <Field key={key} label={{ title: 'Name', email: 'Email', loginName: 'SharePoint login' }[key]}><input required={key === 'title'} value={draft[key]} onChange={(event) => setDraft((row) => ({ ...row, [key]: event.target.value }))} /></Field>)}
     <Field label="Role"><select value={draft.role} onChange={(event) => setDraft((row) => ({ ...row, role: event.target.value }))}><option>User</option><option>Manager</option></select></Field><button className="button primary" disabled={saving || !(draft.loginName.trim() || draft.email.trim())}>Save user</button>{draft.id && <button type="button" className="button secondary" onClick={() => setDraft(empty)}>Cancel edit</button>}
-    </form>{users.map((entry) => <article className="panel directory-row" key={entry.id}><strong>{entry.title}</strong><span>{entry.email || entry.loginName}</span><Badge>{entry.role}</Badge><button className="button secondary" onClick={() => setDraft(entry)}>Edit</button></article>)}</section>;
+    </form>}{users.map((entry) => <article className="panel directory-row" key={entry.id}><strong>{entry.title}</strong><span>{entry.email || entry.loginName}</span><Badge>{entry.role}</Badge>{manager && <button className="button secondary" onClick={() => setDraft(entry)}>Edit</button>}</article>)}</section>;
 }
 
 function ProjectDrawer({ project, user, manager, users, onDeleteTask, tasks, updates, risks, onClose, onEdit, onSaveTask, onToggleTask, onSetPhaseRequired, onAddUpdate, onAddRisk, onClaim }) {
@@ -278,16 +282,15 @@ function Toast({ toast, onClose }) { if (!toast) return null; return <div classN
 
 export function App() {
   const repoRef = useRef(null);
-  if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store) }; }
+  if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store, repository.config) }; }
   const repo = repoRef.current;
   const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-  const [view, setView] = useState('overview');
+  const [view, setView] = useState('my-work');
   const [user, setUser] = useState(null);
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [phaseFilter, setPhaseFilter] = useState('');
+  const [phaseFilter, setPhaseFilter] = useState([]);
   const [openProjectId, setOpenProjectId] = useState('');
   const [projectEditor, setProjectEditor] = useState(null);
   const [taskEditor, setTaskEditor] = useState(null);
@@ -304,18 +307,16 @@ export function App() {
       const [currentUser, readiness] = await Promise.all([repo.store.currentUser(), repo.store.readiness()]);
       setUser(currentUser);
       if (!readiness.ready) await repo.store.provision();
-      setData(await repo.store.load());
+      await repo.store.registerCurrentUser();
+      const loaded = await repo.store.load();
+      setData(loaded);
+      setView(isManager(currentUser, loaded.users) ? 'overview' : 'my-work');
     } catch (caught) { setError(caught.message || 'Could not load portfolio data.'); }
     finally { setLoading(false); }
   }
 
   const manager = isManager(user, data.users);
   const enriched = useMemo(() => data.projects.map((project) => enrichProject(project, data.tasks)), [data.projects, data.tasks]);
-  const filteredProjects = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return enriched;
-    return enriched.filter((project) => [project.title, project.measurementArea, project.ownerName, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)));
-  }, [enriched, search]);
   const openProject = enriched.find((project) => project.id === openProjectId);
 
   async function saveProject(project) {
@@ -518,16 +519,15 @@ export function App() {
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{[...NAV, ...(manager ? [['users', 'Users and managers', 'tasks']] : [])].map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
-    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><label className="search-box"><Icon name="search" /><input aria-label="Search projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{manager && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}</div></header>
+    <aside className="sidebar"><div className="brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></div><nav>{[...NAV.filter(([key]) => manager || ['my-work', 'glossary'].includes(key)), ['users', 'Users and managers', 'tasks']].map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{user?.title || 'SharePoint user'}</strong><span>{user?.email || user?.loginName || 'Full portfolio access'}</span></div></div></div></aside>
+    <div className="main-shell"><header className="topbar"><div className="mobile-brand"><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></div><div className="top-actions"><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{manager && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}</div></header>
       <main>
-        {view === 'overview' && <Overview projects={filteredProjects} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} onAttention={() => setView('attention')} />}
-        {view === 'board' && <Board projects={filteredProjects} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} />}
-        {view === 'attention' && <Attention projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} />}
-        {view === 'users' && manager && <UserDirectory users={data.users || []} onSave={saveUser} />}
-        {view === 'my-work' && <MyWork projects={filteredProjects} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
+        {manager && view === 'overview' && <Overview projects={enriched} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} onAttention={() => setView('attention')} />}
+        {manager && view === 'board' && <Board projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} />}
+        {manager && view === 'attention' && <Attention projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} />}
+        {view === 'users' && <UserDirectory users={data.users || []} manager={manager} testingEnabled={repo.config.testingManagerPassword !== false && repo.config.testingManagerPassword !== ''} onActivate={async (password) => { await repo.store.activateTestingManager(password); setData(await repo.store.load()); setToast({ message: 'Testing manager access enabled.' }); }} onSave={saveUser} />}
+        {view === 'my-work' && <MyWork projects={enriched} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
         {view === 'glossary' && <Glossary manager={manager} acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
-        {manager && !data.projects.length && view === 'overview' && <EmptyState title="Your modernization portfolio is ready" message="Add the first project to begin tracking modernization work." action={<div className="empty-actions"><button className="button primary" onClick={() => setProjectEditor({})}>Add first project</button></div>} />}
       </main>
     </div>
     {openProject && <ProjectDrawer project={openProject} user={user} manager={manager} users={data.users || []} onDeleteTask={deleteTask} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={setProjectEditor} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onAddRisk={addRisk} onClaim={claimProject} />}
