@@ -1,7 +1,9 @@
 import { isOwnedByUser, userIdentityKey } from './repository';
 
+export const DEFAULT_TEST_MANAGER_PASSWORD = 'Modernization-Test!2026';
+
 export function isManager(user, users = []) {
-  return user?.isSiteAdmin === true || users.some((entry) => entry.role === 'Manager' && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
+  return users.some((entry) => entry.role === 'Manager' && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
 }
 export function canUpdateTask(task, user, projects) {
   return isOwnedByUser(task, user) || projects.some((project) => project.projectKey === task.projectKey && isOwnedByUser(project, user));
@@ -13,7 +15,7 @@ export function visibleData(data, user) {
   const projects = data.projects.filter((project) => isOwnedByUser(project, user) || keys.has(project.projectKey));
   // Related project history is restricted to projects owned by the user.
   const ownedKeys = new Set(projects.filter((project) => isOwnedByUser(project, user)).map((project) => project.projectKey));
-  return { ...data, projects, tasks, updates: data.updates.filter((row) => ownedKeys.has(row.projectKey)), risks: data.risks.filter((row) => ownedKeys.has(row.projectKey)), users: (data.users || []).filter((entry) => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user)) };
+  return { ...data, projects, tasks, updates: data.updates.filter((row) => ownedKeys.has(row.projectKey)), risks: data.risks.filter((row) => ownedKeys.has(row.projectKey)), users: data.users || [] };
 }
 export function validateTask(task) {
   if (!task.title?.trim()) throw new Error('Enter a task name.');
@@ -28,7 +30,7 @@ export function validateTask(task) {
 
 // Application authorization applies to every repository call, including exports.
 // SharePoint ACLs remain the server-side security boundary (see deployment guide).
-export function authorizedStore(raw) {
+export function authorizedStore(raw, config = {}) {
   const context = async () => {
     const [user, data] = await Promise.all([raw.currentUser(), raw.load()]);
     return { user, data, manager: isManager(user, data.users) };
@@ -40,6 +42,19 @@ export function authorizedStore(raw) {
   };
   return new Proxy(raw, {
     get(target, property) {
+      if (property === 'registerCurrentUser' || property === 'activateTestingManager') return async (password) => {
+        const { user, data } = await context();
+        const key = userIdentityKey(user);
+        if (!key) throw new Error('Your signed-in identity could not be resolved.');
+        const existing = (data.users || []).find((entry) => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
+        if (property === 'activateTestingManager') {
+          const expected = config.testingManagerPassword ?? DEFAULT_TEST_MANAGER_PASSWORD;
+          if (!expected || password !== expected) throw new Error('Testing password is incorrect or testing access is disabled.');
+        }
+        const row = { ...existing, id: existing?.id || `user-${encodeURIComponent(key)}`, title: user.title || user.email || key, loginName: key, email: user.email || '', role: property === 'activateTestingManager' ? 'Manager' : existing?.role || 'User' };
+        if (existing && Object.keys(row).every((field) => row[field] === existing[field])) return existing;
+        return raw.saveUser(row);
+      };
       if (property === 'load') return async () => { const { data, user } = await context(); return visibleData(data, user); };
       if (property === 'saveTask') return async (row) => {
         const { user, data, manager } = await context();
@@ -60,7 +75,7 @@ export function authorizedStore(raw) {
           const row = args[0];
           if (!row.title?.trim() || !userIdentityKey(row) || !['Manager', 'User'].includes(row.role)) throw new Error('Name, login/email and role are required.');
           if (data.users?.some((entry) => entry.id !== row.id && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, row))) throw new Error('This user is already in the directory.');
-          if (!user.isSiteAdmin && row.role !== 'Manager' && isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, user)) throw new Error('Ask another manager to change your role.');
+          if (row.role !== 'Manager' && isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, user)) throw new Error('Ask another manager to change your role.');
         }
         return raw[property](...args);
       };

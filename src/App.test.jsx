@@ -24,7 +24,8 @@ describe('application shell', () => {
     vi.restoreAllMocks();
   });
 
-  async function renderApp() {
+  async function renderApp(seedManager = true) {
+    if (seedManager) await createRepository().store.saveUser({ id: 'test-manager', title: 'Local Engineer', loginName: 'local', email: 'local.engineer@example.invalid', role: 'Manager' });
     await act(async () => {
       root = createRoot(document.getElementById('root'));
       root.render(<App />);
@@ -43,17 +44,18 @@ describe('application shell', () => {
     expect(userInitials({ title: 'Leila Engineer' })).toBe('LE');
   });
 
-  it('boots a clean workspace with one centered first-project action and no workspace status card', async () => {
+  it('hides the empty register and duplicate first-project action', async () => {
     await renderApp();
 
     expect(document.body.textContent).toContain('Modernization at a glance');
     expect(document.body.textContent).toContain('0 total measurement areas');
-    expect(document.body.textContent).toContain('Your modernization portfolio is ready');
+    expect(document.body.textContent).not.toContain('Your modernization portfolio is ready');
+    expect(document.querySelector('.portfolio-register')).toBeNull();
+    expect(document.querySelector('.topbar .search-box')).toBeNull();
     expect(document.querySelector('.brand-logo')?.getAttribute('alt')).toBe('NAVAIR');
     expect(document.querySelector('.sidebar-user .avatar')?.textContent).toBe('LE');
     expect(document.querySelector('.sync-card')).toBeNull();
-    expect(document.querySelectorAll('.empty-actions button')).toHaveLength(1);
-    expect(document.querySelector('.empty-actions button')?.textContent).toContain('Add first project');
+    expect(document.querySelectorAll('.empty-actions button')).toHaveLength(0);
     expect(document.body.textContent).not.toContain('Demo workspace');
     expect(document.body.textContent).not.toContain('SharePoint workspace');
     expect(document.body.textContent).not.toContain('historical baseline');
@@ -200,8 +202,8 @@ describe('application shell', () => {
     await renderApp();
     expect(document.body.textContent).not.toContain('Private other project');
     expect(document.body.textContent).not.toContain('New project');
-    expect(document.body.textContent).not.toContain('Users and managers');
-    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    expect(document.body.textContent).toContain('Users and managers');
+    await act(async () => document.querySelector('.project-card').click());
     expect(document.body.textContent).not.toContain('Edit project');
     await act(async () => document.querySelector('.upcoming-list button').click());
     expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
@@ -225,6 +227,46 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.phase-task')).toHaveLength(1);
     expect(document.querySelector('.phase-task').textContent).toContain('Keep this task');
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks).toHaveLength(1);
+  });
+
+  it('registers standard users and grants testing manager access only after the right password', async () => {
+    await renderApp(false);
+    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['My work0', 'Acronym glossary', 'Users and managers']);
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0]).toMatchObject({ title: 'Local Engineer', role: 'User' });
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
+    expect(document.querySelector('.directory-row button')).toBeNull();
+    await act(async () => changeValue(document.querySelector('input[type="password"]'), 'wrong'));
+    await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="alert"]').textContent).toContain('incorrect');
+    expect(document.body.textContent).not.toContain('New project');
+    await act(async () => changeValue(document.querySelector('input[type="password"]'), 'Modernization-Test!2026'));
+    await act(async () => document.querySelector('.directory-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.body.textContent).toContain('New project');
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('Manager');
+  });
+
+  it('combines stage multi-selection with local portfolio search and health filters', async () => {
+    const raw = createRepository().store;
+    for (const [id, stage, health] of [['Alpha', 'requirement', 'On Track'], ['Beta', 'development', 'At Risk'], ['Gamma', 'acquisition', 'On Track']]) await raw.saveProject({ id, projectKey: id, title: id, ownerName: 'Engineer', currentStageKey: stage, health, status: 'Planned' });
+    await renderApp();
+    const rows = () => [...document.querySelectorAll('.project-table-row:not(.table-header)')].map((row) => row.textContent);
+    const stages = document.querySelectorAll('.phase-node');
+    await act(async () => stages[0].click());
+    expect(rows()).toHaveLength(1);
+    await act(async () => stages[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+    expect(rows()).toHaveLength(2);
+    await act(async () => changeValue(document.querySelector('[aria-label="Search portfolio projects"]'), 'Beta'));
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain('Beta');
+    expect(document.querySelectorAll('.phase-node.selected')).toHaveLength(2);
+    await act(async () => changeValue(document.querySelector('[aria-label="Filter by health"]'), 'On Track'));
+    expect(rows()).toHaveLength(0);
+    await act(async () => { changeValue(document.querySelector('[aria-label="Search portfolio projects"]'), ''); changeValue(document.querySelector('[aria-label="Filter by health"]'), ''); });
+    await act(async () => [...document.querySelectorAll('button')].find((row) => row.textContent === 'Clear filter').click());
+    expect(rows()).toHaveLength(3);
+    expect(document.querySelector('.topbar input')).toBeNull();
   });
 
 });

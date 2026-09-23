@@ -35,9 +35,17 @@ try {
   await page.locator('#app').evaluate((frame, html) => { frame.srcdoc = html; }, artifact);
   const frame = page.frameLocator('#app');
 
-  await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor({ timeout: 20_000 });
+  await frame.getByRole('heading', { name: 'My work', exact: true }).waitFor({ timeout: 20_000 });
+  if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
+  await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  await frame.getByLabel('Testing password').fill('Modernization-Test!2026');
+  await frame.getByRole('button', { name: 'Enable manager access' }).click();
+  await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
+  await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
-  await frame.getByText('Your modernization portfolio is ready').waitFor();
+  if (await frame.locator('.portfolio-register').count()) errors.push('Empty portfolio register remained visible');
+  if (await frame.getByText('Add first project').count()) errors.push('Duplicate new project prompt remained visible');
+  if (await frame.locator('.topbar .search-box').count()) errors.push('Global search remained visible');
   const emptyBarWidths = await frame.locator('.phase-bar span').evaluateAll((bars) => bars.map((bar) => bar.style.width));
   if (emptyBarWidths.some((width) => width !== '0%')) errors.push(`Empty pipeline stages displayed progress: ${emptyBarWidths.join(', ')}`);
   if (await frame.getByText('Open sample portfolio').count()) errors.push('Sample portfolio control remained visible');
@@ -93,6 +101,22 @@ try {
   await frame.getByRole('button', { name: 'Save task' }).click();
   await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).waitFor();
   await frame.locator('.project-drawer .icon-button').first().click();
+  // The register should span the same content width as the pipeline panel.
+  for (const width of [1440, 768]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const theme of ['light', 'dark']) {
+      await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+      const layout = await frame.locator('.portfolio-register').evaluate((register) => {
+        const bounds = register.getBoundingClientRect();
+        const pipeline = document.querySelector('.pipeline-panel').getBoundingClientRect();
+        const select = getComputedStyle(register.querySelector('select'));
+        const option = getComputedStyle(register.querySelector('option'));
+        return { widthDelta: Math.abs(bounds.width - pipeline.width), leftDelta: Math.abs(bounds.left - pipeline.left), selectColor: select.color, selectBackground: select.backgroundColor, optionColor: option.color, optionBackground: option.backgroundColor };
+      });
+      if (layout.widthDelta > 2 || layout.leftDelta > 2 || layout.selectColor === layout.selectBackground || layout.optionColor === layout.optionBackground || layout.optionBackground === 'rgba(0, 0, 0, 0)') errors.push(`Portfolio layout/theme failure at ${width}px (${theme}): ${JSON.stringify(layout)}`);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await frame.getByRole('button', { name: /Pipeline board/ }).click();
   const beforeDelete = await frame.locator('.project-card').count();
   await frame.locator('.project-card .project-menu').first().click();

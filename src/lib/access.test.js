@@ -11,7 +11,7 @@ describe('role and task authorization', () => {
   it('defaults unknown identities to standard users and recognizes claims identities', () => {
     expect(isManager(user)).toBe(false);
     expect(isManager(user, [{ email: user.email.toUpperCase(), role: 'Manager' }])).toBe(true);
-    expect(isManager({ isSiteAdmin: true })).toBe(true);
+    expect(isManager({ isSiteAdmin: true })).toBe(false);
     const scoped = visibleData(data, user);
     expect(scoped.projects.map((row) => row.id)).toEqual(['p1']);
     expect(scoped.tasks.map((row) => row.id)).toEqual(['t1']);
@@ -54,4 +54,21 @@ describe('role and task authorization', () => {
     await store.saveUser({ id: 'u1', title: 'Engineer', email: user.email, role: 'User' });
     expect((await createRepository().store.load()).users[0].title).toBe('Engineer');
   });
+  it('registers only the current identity, preserves roles, and supports disabling testing access', async () => {
+    localStorage.clear(); window.MOD_TRACKER_CONFIG = { forceLocal: true };
+    const raw = createRepository().store;
+    const store = authorizedStore(raw);
+    await store.registerCurrentUser();
+    await store.registerCurrentUser();
+    expect((await store.load()).users).toHaveLength(1);
+    expect((await store.load()).users[0].role).toBe('User');
+    await expect(store.activateTestingManager('wrong')).rejects.toThrow('incorrect');
+    await expect(authorizedStore(raw, { testingManagerPassword: false }).activateTestingManager('Modernization-Test!2026')).rejects.toThrow('disabled');
+    await store.activateTestingManager('Modernization-Test!2026');
+    await store.registerCurrentUser();
+    const loaded = await createRepository().store.load();
+    expect(loaded.users).toHaveLength(1);
+    expect(loaded.users[0]).toMatchObject({ role: 'Manager', loginName: 'local' });
+  });
+
 });

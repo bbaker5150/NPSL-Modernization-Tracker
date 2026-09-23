@@ -436,3 +436,22 @@ input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-o
 .attention-task p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .directory-form { display: grid; gap: 14px; }
 .directory-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+
+/* Portfolio filters share the same full-width panel as the register. */
+.top-actions { margin-left: auto; }
+.portfolio-register { width: 100%; min-width: 0; overflow: hidden; }
+.portfolio-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 20px; }
+.portfolio-heading h2 { margin: 5px 0; }
+.portfolio-heading p, .pipeline-hint { color: var(--muted); font-size: 11px; }
+.pipeline-hint { margin: 0 0 14px; }
+.portfolio-filters { display: flex; align-items: center; gap: 10px; flex: 1 1 400px; justify-content: flex-end; }
+.portfolio-filters .search-box { flex: 1 1 220px; max-width: 390px; min-width: 0; }
+.portfolio-register .table-panel { border-radius: 0; }
+.portfolio-no-results { padding: 20px; color: var(--muted); }
+.select-wrap select, .select-wrap select option { background-color: var(--surface); color: var(--ink); }
+@media (max-width: 600px) {
+  .portfolio-heading { padding: 16px; }
+  .portfolio-filters { flex-basis: 100%; flex-wrap: wrap; }
+  .portfolio-filters .search-box { max-width: none; flex-basis: 100%; }
+  .portfolio-filters .select-wrap { flex: 1; }
+}
