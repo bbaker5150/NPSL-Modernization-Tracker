@@ -196,6 +196,7 @@ export class SharePointError extends Error {
 export async function spGet(webUrl, path, fetchImpl = fetch) {
   const response = await fetchImpl(`${webUrl}${path}`, {
     method: 'GET',
+    cache: 'no-store',
     credentials: 'include',
     headers: { Accept: JSON_ACCEPT },
   });
@@ -232,6 +233,7 @@ export async function spPost(
 export async function spGetText(webUrl, path, fetchImpl = fetch) {
   const response = await fetchImpl(`${webUrl}${path}`, {
     method: 'GET',
+    cache: 'no-store',
     credentials: 'include',
     headers: { Accept: '*/*' },
   });
