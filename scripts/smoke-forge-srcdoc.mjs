@@ -55,6 +55,29 @@ try {
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
   await frame.locator('.project-drawer').waitFor();
+  // Removing the task-code cell must not leave titles in its old 48px track.
+  // Exercise realistic long titles in the packaged iframe, at multiple sizes.
+  const upcomingTitle = frame.locator('.upcoming-list > button strong').first();
+  const originalTitle = await upcomingTitle.textContent();
+  await upcomingTitle.evaluate((element) => { element.textContent = 'Develop Capability Development Document (CDD/CSS) and incorporate comments from the technical review team'; });
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const theme of ['light', 'dark']) {
+      await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+      const layout = await frame.locator('.upcoming-list > button').first().evaluate((row) => {
+        const title = row.querySelector('div').getBoundingClientRect();
+        const badge = row.querySelector('.badge').getBoundingClientRect();
+        const bounds = row.getBoundingClientRect();
+        return { titleWidth: title.width, badgeWidth: badge.width, rowWidth: bounds.width,
+          overlap: title.right > badge.left, overflow: row.scrollWidth > row.clientWidth + 1 || badge.right > bounds.right + 1 };
+      });
+      if (layout.titleWidth < layout.rowWidth * 0.55 || layout.badgeWidth > layout.rowWidth * 0.4 || layout.overlap || layout.overflow) {
+        errors.push(`Upcoming work layout failed at ${width}px in ${theme}: ${JSON.stringify(layout)}`);
+      }
+    }
+  }
+  await upcomingTitle.evaluate((element, value) => { element.textContent = value; }, originalTitle);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.locator('.phase-task').first().waitFor();
   const quickComplete = frame.locator('.task-check:not(.checked)').first();
@@ -92,6 +115,6 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log('Forge srcdoc smoke test passed: clean data booted, glossary writes worked, WBS edits worked, Not Required cleared its due date, and deletion completed without browser prompts.');
+console.log('Forge srcdoc smoke test passed: clean data booted, glossary writes worked, drawer task layouts passed desktop/tablet/mobile checks in both themes, task edits worked, Not Required justification saved, and deletion completed without browser prompts.');
 await browser.close();
 server.close();

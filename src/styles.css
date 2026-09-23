@@ -294,9 +294,10 @@ p { color: var(--muted); line-height: 1.65; }
 .data-warning { display: flex; gap: 12px; color: var(--amber); background: var(--amber-soft); border-color: color-mix(in srgb, var(--amber) 22%, var(--line)); }
 .data-warning p { color: color-mix(in srgb, var(--amber) 58%, var(--ink)); }
 .upcoming-list { display: grid; }
-.upcoming-list > button { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+.upcoming-list > button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
 .upcoming-list > button:first-child { border-top: 0; }
-.upcoming-list > button > span:first-child { color: var(--blue); font-size: 9px; font-weight: 700; }
+.upcoming-list > button > div { min-width: 0; overflow-wrap: anywhere; }
+.upcoming-list > button > .badge { justify-self: end; }
 .upcoming-list strong, .upcoming-list small { display: block; }
 .upcoming-list strong { font-size: 10px; }
 .upcoming-list small { margin-top: 3px; color: var(--muted); font-size: 8px; }
