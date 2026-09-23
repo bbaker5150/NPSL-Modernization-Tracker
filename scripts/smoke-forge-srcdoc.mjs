@@ -38,8 +38,17 @@ try {
   await frame.getByRole('heading', { name: 'My work', exact: true }).waitFor({ timeout: 20_000 });
   if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
   await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
-  await frame.getByLabel('Testing password').fill('Modernization-Test!2026');
+  await frame.getByLabel('Testing password').fill('incorrect-password');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
+  await frame.getByRole('alert').filter({ hasText: 'Testing password is incorrect' }).waitFor();
+  if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Incorrect password granted manager access');
+  await frame.getByLabel('Testing password').fill('admin123');
+  await frame.getByRole('button', { name: 'Enable manager access' }).click();
+  await frame.getByRole('button', { name: /New project/ }).waitFor();
+  // Reload the packaged application to verify persisted role, not just UI state.
+  await page.reload();
+  await page.locator('#app').evaluate((element, html) => { element.srcdoc = html; }, artifact);
+  await frame.getByRole('button', { name: /New project/ }).waitFor();
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();

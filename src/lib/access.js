@@ -1,6 +1,6 @@
 import { isOwnedByUser, userIdentityKey } from './repository';
 
-export const DEFAULT_TEST_MANAGER_PASSWORD = 'Modernization-Test!2026';
+export const DEFAULT_TEST_MANAGER_PASSWORD = 'admin123';
 
 export function isManager(user, users = []) {
   return users.some((entry) => entry.role === 'Manager' && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));

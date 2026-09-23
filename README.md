@@ -23,7 +23,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 
 ## Testing manager access
 
-New users land on **My work** and can also open **Acronym glossary** and **Users and managers**. Sign-ins automatically register the SharePoint name/email in the shared directory. On **Users and managers**, enter `Modernization-Test!2026` under **Testing manager access** to promote the current signed-in identity; no separate username is needed. Existing saved manager roles remain in place.
+New users land on **My work** and can also open **Acronym glossary** and **Users and managers**. Sign-ins automatically register the SharePoint name/email in the shared directory. On **Users and managers**, enter `admin123` under **Testing manager access** to promote the current signed-in identity; no separate username is needed. Existing saved manager roles remain in place.
 
 This is a testing-only client-side convenience, not secure authentication. Set `window.MOD_TRACKER_CONFIG.testingManagerPassword` to a different test password, or `false` to disable promotion. Disabling the flow does not demote previously promoted users; a manager must change those roles separately.
 
@@ -73,7 +73,7 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 | --- | --- | --- |
 | `listPrefix` | `Modernization` | Prefix for the six SharePoint List titles. |
 | `webUrl` | Auto-detected | Target SharePoint web URL. |
-| `testingManagerPassword` | `Modernization-Test!2026` | Testing-only self-promotion password; use `false` to disable. |
+| `testingManagerPassword` | `admin123` | Testing-only self-promotion password; use `false` to disable. |
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
 | `hideLists` | `true` | Hide the six backing lists from the normal Site Contents view without affecting API access. |
