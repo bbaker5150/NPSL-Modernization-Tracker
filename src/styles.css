@@ -506,3 +506,11 @@ button.brand { width: 100%; }
 
 .marker-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .marker-scroll::-webkit-scrollbar { display: none; }
+/* Stage labels sit above a neutral track; circles show project counts. */
+.phase-node { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 14px 10px; text-align: center; }
+.phase-node .phase-label { min-height: 32px; display: flex; align-items: center; justify-content: center; width: 100%; font-size: 12px; font-weight: 650; }
+.phase-line { display: block; width: 100%; height: 3px; border-radius: 2px; background: var(--line-strong); }
+.phase-count { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--ink); font-size: 14px; font-weight: 700; }
+.phase-node.selected .phase-line { background: var(--blue); }
+.phase-node.selected .phase-count { background: var(--blue); color: white; }
+.phase-node::before, .phase-node::after { display: none; }

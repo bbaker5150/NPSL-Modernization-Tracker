@@ -93,10 +93,12 @@ Needs attention shows only unfinished projects with outstanding tasks. Complete,
 
 ### Status-focused review and progress views
 
-- `In Progress – At Program Office` identifies work awaiting action outside NPSL. Any project with a task in this status displays **Blocked** health until no such tasks remain; its stored health is retained and resumes afterward.
+- `In Progress – At Program Office` identifies work awaiting action outside NPSL. It does not override project health; managers set health independently. Project status is no longer exposed in the editor or drawer, and legacy status fields are retained only for storage compatibility.
 - Needs attention groups outstanding tasks by status in independently collapsible sections. Resolved tasks remain excluded.
 - The project progress chevron switches both the calculation and the markers between phases and tasks. Task mode labels the next outstanding task and shows one numbered marker per existing task; only Complete tasks receive a completed marker. Owners and managers save this preference; other assigned users can switch their own current view.
 - The Portfolio projects Progress header has a separate view selector that compares every row using the same phase or task calculation without rewriting project preferences.
 - Managers edit or delete a project through the vertical settings menu beside the drawer close button. Task creation uses the plus icon in each phase heading.
 
 The brand returns to Portfolio home, and Active projects opens the pipeline board. Standard users continue to see only repository-authorized projects and tasks in these views. Needs attention uses horizontal, collapsible status columns with matching status pills. Task markers are distributed across a connected rail; long task lists scroll horizontally. Project menus dismiss on outside interaction or Escape. Managers can promote a directory entry with Make manager; the form uses name/email/role and retains SharePoint login identifiers internally.
+
+Excel exports follow the current view and portfolio filters, preserve access scope, and include a compact Projects register, grouped Needs Attention, supporting detail sheets, and summary navigation links. SharePoint display names are shortened for reading without changing stored account identities. The pipeline selector centers each phase name above a neutral track and shows its project count in a circle below.
