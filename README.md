@@ -4,7 +4,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 
 ## What the app provides
 
-- Portfolio dashboard, five-phase pipeline, Kanban board, and searchable project register
+- Portfolio dashboard, four-phase pipeline, Kanban board, and searchable project register
 - Engineer-focused **My work** queues tied to the signed-in SharePoint login identity
 - Project pipeline tasks, updates, risks, ownership, health, and milestones
 - Manager portfolio access and ownership-scoped standard-user views
@@ -81,3 +81,12 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. Newly created backing lists are hidden from the normal Site Contents view in their initial create request, so startup does not issue follow-up MERGE operations. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. The saved Users directory determines application roles; Every new identity, including site administrators, defaults to standard-user app access. The testing password flow can grant the signed-in user a persisted Manager role. SharePoint permissions remain the server-side access boundary; see the deployment guide before granting list access.
 
 See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and deployment behavior.
+
+
+## September phase and progress update
+
+Pipeline order is Requirement (MSA), Acquisition (TMRR), Procurement (EMD), Deployment (P&D). Both legacy and DAWIA terms appear together. Existing Development and Production/Procurement tasks map to Procurement (EMD); Operation and Sustainment maps to Deployment (P&D). Records, titles, owners and deadlines are retained; managers can move individual tasks if needed.
+
+Project owners and managers can choose **Progress calculation** in the project drawer. Phase mode (default) counts phases whose existing tasks are all resolved; empty phases are not resolved. Task mode is exactly Complete tasks divided by **all existing tasks**, independent of their phase; Not Required is not counted as Complete. A project with no tasks reports 0%. Owners can add tasks to their own projects early; assignment, due dates, project creation, and changes to existing task definitions remain manager-controlled.
+
+Needs attention shows only unfinished projects with outstanding tasks. Complete, Not Required, and legacy Not Applicable tasks are excluded even when they retain old deferral information.

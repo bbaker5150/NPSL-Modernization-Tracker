@@ -1,3 +1,4 @@
+import { normalizePhaseKey } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 
@@ -12,7 +13,7 @@ export const CONTAINERS = [
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true],
       ['ManagerName', 'Manager', FIELD.TEXT], ['ManagerEmail', 'Manager Email', FIELD.TEXT],
       ['Priority', 'Priority', FIELD.TEXT], ['Health', 'Health', FIELD.TEXT], ['ProjectStatus', 'Status', FIELD.TEXT],
-      ['CurrentStageKey', 'Current Stage', FIELD.TEXT], ['PercentComplete', 'Percent Complete', FIELD.NUMBER],
+      ['CurrentStageKey', 'Current Stage', FIELD.TEXT], ['PercentComplete', 'Percent Complete', FIELD.NUMBER], ['ProgressMode', 'Progress Mode', FIELD.TEXT],
       ['TargetFinish', 'Target Finish', FIELD.DATE], ['NextMilestone', 'Next Milestone', FIELD.TEXT],
       ['NextMilestoneDate', 'Next Milestone Date', FIELD.DATE], ['SourceNotes', 'Source Notes', FIELD.NOTE],
       ['ImportedBaseline', 'Imported Baseline', FIELD.BOOLEAN], ['TagsJson', 'Tags', FIELD.NOTE],
@@ -80,16 +81,7 @@ const sharePointFormDate = (value) => {
   const [year, month, day] = dateOnly(value).split('-').map(Number);
   return year && month && day ? `${month}/${day}/${year}` : '';
 };
-const LEGACY_PHASE_KEYS = {
-  'need-scope': 'requirement',
-  'research-tds': 'development',
-  'requirements-acquisition': 'acquisition',
-  'procurement-support': 'production-procurement',
-  'test-evaluation': 'development',
-  'integration-deployment': 'operation-sustainment',
-  'sustainment-closeout': 'operation-sustainment',
-};
-const phaseKey = (value) => LEGACY_PHASE_KEYS[value] || value || 'requirement';
+const phaseKey = normalizePhaseKey;
 const safeJson = (value, fallback) => {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 };
@@ -98,7 +90,7 @@ const projectFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
   Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', ManagerName: row.managerName,
   ManagerEmail: row.managerEmail || '', Priority: row.priority, Health: row.health, ProjectStatus: row.status,
-  CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, TargetFinish: sharePointDate(row.targetFinish),
+  CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, ProgressMode: row.progressMode || 'phases', TargetFinish: sharePointDate(row.targetFinish),
   NextMilestone: row.nextMilestone, NextMilestoneDate: sharePointDate(row.nextMilestoneDate), SourceNotes: row.sourceNotes,
   ImportedBaseline: !!row.importedBaseline, TagsJson: JSON.stringify(row.tags || []),
 });
@@ -133,7 +125,7 @@ function fromProject(item) {
     measurementArea: item.MeasurementArea || item.Title, description: item.Description || '', ownerName: item.OwnerName || 'Unassigned',
     ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', managerName: item.ManagerName || 'Unassigned', managerEmail: item.ManagerEmail || '',
     priority: item.Priority || 'Medium', health: item.Health || 'Needs Review', status: item.ProjectStatus || 'Planned',
-    currentStageKey: phaseKey(item.CurrentStageKey), percentComplete: Number(item.PercentComplete || 0),
+    currentStageKey: phaseKey(item.CurrentStageKey), percentComplete: Number(item.PercentComplete || 0), progressMode: item.ProgressMode === 'tasks' ? 'tasks' : 'phases',
     targetFinish: dateOnly(item.TargetFinish), nextMilestone: item.NextMilestone || '', nextMilestoneDate: dateOnly(item.NextMilestoneDate),
     sourceNotes: item.SourceNotes || '', importedBaseline: !!item.ImportedBaseline, tags: safeJson(item.TagsJson, []),
   };

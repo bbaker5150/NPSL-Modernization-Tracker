@@ -1,3 +1,4 @@
+import { workflowData, normalizePhaseKey } from '../data/workflow';
 import { isOwnedByUser, userIdentityKey } from './repository';
 
 export const DEFAULT_TEST_MANAGER_PASSWORD = 'admin123';
@@ -56,13 +57,28 @@ export function authorizedStore(raw, config = {}) {
         return raw.saveUser(row);
       };
       if (property === 'load') return async () => { const { data, user } = await context(); return visibleData(data, user); };
+      if (property === 'saveProgressMode') return async (id, mode) => {
+        const { user, data, manager } = await context();
+        const project = data.projects.find((row) => row.id === id);
+        if (!project || (!manager && !isOwnedByUser(project, user))) throw new Error('Only the project owner or a manager can change progress calculation.');
+        if (!['phases', 'tasks'].includes(mode)) throw new Error('Select a valid progress calculation.');
+        return raw.saveProject({ ...project, progressMode: mode });
+      };
       if (property === 'saveTask') return async (row) => {
         const { user, data, manager } = await context();
         const existing = data.tasks.find((task) => task.id === row.id);
         let next = { ...row };
         if (!manager) {
-          if (!existing || !canUpdateTask(existing, user, data.projects)) throw new Error('You can only update your assigned tasks.');
-          next = { ...existing, status: row.status, deferredDate: row.deferredDate || '', deferredJustification: row.deferredJustification || '', notRequiredJustification: row.notRequiredJustification || '' };
+          if (!existing) {
+            const project = data.projects.find((project) => project.projectKey === row.projectKey && isOwnedByUser(project, user));
+            if (!project) throw new Error('You can only add tasks to your own project.');
+            const phaseKey = normalizePhaseKey(row.phaseKey);
+            if (!workflowData.phases.some((phase) => phase.key === phaseKey)) throw new Error('Select a valid phase.');
+            next = { id: row.id, projectKey: project.projectKey, title: row.title, phaseKey, order: Math.max(0, ...data.tasks.filter((task) => task.projectKey === project.projectKey).map((task) => task.order || 0)) + 1, status: 'Not Started', ownerName: user.title || user.email, ownerKey: userIdentityKey(user), ownerEmail: user.email || '', dueDate: '', deferredDate: '', deferredJustification: '', notRequiredJustification: '' };
+          } else {
+            if (!canUpdateTask(existing, user, data.projects)) throw new Error('You can only update your assigned tasks.');
+            next = { ...existing, status: row.status, deferredDate: row.deferredDate || '', deferredJustification: row.deferredJustification || '', notRequiredJustification: row.notRequiredJustification || '' };
+          }
         }
         validateTask(next);
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';

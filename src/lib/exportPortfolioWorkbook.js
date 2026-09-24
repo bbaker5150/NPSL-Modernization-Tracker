@@ -216,13 +216,13 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Owner Identity Key', width: 36 }, { header: 'Health', width: 16 }, { header: 'Priority', width: 12 },
       { header: 'Status', width: 16 }, { header: 'Pipeline Stage', width: 28 }, { header: 'Progress', width: 12, numFmt: '0%' },
       { header: 'Target Finish', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Next Milestone', width: 34, wrap: true },
-      { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Tasks', width: 14 }, { header: 'Overdue Tasks', width: 14 },
+      { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Tasks', width: 14 }, { header: 'Overdue Tasks', width: 14 }, { header: 'Progress Calculation', width: 26 },
     ],
     rows: projects.map((project) => [
       project.projectKey || project.id, project.trackingId || '', project.title, project.measurementArea, project.description || '', project.ownerName || 'Unassigned',
       project.ownerEmail || '', project.ownerKey || '', project.health, project.priority, project.status, phaseName(phases, project.currentStageKey),
       Number(project.percentComplete || 0) / 100, toDate(project.targetFinish), project.nextMilestone || '', toDate(project.nextMilestoneDate),
-      Number(project.blockedCount || 0), Number(project.overdueCount || 0),
+      Number(project.blockedCount || 0), Number(project.overdueCount || 0), project.progressMode === 'tasks' ? 'Completed tasks / all tasks' : 'Resolved phases',
     ]),
   });
   addDataSheet(workbook, {

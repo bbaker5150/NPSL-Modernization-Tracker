@@ -1,4 +1,4 @@
-import { workflowData } from '../data/workflow';
+import { workflowData, normalizePhaseKey } from '../data/workflow';
 import { DEFAULT_ACRONYM_VERSION, defaultAcronyms } from '../data/defaultAcronyms';
 import { resolveWebUrl } from './spContext';
 import { SharePointStore } from './spStore';
@@ -29,7 +29,7 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { return clone(this.data); }
+  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey) })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey) })); return data; }
   async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row) { return this.upsert('projects', row, 'project'); }
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }
