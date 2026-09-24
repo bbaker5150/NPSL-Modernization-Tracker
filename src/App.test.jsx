@@ -327,4 +327,38 @@ describe('application shell', () => {
     expect(document.querySelector('.attention-group').open).toBe(false);
   });
 
+  it('navigates from the active card and brand, and dismisses both project menus', async () => {
+    await createRepository().store.saveProject({ id: 'p', projectKey: 'p', title: 'Navigation project', ownerName: 'Engineer' });
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('Active projects')).click());
+    expect(document.querySelector('.kanban-board')).not.toBeNull();
+    await act(async () => document.querySelector('.project-menu').click());
+    expect(document.querySelector('.project-menu-popover')).not.toBeNull();
+    await act(async () => document.querySelector('.page-heading').dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(document.querySelector('.project-menu-popover')).toBeNull();
+    await act(async () => document.querySelector('.project-card').click());
+    await act(async () => document.querySelector('[aria-label="Project settings"]').click());
+    await act(async () => document.querySelector('.drawer-progress').dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(document.querySelector('.project-menu-popover')).toBeNull();
+    await act(async () => document.querySelector('[aria-label="Project settings"]').click());
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('.project-menu-popover')).toBeNull();
+    await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
+    await act(async () => document.querySelector('.brand').click());
+    expect(document.body.textContent).toContain('Modernization at a glance');
+  });
+
+  it('promotes another user while preserving the hidden SharePoint identity', async () => {
+    const raw = createRepository().store;
+    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'i:0#.f|membership|other@example.test', role: 'User' });
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    expect(document.body.textContent).not.toContain('SharePoint login');
+    expect(document.body.textContent).not.toContain('i:0#.f|membership');
+    await act(async () => [...document.querySelectorAll('.directory-row button')].find((row) => row.textContent === 'Make manager').click());
+    const promoted = (await createRepository().store.load()).users.find((row) => row.id === 'other');
+    expect(promoted).toMatchObject({ role: 'Manager', email: 'other@example.test', loginName: 'i:0#.f|membership|other@example.test' });
+    expect(document.querySelector('.directory-row').textContent).toContain('Manager');
+  });
+
 });
