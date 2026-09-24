@@ -71,7 +71,7 @@ try {
   await frame.getByRole('button', { name: 'Add acronym' }).click();
   await frame.getByText('Smoke Test Glossary Entry').waitFor();
 
-  await frame.getByRole('button', { name: /Portfolio/, exact: true }).click();
+  await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('button', { name: /New project/ }).click();
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
@@ -83,6 +83,14 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
+  await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
+  await frame.locator('.drawer-progress').click();
+  if (await frame.locator('.drawer-header-actions .project-menu-popover').count()) errors.push('Settings menu did not dismiss on outside click');
+  const markers = await frame.locator('.task-markers').evaluate((rail) => {
+    const balls = [...rail.children].map((el) => el.getBoundingClientRect());
+    return { spread: balls.at(-1).left - balls[0].left, width: rail.clientWidth, track: getComputedStyle(rail, '::before').display };
+  });
+  if (markers.spread < markers.width * .65 || markers.track === 'none') errors.push('Task markers are not distributed across a connected track');
   // Removing the task-code cell must not leave titles in its old 48px track.
   // Exercise realistic long titles in the packaged iframe, at multiple sizes.
   const upcomingTitle = frame.locator('.upcoming-list > button strong').first();
@@ -92,6 +100,10 @@ try {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+      const tabs = await frame.locator('.drawer-tabs').evaluate((el) => ({ overflowY: getComputedStyle(el).overflowY, scrollbar: getComputedStyle(el).scrollbarWidth }));
+      if (tabs.overflowY !== 'hidden' || tabs.scrollbar !== 'none') errors.push('Drawer tab strip has a visible scrollbar');
+      const headerButtons = await frame.locator('.top-actions > button').evaluateAll((buttons) => buttons.map((el) => getComputedStyle(el).backgroundColor));
+      if (headerButtons.some((color) => color !== 'rgba(0, 0, 0, 0)')) errors.push('Header buttons have a differing background');
       const caption = await frame.locator('.progress-caption').evaluate((row) => {
         const [percent, title] = [row.querySelector('span'), row.querySelector('strong')];
         return { overlap: percent.getBoundingClientRect().right > title.getBoundingClientRect().left, overflow: row.scrollWidth > row.clientWidth + 1, sameFont: getComputedStyle(percent).fontSize === getComputedStyle(title).fontSize };

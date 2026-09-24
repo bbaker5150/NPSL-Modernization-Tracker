@@ -474,22 +474,35 @@ button { border: 0 !important; }
 .progress-choice > svg { transform: rotate(90deg); pointer-events: none; }
 .progress-choice select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .progress-column-heading { display: flex; align-items: center; gap: 3px; }
-.mini-pipeline.task-markers { display: flex; flex-wrap: wrap; gap: 9px; max-height: 88px; overflow-y: auto; padding: 5px; }
-.mini-pipeline.task-markers::before { display: none; }
+.mini-pipeline.task-markers { display: grid; gap: 5px; padding: 5px 0; }
+.mini-pipeline.task-markers::before { display: block; top: 16px; }
 .mini-pipeline.task-markers span { flex: none; }
 .add-task-button { width: 30px; height: 30px; background: var(--surface-2); color: var(--muted); }
 .add-task-button:hover { color: var(--blue); background: var(--blue-soft); }
 .drawer-content, .drawer-tabs, .task-markers { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .project-drawer ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.attention-groups { display: grid; gap: 16px; }
+.attention-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(300px, 1fr); align-items: start; gap: 16px; overflow-x: auto; padding-bottom: 12px; }
 .attention-group > summary { display: flex; align-items: center; gap: 10px; padding: 18px 20px; cursor: pointer; list-style: none; }
 .attention-group > summary::-webkit-details-marker { display: none; }
-.attention-group > summary strong { flex: 1; }
+.attention-group > summary > .badge:first-of-type { white-space: normal; }
+.attention-group > summary > .badge:last-child { margin-left: auto; flex: none; }
 .attention-group[open] > summary > svg { transform: rotate(90deg); }
-.attention-group > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 12px; padding: 0 20px 20px; }
+.attention-group > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 20px 20px; }
 .attention-group .attention-task { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .attention-task h3 { font-size: 13px; overflow-wrap: anywhere; }
 .attention-task .text-button { padding: 0; margin-bottom: 8px; text-align: left; }
 .upcoming-list > button > .badge { max-width: 180px; white-space: normal; text-align: center; }
 .phase-task > .badge { white-space: normal; text-align: center; }
 @media (max-width: 600px) { .upcoming-list > button > .badge { max-width: 110px; } }
+
+/* No vertical scrollbar in the horizontal tab strip. */
+.drawer-tabs { overflow-y: hidden; scrollbar-width: none; }
+.drawer-tabs::-webkit-scrollbar { display: none; }
+.top-actions .button, .top-actions .icon-button, .top-actions .button.primary { background: transparent; box-shadow: none; }
+.top-actions .button:hover, .top-actions .icon-button:hover, .top-actions .button.primary:hover { background: transparent; box-shadow: none; color: var(--blue); }
+button.brand, button.mobile-brand { background: transparent; text-align: left; cursor: pointer; }
+button.brand { width: 100%; }
+.directory-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.marker-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.marker-scroll::-webkit-scrollbar { display: none; }
