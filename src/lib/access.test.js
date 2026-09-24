@@ -27,8 +27,8 @@ describe('role and task authorization', () => {
   it('restricts every standard-user write to permitted task fields', async () => {
     const raw = { currentUser: async () => user, load: async () => structuredClone(data), saveTask: vi.fn(async (row) => row), saveProject: vi.fn(), recycle: vi.fn(), saveUser: vi.fn() };
     const store = authorizedStore(raw);
-    const saved = await store.saveTask({ ...task, title: 'Tampered', dueDate: '2099-01-01', ownerEmail: 'attacker', status: 'In Progress', deferredDate: '2026-10-01', deferredJustification: 'Vendor delay' });
-    expect(saved).toMatchObject({ title: 'Review', dueDate: '2026-09-01', ownerEmail: user.email, status: 'In Progress', deferredDate: '2026-10-01' });
+    const saved = await store.saveTask({ ...task, title: 'Tampered', dueDate: '2099-01-01', ownerEmail: 'attacker', status: 'In Progress – At Program Office', deferredDate: '2026-10-01', deferredJustification: 'Vendor delay' });
+    expect(saved).toMatchObject({ title: 'Review', dueDate: '2026-09-01', ownerEmail: user.email, status: 'In Progress – At Program Office', deferredDate: '2026-10-01' });
     await expect(store.saveTask({ ...data.tasks[1], status: 'Complete' })).rejects.toThrow('assigned');
     await expect(store.saveTask({ ...task, id: 'new', projectKey: 'other' })).rejects.toThrow('own project');
     const added = await store.saveTask({ ...task, id: 'new', spId: 99, ownerKey: 'other', dueDate: '2099-01-01', status: 'Complete' });

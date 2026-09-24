@@ -76,8 +76,13 @@ try {
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
   await frame.locator('.project-drawer').waitFor();
-  await frame.getByLabel('Progress calculation').selectOption('tasks');
+  await frame.getByLabel('Progress calculation', { exact: true }).selectOption('tasks');
   await frame.getByText('0 of 4 tasks completed', { exact: true }).waitFor();
+  if (await frame.locator('.task-markers > span').count() !== 4) errors.push('Task progress must display one marker per task');
+  if (await frame.getByRole('button', { name: 'Claim project', exact: true }).count()) errors.push('Claim project remained visible');
+  await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
+  await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   // Removing the task-code cell must not leave titles in its old 48px track.
   // Exercise realistic long titles in the packaged iframe, at multiple sizes.
   const upcomingTitle = frame.locator('.upcoming-list > button strong').first();
@@ -87,6 +92,11 @@ try {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+      const caption = await frame.locator('.progress-caption').evaluate((row) => {
+        const [percent, title] = [row.querySelector('span'), row.querySelector('strong')];
+        return { overlap: percent.getBoundingClientRect().right > title.getBoundingClientRect().left, overflow: row.scrollWidth > row.clientWidth + 1, sameFont: getComputedStyle(percent).fontSize === getComputedStyle(title).fontSize };
+      });
+      if (caption.overlap || caption.overflow || !caption.sameFont) errors.push(`Progress caption layout failed at ${width}px in ${theme}`);
       const layout = await frame.locator('.upcoming-list > button').first().evaluate((row) => {
         const title = row.querySelector('div').getBoundingClientRect();
         const badge = row.querySelector('.badge').getBoundingClientRect();
@@ -115,7 +125,7 @@ try {
   await frame.getByLabel('Not required justification').fill('Not applicable to this modernization project');
   await frame.getByRole('button', { name: 'Save task' }).click();
   await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).waitFor();
-  await frame.locator('.project-drawer .icon-button').first().click();
+  await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
   // The register should span the same content width as the pipeline panel.
   for (const width of [1440, 768]) {
     await page.setViewportSize({ width, height: 1000 });

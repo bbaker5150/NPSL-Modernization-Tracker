@@ -20,7 +20,7 @@ export function visibleData(data, user) {
 }
 export function validateTask(task) {
   if (!task.title?.trim()) throw new Error('Enter a task name.');
-  if (!['Not Started', 'In Progress', 'Blocked', 'Complete', 'Not Required', 'Not Applicable'].includes(task.status)) throw new Error('Select a valid task status.');
+  if (!['Not Started', 'In Progress', 'In Progress – At Program Office', 'Blocked', 'Complete', 'Not Required', 'Not Applicable'].includes(task.status)) throw new Error('Select a valid task status.');
   for (const date of [task.dueDate, task.deferredDate]) {
     if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) !== date)) throw new Error('Enter a valid date.');
   }
