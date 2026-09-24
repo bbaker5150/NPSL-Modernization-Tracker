@@ -71,7 +71,7 @@ try {
   await frame.getByRole('button', { name: 'Add acronym' }).click();
   await frame.getByText('Smoke Test Glossary Entry').waitFor();
 
-  await frame.getByRole('button', { name: /Portfolio/, exact: true }).click();
+  await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('button', { name: /New project/ }).click();
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
