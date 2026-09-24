@@ -27,15 +27,23 @@ describe('portfolio Excel export', () => {
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);
     expect(reopened.worksheets.map((sheet) => sheet.name)).toEqual([
-      'Portfolio Summary', 'Projects', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
+      'Portfolio Summary', 'Projects', 'Needs Attention', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
     ]);
     expect(reopened.getWorksheet('Projects').rowCount).toBe(projects.length + 1);
     expect(reopened.getWorksheet('Tasks').rowCount).toBe(tasks.length + 1);
     expect(reopened.getWorksheet('Projects').getCell('A1').font.bold).toBe(true);
     expect(reopened.getWorksheet('Projects').getCell('A1').fill.fgColor.argb).toBe('0B2942');
-    expect(reopened.getWorksheet('Projects').getCell('M2').numFmt).toBe('0%');
+    expect(reopened.getWorksheet('Projects').getCell('E2').numFmt).toBe('0%');
     expect(reopened.getWorksheet('Pipeline Reference').rowCount).toBe(workflowData.phases.length + 1);
     expect(reopened.getWorksheet('Acronym Glossary').rowCount).toBe(glossary.length + 1);
     expect(reopened.getWorksheet('Portfolio Summary').getCell('A1').value).toBe('Modernization Project Tracker');
   }, 20_000);
+  it('restricts related sheets to supplied projects and keeps project status out of the report', () => {
+    const workbook = createPortfolioWorkbook({ projects: [{ projectKey: 'visible', title: 'Visible', ownerName: 'Baker, Barry T CIV (USA)', health: 'On Track', currentStageKey: 'requirement' }], tasks: [{ id: 'one', projectKey: 'visible', title: 'Office handoff', status: 'In Progress – At Program Office' }, { id: 'two', projectKey: 'hidden', title: 'Hidden task', status: 'Not Started' }], risks: [], updates: [], phases: workflowData.phases, glossary: [] });
+    expect(workbook.getWorksheet('Projects').getRow(1).values).not.toContain('Status');
+    expect(workbook.getWorksheet('Projects').getCell('B2').value).toBe('Barry T Baker');
+    expect(workbook.getWorksheet('Tasks').rowCount).toBe(2);
+    expect(workbook.getWorksheet('Needs Attention').getCell('A2').value).toBe('In Progress – At Program Office');
+  });
+
 });

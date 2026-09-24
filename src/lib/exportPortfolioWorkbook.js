@@ -1,3 +1,5 @@
+import { displayName } from './displayName';
+import { projectProgress } from '../data/workflow';
 import ExcelJS from 'exceljs';
 
 const NAVY = '0B2942';
@@ -36,6 +38,7 @@ function styleDataSheet(sheet, columns, statusColumns = []) {
   columns.forEach((column, index) => {
     const excelColumn = sheet.getColumn(index + 1);
     excelColumn.width = column.width;
+    excelColumn.hidden = /(?: ID|Identity Key)$/.test(column.header);
     excelColumn.alignment = { vertical: 'top', wrapText: !!column.wrap };
     if (column.numFmt) excelColumn.numFmt = column.numFmt;
   });
@@ -60,7 +63,7 @@ function styleDataSheet(sheet, columns, statusColumns = []) {
       let fill;
       let color;
       if (/complete|not required|not applicable|on track|closed/i.test(value)) { fill = 'E3F5EE'; color = '18795B'; }
-      else if (/blocked|critical|at risk/i.test(value)) { fill = 'FCE8E8'; color = 'B4232B'; }
+      else if (/blocked|critical|at risk|program office/i.test(value)) { fill = 'FCE8E8'; color = 'B4232B'; }
       else if (/review|high|progress|possible|medium/i.test(value)) { fill = 'FFF2D9'; color = '9A5B00'; }
       if (fill) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
@@ -107,7 +110,7 @@ function addSummary(workbook, { projects, tasks, updates, risks, phases, user, s
   const generated = new Date();
   const metadata = [
     ['Export source', sourceLabel],
-    ['Generated for', user?.title || user?.email || 'SharePoint user'],
+    ['Generated for', displayName(user?.title || user?.email || 'SharePoint user')],
     ['Generated on', generated],
   ];
   metadata.forEach(([label, value], index) => {
@@ -125,7 +128,7 @@ function addSummary(workbook, { projects, tasks, updates, risks, phases, user, s
   const blockedTasks = tasks.filter((task) => task.status === 'Blocked').length;
   const avg = projects.length ? Math.round(projects.reduce((sum, project) => sum + Number(project.percentComplete || 0), 0) / projects.length) : 0;
   const cards = [
-    ['Projects', projects.length, 'All portfolio projects'],
+    ['Projects', projects.length, 'Projects in this export scope'],
     ['Portfolio progress', `${avg}%`, `${completedTasks} of ${tasks.length} tasks resolved`],
     ['Open risks', openRisks, `${risks.length} risks captured`],
     ['Blocked tasks', blockedTasks, `${updates.length} status updates`],
@@ -197,9 +200,13 @@ function addSummary(workbook, { projects, tasks, updates, risks, phases, user, s
 }
 
 export function createPortfolioWorkbook({ projects, tasks, updates, risks, phases, glossary = [], user, sourceLabel = 'Live SharePoint portfolio' }) {
+  const keys = new Set(projects.map((project) => project.projectKey));
+  tasks = tasks.filter((task) => keys.has(task.projectKey));
+  risks = risks.filter((risk) => keys.has(risk.projectKey));
+  updates = updates.filter((update) => keys.has(update.projectKey));
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Modernization Project Tracker';
-  workbook.lastModifiedBy = user?.title || user?.email || 'SharePoint user';
+  workbook.lastModifiedBy = displayName(user?.title || user?.email || 'SharePoint user');
   workbook.created = new Date();
   workbook.modified = new Date();
   workbook.subject = sourceLabel;
@@ -209,21 +216,24 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
 
   addSummary(workbook, { projects, tasks, updates, risks, phases, user, sourceLabel });
   addDataSheet(workbook, {
-    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [9, 10, 11],
+    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [4],
     columns: [
-      { header: 'Project ID', width: 22 }, { header: 'Tracking ID', width: 15 }, { header: 'Project', width: 32, wrap: true }, { header: 'Measurement Area', width: 22 },
-      { header: 'Description', width: 42, wrap: true }, { header: 'Owner', width: 22 }, { header: 'Owner Email', width: 30 },
-      { header: 'Owner Identity Key', width: 36 }, { header: 'Health', width: 16 }, { header: 'Priority', width: 12 },
-      { header: 'Status', width: 16 }, { header: 'Pipeline Stage', width: 28 }, { header: 'Progress', width: 12, numFmt: '0%' },
-      { header: 'Target Finish', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Next Milestone', width: 34, wrap: true },
-      { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Tasks', width: 14 }, { header: 'Overdue Tasks', width: 14 }, { header: 'Progress Calculation', width: 26 },
+      { header: 'Project', width: 34, wrap: true }, { header: 'Owner', width: 24 },
+      { header: 'Stage', width: 26 }, { header: 'Health', width: 16 },
+      { header: 'Progress', width: 12, numFmt: '0%' }, { header: 'Progress View', width: 18 },
+      { header: 'Next Milestone', width: 40, wrap: true }, { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' },
+      { header: 'Target Finish', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Owner Email', width: 30 },
+      { header: 'Phase Progress', width: 15, numFmt: '0%' }, { header: 'Task Progress', width: 15, numFmt: '0%' },
     ],
-    rows: projects.map((project) => [
-      project.projectKey || project.id, project.trackingId || '', project.title, project.measurementArea, project.description || '', project.ownerName || 'Unassigned',
-      project.ownerEmail || '', project.ownerKey || '', project.health, project.priority, project.status, phaseName(phases, project.currentStageKey),
-      Number(project.percentComplete || 0) / 100, toDate(project.targetFinish), project.nextMilestone || '', toDate(project.nextMilestoneDate),
-      Number(project.blockedCount || 0), Number(project.overdueCount || 0), project.progressMode === 'tasks' ? 'Completed tasks / all tasks' : 'Resolved phases',
-    ]),
+    rows: projects.map((project) => [project.title, displayName(project.ownerName || 'Unassigned'), phaseName(phases, project.currentStageKey), project.health,
+      Number(project.percentComplete || 0) / 100, project.progressMode === 'tasks' ? 'By task' : 'By phase', project.nextMilestone || '', toDate(project.nextMilestoneDate), toDate(project.targetFinish), project.ownerEmail || '',
+      projectProgress(tasks.filter((task) => task.projectKey === project.projectKey), 'phases').percentComplete / 100,
+      projectProgress(tasks.filter((task) => task.projectKey === project.projectKey), 'tasks').percentComplete / 100]),
+  });
+  addDataSheet(workbook, {
+    name: 'Needs Attention', tableName: 'AttentionTable', statusColumns: [1],
+    columns: [{ header: 'Status', width: 32, wrap: true }, { header: 'Project', width: 32, wrap: true }, { header: 'Task', width: 44, wrap: true }, { header: 'Owner', width: 24 }, { header: 'Due Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Deferred Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Reason', width: 40, wrap: true }],
+    rows: tasks.filter((task) => !isResolvedTask(task)).sort((a, b) => a.status.localeCompare(b.status)).map((task) => [task.status, projects.find((p) => p.projectKey === task.projectKey)?.title || '', task.title, displayName(displayName(task.ownerName || 'Unassigned')), toDate(task.dueDate), toDate(task.deferredDate), task.deferredJustification || '']),
   });
   addDataSheet(workbook, {
     name: 'Tasks', tableName: 'TasksTable', statusColumns: [7],
@@ -238,7 +248,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     ],
     rows: tasks.map((task) => [
       task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.title,
-      phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, task.ownerName || 'Unassigned', task.ownerEmail || '', task.ownerKey || '',
+      phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, displayName(task.ownerName || 'Unassigned'), task.ownerEmail || '', task.ownerKey || '',
       toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '',
     ]),
   });
@@ -249,7 +259,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Severity', width: 13 }, { header: 'Probability', width: 14 }, { header: 'Status', width: 13 }, { header: 'Owner', width: 22 },
       { header: 'Owner Identity Key', width: 36 }, { header: 'Due Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Mitigation', width: 46, wrap: true },
     ],
-    rows: risks.map((risk) => [risk.id, risk.projectKey, projects.find((project) => project.projectKey === risk.projectKey)?.title || '', risk.title, risk.severity, risk.probability, risk.status, risk.ownerName || 'Unassigned', risk.ownerKey || '', toDate(risk.dueDate), risk.mitigation || '']),
+    rows: risks.map((risk) => [risk.id, risk.projectKey, projects.find((project) => project.projectKey === risk.projectKey)?.title || '', risk.title, risk.severity, risk.probability, risk.status, displayName(risk.ownerName || 'Unassigned'), risk.ownerKey || '', toDate(risk.dueDate), risk.mitigation || '']),
   });
   addDataSheet(workbook, {
     name: 'Updates', tableName: 'UpdatesTable',
@@ -258,7 +268,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Type', width: 14 }, { header: 'Author', width: 22 }, { header: 'Author Email', width: 30 }, { header: 'Author Identity Key', width: 36 },
       { header: 'Summary', width: 64, wrap: true },
     ],
-    rows: updates.map((update) => [update.id, update.projectKey, projects.find((project) => project.projectKey === update.projectKey)?.title || '', toDate(update.entryDate), update.type, update.authorName, update.authorEmail, update.authorKey || '', update.summary]),
+    rows: updates.map((update) => [update.id, update.projectKey, projects.find((project) => project.projectKey === update.projectKey)?.title || '', toDate(update.entryDate), update.type, displayName(update.authorName), update.authorEmail, update.authorKey || '', update.summary]),
   });
   addDataSheet(workbook, {
     name: 'Pipeline Reference', tableName: 'PipelineTable',
@@ -270,6 +280,11 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     columns: [{ header: 'Acronym', width: 18 }, { header: 'Full Term', width: 44, wrap: true }, { header: 'Definition', width: 76, wrap: true }],
     rows: glossary.map((entry) => [entry.acronym, entry.term, entry.definition]),
   });
+  const summary = workbook.getWorksheet('Portfolio Summary');
+  let linkRow = summary.rowCount + 3;
+  for (const sheet of workbook.worksheets.filter((sheet) => sheet !== summary)) {
+    summary.getCell(linkRow++, 1).value = { text: `Open ${sheet.name}`, hyperlink: `#'${sheet.name}'!A1` };
+  }
   return workbook;
 }
 

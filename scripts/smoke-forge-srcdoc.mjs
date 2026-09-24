@@ -56,6 +56,13 @@ try {
   if (phaseLabels.join('|') !== 'Requirement (MSA)|Acquisition (TMRR)|Procurement (EMD)|Deployment (P&D)') errors.push(`Incorrect phase sequence: ${phaseLabels}`);
   const tracks = await frame.locator('.pipeline-rail').evaluate((row) => getComputedStyle(row).gridTemplateColumns.split(' ').length);
   if (tracks !== 4) errors.push(`Expected four pipeline columns, got ${tracks}`);
+  const stageGeometry = await frame.locator('.phase-node').evaluateAll((nodes) => nodes.map((node) => {
+    const label = node.querySelector('.phase-label').getBoundingClientRect();
+    const line = node.querySelector('.phase-line').getBoundingClientRect();
+    const count = node.querySelector('.phase-count').getBoundingClientRect();
+    return label.bottom <= line.top && line.bottom <= count.top && Math.abs((label.left + label.right) / 2 - (count.left + count.right) / 2) < 2;
+  }));
+  if (stageGeometry.some((valid) => !valid)) errors.push('Pipeline labels, lines, and count circles are not centered in order');
   if (await frame.locator('.portfolio-register').count()) errors.push('Empty portfolio register remained visible');
   if (await frame.getByText('Add first project').count()) errors.push('Duplicate new project prompt remained visible');
   if (await frame.locator('.topbar .search-box').count()) errors.push('Global search remained visible');

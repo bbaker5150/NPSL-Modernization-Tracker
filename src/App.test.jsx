@@ -301,12 +301,12 @@ describe('application shell', () => {
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).projects[0].progressMode).toBe('tasks');
   });
 
-  it('groups program office work, derives blocked health, and switches task markers and portfolio progress', async () => {
+  it('groups program office work, preserves project health, and switches task markers and portfolio progress', async () => {
     const raw = createRepository().store;
     await raw.saveProject({ id: 'p', projectKey: 'p', title: 'Office handoff', ownerName: 'Engineer', health: 'On Track', status: 'In Progress' });
     for (const [id, status] of [['done', 'Complete'], ['office', 'In Progress – At Program Office'], ['skip', 'Not Required']]) await raw.saveTask({ id, projectKey: 'p', title: `${id} task`, phaseKey: 'requirement', order: id === 'done' ? 1 : 2, status });
     await renderApp();
-    expect(document.querySelector('.project-table-row:not(.table-header)').textContent).toContain('Blocked');
+    expect(document.querySelector('.project-table-row:not(.table-header)').textContent).toContain('On Track');
     await act(async () => changeValue(document.querySelector('[aria-label="Portfolio progress calculation"]'), 'tasks'));
     expect(document.querySelector('.project-table-row:not(.table-header)').textContent).toContain('33%');
     await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
