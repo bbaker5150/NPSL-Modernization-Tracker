@@ -76,7 +76,7 @@ try {
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
   await frame.locator('.project-drawer').waitFor();
-  await frame.getByLabel('Progress calculation').selectOption('tasks');
+  await frame.getByLabel('Progress calculation', { exact: true }).selectOption('tasks');
   await frame.getByText('0 of 4 tasks completed', { exact: true }).waitFor();
   if (await frame.locator('.task-markers > span').count() !== 4) errors.push('Task progress must display one marker per task');
   if (await frame.getByRole('button', { name: 'Claim project', exact: true }).count()) errors.push('Claim project remained visible');
