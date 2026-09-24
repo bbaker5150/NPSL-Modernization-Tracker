@@ -57,7 +57,7 @@ New backing lists are marked `Hidden` in the same request that creates them. Thi
 
 ### Project fields
 
-`RecordId`, `ProjectKey`, `MeasurementArea`, `Description`, `OwnerName`, `OwnerEmail`, `OwnerKey`, `ManagerName`, `ManagerEmail`, `Priority`, `Health`, `ProjectStatus`, `CurrentStageKey`, `PercentComplete`, `TargetFinish`, `NextMilestone`, `NextMilestoneDate`, `SourceNotes`, `ImportedBaseline`, and `TagsJson`.
+`RecordId`, `ProjectKey`, `MeasurementArea`, `Description`, `OwnerName`, `OwnerEmail`, `OwnerKey`, `ManagerName`, `ManagerEmail`, `Priority`, `Health`, `ProjectStatus`, `CurrentStageKey`, `PercentComplete`, `ProgressMode`, `TargetFinish`, `NextMilestone`, `NextMilestoneDate`, `SourceNotes`, `ImportedBaseline`, and `TagsJson`.
 
 ### Task fields
 
@@ -84,3 +84,10 @@ Original due dates remain stored for deferred and Not Required tasks. Deferred d
 - Forge manifest, developer console, and test-recorder runtimes remain installed and hash-verified.
 - The Forge developer and recorder buttons are hidden with the runtime's actual DOM selectors.
 - The finished file has zero external subresource references.
+
+
+### Phase/progress compatibility
+
+The additive `ProgressMode` project field stores `phases` (default) or `tasks`. Owners may update only this project field through the dedicated repository method and may create tasks on their own projects with an initial Not Started status, no deadline, and themselves as owner. Manager-only project/assignment/deadline rules otherwise remain in place. In a tenant using restrictive list ACLs, these owner actions also require appropriate SharePoint write permissions; application code does not elevate permissions.
+
+Legacy phase keys are normalized on load without deleting records: Development and Production/Procurement become Procurement (EMD); Operation and Sustainment becomes Deployment (P&D). Requirement and Acquisition retain their keys. Both browser storage and SharePoint use the same mapping.

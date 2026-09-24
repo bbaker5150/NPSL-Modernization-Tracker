@@ -143,7 +143,7 @@ p { color: var(--muted); line-height: 1.65; }
 .panel-heading h2 { margin: 0; }
 .count-label { color: var(--muted); font-size: 10px; }
 .pipeline-panel { padding-bottom: 18px; }
-.pipeline-rail { position: relative; display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 0; padding: 5px 15px 4px; overflow-x: auto; }
+.pipeline-rail { position: relative; display: grid; grid-template-columns: repeat(4, minmax(145px, 1fr)); gap: 0; padding: 5px 15px 4px; overflow-x: auto; }
 .pipeline-rail::before { content: ''; position: absolute; top: 35px; left: 7%; right: 7%; height: 1px; background: var(--line-strong); }
 .phase-node { position: relative; min-height: 106px; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 0; border-radius: 11px; background: transparent; text-align: left; cursor: pointer; transition: .18s ease; }
 .phase-node:hover, .phase-node.selected { background: var(--surface-2); }
@@ -200,7 +200,7 @@ p { color: var(--muted); line-height: 1.65; }
 .badge-info { color: var(--blue); background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 22%, transparent); }
 
 .board-scroll { overflow-x: auto; padding-bottom: 10px; }
-.kanban-board { min-width: 1402px; display: grid; grid-template-columns: repeat(5, 270px); gap: 13px; align-items: start; }
+.kanban-board { min-width: 1119px; display: grid; grid-template-columns: repeat(4, 270px); gap: 13px; align-items: start; }
 .kanban-column { min-height: 500px; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface-2) 80%, transparent); }
 .kanban-column > header { display: flex; align-items: center; justify-content: space-between; min-height: 58px; padding: 12px 13px; border-bottom: 1px solid var(--line); }
 .kanban-column > header > div { display: flex; align-items: center; gap: 8px; }
@@ -270,7 +270,7 @@ p { color: var(--muted); line-height: 1.65; }
 .drawer-progress { margin-top: 21px; }
 .drawer-progress > div:first-child { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: var(--muted); font-size: 9px; }
 .drawer-progress strong { color: var(--ink); }
-.mini-pipeline { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin-top: 13px; }
+.mini-pipeline { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 13px; }
 .mini-pipeline::before { content: ''; position: absolute; top: 11px; left: 3%; right: 3%; height: 1px; background: var(--line-strong); }
 .mini-pipeline span { position: relative; z-index: 1; width: 22px; height: 22px; display: grid; place-items: center; justify-self: center; border-radius: 50%; color: var(--faint); background: var(--surface); border: 1px solid var(--line-strong); font-size: 8px; font-weight: 800; }
 .mini-pipeline span.done { color: white; background: var(--mint); border-color: var(--mint); }
@@ -414,7 +414,7 @@ input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-o
   .search-box input::placeholder { color: transparent; }
   .kpi-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
   .kpi-card { min-height: 112px; padding: 14px; gap: 10px; }.kpi-card strong { font-size: 23px; }.kpi-card small { display: none; }.kpi-icon { width: 35px; height: 35px; }
-  .pipeline-rail { grid-template-columns: repeat(5, 145px); }
+  .pipeline-rail { grid-template-columns: repeat(4, 145px); }
   .drawer-header { padding: 18px 16px 0; }.drawer-content { padding: 17px 16px 30px; }.drawer-title-row h2 { font-size: 22px; }
   .drawer-tabs { gap: 18px; }.detail-grid { grid-template-columns: 1fr 1fr; }.detail-grid > div { min-height: 88px; }
   .phase-task { grid-template-columns: 19px minmax(0, 1fr) auto; }.phase-task .task-date { display: none; }.phase-task .badge { max-width: 68px; overflow: hidden; text-overflow: ellipsis; }

@@ -52,6 +52,10 @@ try {
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
+  const phaseLabels = await frame.locator('.phase-label').allTextContents();
+  if (phaseLabels.join('|') !== 'Requirement (MSA)|Acquisition (TMRR)|Procurement (EMD)|Deployment (P&D)') errors.push(`Incorrect phase sequence: ${phaseLabels}`);
+  const tracks = await frame.locator('.pipeline-rail').evaluate((row) => getComputedStyle(row).gridTemplateColumns.split(' ').length);
+  if (tracks !== 4) errors.push(`Expected four pipeline columns, got ${tracks}`);
   if (await frame.locator('.portfolio-register').count()) errors.push('Empty portfolio register remained visible');
   if (await frame.getByText('Add first project').count()) errors.push('Duplicate new project prompt remained visible');
   if (await frame.locator('.topbar .search-box').count()) errors.push('Global search remained visible');
@@ -72,6 +76,8 @@ try {
   await frame.locator('.modal .field input').first().fill('Smoke test modernization project');
   await frame.getByRole('button', { name: /Save project/ }).click();
   await frame.locator('.project-drawer').waitFor();
+  await frame.getByLabel('Progress calculation').selectOption('tasks');
+  await frame.getByText('0 of 4 tasks completed', { exact: true }).waitFor();
   // Removing the task-code cell must not leave titles in its old 48px track.
   // Exercise realistic long titles in the packaged iframe, at multiple sizes.
   const upcomingTitle = frame.locator('.upcoming-list > button strong').first();

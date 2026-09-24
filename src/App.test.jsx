@@ -65,7 +65,7 @@ describe('application shell', () => {
     const boardButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Pipeline board'));
     await act(async () => boardButton.click());
     expect(document.body.textContent).toContain('Scan where every project sits');
-    expect(document.querySelectorAll('.kanban-column')).toHaveLength(5);
+    expect(document.querySelectorAll('.kanban-column')).toHaveLength(4);
 
     const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent.includes('Acronym glossary'));
     await act(async () => glossaryButton.click());
@@ -118,7 +118,7 @@ describe('application shell', () => {
     expect(myWork.querySelector('.badge').textContent).toBe('1');
     await act(async () => myWork.click());
     expect(document.body.textContent).toContain('Owned modernization project');
-    expect(document.body.textContent).toContain('5');
+    expect(document.body.textContent).toContain('Work breakdown (4)');
   });
 
   it('lets managers edit tasks and delete projects without sample data', async () => {
@@ -187,10 +187,11 @@ describe('application shell', () => {
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
-    expect(document.querySelectorAll('.attention-project')).toHaveLength(7);
+    expect(document.querySelectorAll('.attention-project')).toHaveLength(1);
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
-    expect(document.body.textContent).toContain('Scope approved');
+    expect(document.body.textContent).not.toContain('Scope approved');
+    expect(document.body.textContent).not.toContain('Omitted task');
   });
 
   it('limits standard users to assigned work and keeps deadline controls read-only', async () => {
@@ -249,7 +250,7 @@ describe('application shell', () => {
 
   it('combines stage multi-selection with local portfolio search and health filters', async () => {
     const raw = createRepository().store;
-    for (const [id, stage, health] of [['Alpha', 'requirement', 'On Track'], ['Beta', 'development', 'At Risk'], ['Gamma', 'acquisition', 'On Track']]) await raw.saveProject({ id, projectKey: id, title: id, ownerName: 'Engineer', currentStageKey: stage, health, status: 'Planned' });
+    for (const [id, stage, health] of [['Alpha', 'requirement', 'On Track'], ['Beta', 'acquisition', 'At Risk'], ['Gamma', 'procurement', 'On Track']]) await raw.saveProject({ id, projectKey: id, title: id, ownerName: 'Engineer', currentStageKey: stage, health, status: 'Planned' });
     await renderApp();
     const rows = () => [...document.querySelectorAll('.project-table-row:not(.table-header)')].map((row) => row.textContent);
     const stages = document.querySelectorAll('.phase-node');
@@ -279,6 +280,25 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('New project');
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('User');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
+  });
+
+  it('lets a standard project owner add tasks and persist task-based progress', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'owner-project', projectKey: 'owner-project', title: 'Owner project', ownerKey: 'local', ownerName: 'Local Engineer', status: 'In Progress' });
+    await raw.saveTask({ id: 'done', projectKey: 'owner-project', title: 'Done task', phaseKey: 'requirement', status: 'Complete' });
+    await renderApp(false);
+    await act(async () => document.querySelector('.project-card').click());
+    await act(async () => changeValue(document.querySelector('[aria-label="Progress calculation"]'), 'tasks'));
+    expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 1 tasks completed');
+    await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((row) => row.textContent.includes('Work breakdown')).click());
+    await act(async () => [...document.querySelectorAll('.task-stage button')].find((row) => row.textContent === 'Add task').click());
+    expect(document.querySelector('[aria-label="Task name"]').disabled).toBe(false);
+    expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
+    await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Owner entered task'));
+    await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Save task').click());
+    expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 2 tasks completed');
+    expect(document.querySelector('.drawer-progress').textContent).toContain('50%');
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).projects[0].progressMode).toBe('tasks');
   });
 
 });
