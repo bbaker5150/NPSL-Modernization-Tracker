@@ -187,7 +187,7 @@ describe('application shell', () => {
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
-    expect(document.querySelectorAll('.attention-project')).toHaveLength(1);
+    expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
     expect(document.body.textContent).not.toContain('Scope approved');
@@ -219,7 +219,7 @@ describe('application shell', () => {
     await renderApp();
     await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
     await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((button) => button.textContent.includes('Work breakdown')).click());
-    await act(async () => [...document.querySelectorAll('.task-stage button')].find((button) => button.textContent === 'Add task').click());
+    await act(async () => [...document.querySelectorAll('.task-stage button')].find((button) => button.getAttribute('aria-label')?.startsWith('Add task to ')).click());
     await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Custom task'));
     await act(async () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Save task').click());
     expect(document.querySelectorAll('.phase-task')).toHaveLength(2);
@@ -291,7 +291,7 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('[aria-label="Progress calculation"]'), 'tasks'));
     expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 1 tasks completed');
     await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((row) => row.textContent.includes('Work breakdown')).click());
-    await act(async () => [...document.querySelectorAll('.task-stage button')].find((row) => row.textContent === 'Add task').click());
+    await act(async () => [...document.querySelectorAll('.task-stage button')].find((row) => row.getAttribute('aria-label')?.startsWith('Add task to ')).click());
     expect(document.querySelector('[aria-label="Task name"]').disabled).toBe(false);
     expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
     await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Owner entered task'));
@@ -299,6 +299,32 @@ describe('application shell', () => {
     expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 2 tasks completed');
     expect(document.querySelector('.drawer-progress').textContent).toContain('50%');
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).projects[0].progressMode).toBe('tasks');
+  });
+
+  it('groups program office work, derives blocked health, and switches task markers and portfolio progress', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'p', projectKey: 'p', title: 'Office handoff', ownerName: 'Engineer', health: 'On Track', status: 'In Progress' });
+    for (const [id, status] of [['done', 'Complete'], ['office', 'In Progress – At Program Office'], ['skip', 'Not Required']]) await raw.saveTask({ id, projectKey: 'p', title: `${id} task`, phaseKey: 'requirement', order: id === 'done' ? 1 : 2, status });
+    await renderApp();
+    expect(document.querySelector('.project-table-row:not(.table-header)').textContent).toContain('Blocked');
+    await act(async () => changeValue(document.querySelector('[aria-label="Portfolio progress calculation"]'), 'tasks'));
+    expect(document.querySelector('.project-table-row:not(.table-header)').textContent).toContain('33%');
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    await act(async () => changeValue(document.querySelector('[aria-label="Progress calculation"]'), 'tasks'));
+    expect(document.querySelectorAll('.task-markers > span')).toHaveLength(3);
+    expect(document.querySelectorAll('.task-markers .done')).toHaveLength(1);
+    expect(document.querySelector('.progress-caption strong').textContent).toBe('office task');
+    expect(document.querySelector('.task-markers [aria-current="step"]').title).toContain('office task');
+    expect(document.body.textContent).not.toContain('Claim project');
+    await act(async () => document.querySelector('[aria-label="Project settings"]').click());
+    expect(document.querySelector('.drawer-header-actions .project-menu-popover').textContent).toBe('Edit projectDelete project');
+    await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
+    expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
+    expect(document.querySelector('.attention-group summary').textContent).toContain('In Progress – At Program Office');
+    expect(document.querySelector('.attention-group').textContent).not.toContain('skip task');
+    await act(async () => document.querySelector('.attention-group summary').click());
+    expect(document.querySelector('.attention-group').open).toBe(false);
   });
 
 });

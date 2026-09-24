@@ -90,3 +90,11 @@ Pipeline order is Requirement (MSA), Acquisition (TMRR), Procurement (EMD), Depl
 Project owners and managers can choose **Progress calculation** in the project drawer. Phase mode (default) counts phases whose existing tasks are all resolved; empty phases are not resolved. Task mode is exactly Complete tasks divided by **all existing tasks**, independent of their phase; Not Required is not counted as Complete. A project with no tasks reports 0%. Owners can add tasks to their own projects early; assignment, due dates, project creation, and changes to existing task definitions remain manager-controlled.
 
 Needs attention shows only unfinished projects with outstanding tasks. Complete, Not Required, and legacy Not Applicable tasks are excluded even when they retain old deferral information.
+
+### Status-focused review and progress views
+
+- `In Progress – At Program Office` identifies work awaiting action outside NPSL. Any project with a task in this status displays **Blocked** health until no such tasks remain; its stored health is retained and resumes afterward.
+- Needs attention groups outstanding tasks by status in independently collapsible sections. Resolved tasks remain excluded.
+- The project progress chevron switches both the calculation and the markers between phases and tasks. Task mode labels the next outstanding task and shows one numbered marker per existing task; only Complete tasks receive a completed marker. Owners and managers save this preference; other assigned users can switch their own current view.
+- The Portfolio projects Progress header has a separate view selector that compares every row using the same phase or task calculation without rewriting project preferences.
+- Managers edit or delete a project through the vertical settings menu beside the drawer close button. Task creation uses the plus icon in each phase heading.
