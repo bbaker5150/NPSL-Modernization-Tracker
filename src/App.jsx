@@ -77,7 +77,7 @@ function EmptyState({ title, message, action }) {
 }
 
 function Skeleton() {
-  return <div className="loading-shell"><div className="loading-mark">M</div><div><strong>Modernization Tracker</strong><span>Loading portfolio data…</span></div></div>;
+  return <div className="loading-shell"><img className="brand-logo loading-logo" src={navairSeal} alt="NAVAIR" /><div><strong>Modernization Tracker</strong><span>Loading portfolio data…</span></div></div>;
 }
 
 function KpiCard({ icon, label, value, detail, tone = 'blue', onClick }) {
