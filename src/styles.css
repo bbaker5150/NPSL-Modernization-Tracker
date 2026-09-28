@@ -521,3 +521,12 @@ button.brand { width: 100%; }
 .attention-project-group > summary strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
 .attention-project-group[open] > summary > svg { transform: rotate(90deg); }
 .attention-project-group > div { display: grid; gap: 10px; padding: 0 10px 10px; }
+
+.attention-project-group { cursor: pointer; }
+.attention-project-group:hover { border-color: var(--line-strong); }
+.attention-project-group > header { display: flex; align-items: stretch; padding: 5px; }
+.attention-collapse { display: grid; place-items: center; width: 34px; flex: none; background: transparent; color: var(--muted); cursor: pointer; border-radius: 7px; }
+.attention-collapse:hover { background: var(--surface-2); }
+.attention-collapse[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.attention-project-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 9px 7px; background: transparent; text-align: left; cursor: pointer; }
+.attention-project-open strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
