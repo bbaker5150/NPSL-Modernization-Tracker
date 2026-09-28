@@ -122,12 +122,13 @@ describe('tasking schema round trip', () => {
 
 describe('SharePoint user role verification', () => {
   const row = { spId: 7, id: 'u7', title: 'Engineer', loginName: 'i:0#.f|membership|engineer@example.test', email: 'engineer@example.test', role: 'Manager' };
-  it('reads the saved SharePoint role back before confirming a manager', async () => {
+  it.each(['Manager', 'SME', 'User'])('reads the saved SharePoint role back before confirming %s', async (role) => {
+    const requested = { ...row, role };
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ value: [{ FieldName: 'AppRole', HasException: false, ErrorMessage: null }] }));
-    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, Title: row.title, LoginKey: row.loginName, Email: row.email, AppRole: 'Manager' }));
-    expect(await store.saveUser(row)).toEqual(row);
-    expect(store.post.mock.calls[0][1].body.formValues).toContainEqual({ FieldName: 'AppRole', FieldValue: 'Manager' });
+    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, Title: row.title, LoginKey: row.loginName, Email: row.email, AppRole: role }));
+    expect(await store.saveUser(requested)).toEqual(requested);
+    expect(store.post.mock.calls[0][1].body.formValues).toContainEqual({ FieldName: 'AppRole', FieldValue: role });
     expect(store.get.mock.calls[0][0]).toContain('/items(7)?$select=');
   });
   it('rejects a successful HTTP response when the stored role is still User', async () => {
