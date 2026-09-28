@@ -103,3 +103,9 @@ Run the additive schema update with an account allowed to create fields before r
 The app does not overwrite or delete attachments. If an upload fails, successfully uploaded files remain attached; refresh the list before retrying uncertain outcomes. Files over the app's 20 MB limit or duplicate filenames must be renamed/reduced or managed separately. Local preview attachments stay in the browser's IndexedDB and are not uploaded to SharePoint.
 
 REST reference: https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/working-with-folders-and-files-with-rest#working-with-files-attached-to-list-items-by-using-rest
+
+
+### Prompt-free removal and documents
+On first load after this update, the app's existing automatic provisioning adds `Archived` to tracker lists and `ArchivedDocuments` to Tasks (the first loader needs permission to add list columns). Existing records and attachments remain intact. Delete now archives records or hides document attachments through normal metadata updates, following Uncertalytics; it does not issue DELETE, MERGE, recycle, or bulk-delete requests. Archived content remains in SharePoint for site-owner recovery. Deleted document names remain reserved; rename a replacement upload. Downloads fetch the file bytes and save a local blob instead of navigating to SharePoint's file-opening page. Browser download policy and tenant security controls still apply.
+
+Directory Save uses a direct click handler so it works when the embedded host blocks native form submission. SharePoint write errors remain visible in the form and roles are read back before success is shown.

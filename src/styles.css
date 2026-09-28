@@ -551,3 +551,6 @@ button.brand { width: 100%; }
 .document-upload:disabled::file-selector-button { color: var(--muted); cursor: not-allowed; }
 .document-actions a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 @media (max-width: 600px) { .document-list li { align-items: flex-start; flex-direction: column; } }
+
+.document-file-name { text-align: left; overflow-wrap: anywhere; color: var(--blue); }
+.document-actions .icon-button:disabled { opacity: .5; cursor: wait; }

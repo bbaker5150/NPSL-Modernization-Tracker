@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import React, { useEffect, useState } from 'react';
 
 export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete = false, refreshKey }) {
@@ -36,8 +37,19 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     setMessage(`${uploaded} of ${selected.length} documents uploaded.`);
     setError(failures.join('\n')); setBusy(false); setRefresh((value) => value + 1);
   }
+  async function download(file) {
+    setBusy(true); setError('');
+    try {
+      const blob = await store.downloadTaskAttachment(file.taskId || taskId, file.name);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = file.name;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
   async function remove(file) {
-    if (!window.confirm(`Delete “${file.name}”? This cannot be undone.`)) return;
     setBusy(true); setError(''); setMessage('');
     try { await store.deleteTaskAttachment(file.taskId || taskId, file.name); setMessage(`${file.name} deleted.`); }
     catch (err) { setError(err.message); }
@@ -46,7 +58,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
   return <section className="task-documents"><h3>Documents</h3>
     {loading && <p role="status">Loading documents…</p>}
     {!loading && !files.length && <p>No documents attached.</p>}
-    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><a href={file.url} target="_blank" rel="noopener noreferrer">{file.name}</a>{file.taskTitle && <small>{file.taskTitle}</small>}</div><div className="document-actions"><a className="button secondary" href={file.url} download={file.name}>Download</a>{canDelete && <button type="button" className="button secondary" disabled={busy || loading} onClick={() => remove(file)} aria-label={`Delete ${file.name}`}>Delete</button>}</div></li>)}</ul>
+    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div><div className="document-actions"><button type="button" className="icon-button" disabled={busy || loading} onClick={() => download(file)} title="Download document" aria-label={`Download ${file.name}`}><Icon name="download" /></button>{canDelete && <button type="button" className="icon-button" disabled={busy || loading} onClick={() => remove(file)} title="Delete document" aria-label={`Delete ${file.name}`}><Icon name="trash" /></button>}</div></li>)}</ul>
     {!readOnly && <label className="field"><span>{busy ? 'Uploading documents…' : 'Attach documents (up to 20 MB each)'}</span><input aria-label="Attach documents" className="document-upload" type="file" multiple disabled={busy || loading} onChange={upload} /></label>}
     {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
     {!busy && <button type="button" className="text-button" onClick={() => { setError(''); setRefresh((value) => value + 1); }}>Refresh documents</button>}

@@ -23,7 +23,7 @@ export const CONTAINERS = [
   {
     key: 'tasks', suffix: 'Tasks', description: 'Pipeline tasks for every modernization project.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
-      ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
+      ['ArchivedDocuments', 'Archived Documents', FIELD.NOTE], ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
       ['EstimatedHours', 'Est. Hours', FIELD.NUMBER], ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
       ['AssignedDate', 'Assigned / Creation Date', FIELD.DATE], ['StartDate', 'Start Date', FIELD.DATE], ['FinishDate', 'Finish Date', FIELD.DATE], ['DueDate', 'Due Date', FIELD.DATE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['Notes', 'Notes', FIELD.NOTE],
@@ -58,7 +58,7 @@ export const CONTAINERS = [
   ] },
 ].map((container) => ({
   ...container,
-  fields: container.fields.map(([name, title, type, indexed = false]) => ({ name, title, type, indexed, inView: type !== FIELD.NOTE })),
+  fields: [...container.fields, ['Archived', 'Archived', FIELD.BOOLEAN]].map(([name, title, type, indexed = false]) => ({ name, title, type, indexed, inView: type !== FIELD.NOTE })),
 }));
 
 const escapeXml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -231,7 +231,7 @@ export class SharePointStore {
         path = `${parsed.pathname}${parsed.search}`;
       } else path = next;
     }
-    return rows.map(converter);
+    return rows.filter((row) => !row.Archived).map(converter);
   }
 
   async load() {
@@ -270,29 +270,48 @@ export class SharePointStore {
     if (failed) throw new SharePointError(`SharePoint rejected ${failed.FieldName || 'a field'}: ${failed.ErrorMessage || 'validation failed'}`, 400, failed);
   }
 
-  async recycle(key, spId) { await this.post(`${apiFor(this.prefix, key)}/items(${spId})/recycle()`, {}); }
+  async recycle(key, spId) {
+    // Like Uncertalytics, remove from the app through a normal metadata update.
+    await this.update(key, spId, { Archived: true });
+  }
 
   async listTaskAttachments(task) {
     if (!Number.isInteger(task.spId) || task.spId <= 0) throw new Error('Save the task before attaching documents.');
     const body = await this.get(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})/AttachmentFiles?$select=FileName,ServerRelativeUrl`);
-    return (body.value || body.d?.results || []).map((file) => {
+    const archived = await this.archivedDocuments(task);
+    return (body.value || body.d?.results || []).filter((file) => !archived.includes(file.FileName)).map((file) => {
       const url = new URL(file.ServerRelativeUrl, this.webUrl);
       if (url.origin !== new URL(this.webUrl).origin) throw new Error('SharePoint returned an unexpected attachment address.');
       return { name: file.FileName, url: url.href };
     });
   }
 
-  async deleteTaskAttachment(task, name) {
-    const files = await this.listTaskAttachments(task);
-    const file = files.find((entry) => entry.name === name);
+  async archivedDocuments(task) {
+    const response = await this.get(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})?$select=ArchivedDocuments`);
+    const names = safeJson((response.d || response).ArchivedDocuments, []);
+    if (!Array.isArray(names)) throw new Error('Document archive metadata is invalid.');
+    return names;
+  }
+
+  async downloadTaskAttachment(task, name) {
+    const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!file) throw new Error('This document no longer exists. Refresh the documents list.');
-    await this.post(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})/AttachmentFiles/getByFileName('${escapeOData(file.name)}')`, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
-    if ((await this.listTaskAttachments(task)).some((entry) => entry.name === name)) throw new Error('SharePoint did not confirm the document deletion. Refresh and try again.');
+    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
+    return response.blob();
+  }
+
+  async deleteTaskAttachment(task, name) {
+    if (!(await this.listTaskAttachments(task)).some((entry) => entry.name === name)) throw new Error('This document no longer exists. Refresh the documents list.');
+    const archived = await this.archivedDocuments(task);
+    await this.update('tasks', task.spId, { ArchivedDocuments: JSON.stringify([...new Set([...archived, name])]) });
+    if (!(await this.archivedDocuments(task)).includes(name)) throw new Error('SharePoint did not confirm the document deletion. Refresh and try again.');
   }
 
   async addTaskAttachment(task, file) {
     validateAttachment(file);
     const files = await this.listTaskAttachments(task);
+    if ((await this.archivedDocuments(task)).some((name) => name.toLowerCase() === file.name.toLowerCase())) throw new Error('A deleted document uses this name. Rename the file before uploading.');
     if (files.some((entry) => entry.name.toLowerCase() === file.name.toLowerCase())) throw new Error('A document with this name is already attached. Rename the new file before uploading.');
     const settings = await this.get(`${apiFor(this.prefix, 'tasks')}?$select=EnableAttachments`);
     if ((settings.d || settings).EnableAttachments === false) throw new Error('Attachments are disabled on the tasks list. Ask a site owner to enable list attachments.');

@@ -20,7 +20,7 @@ const harnessOrigin = `http://127.0.0.1:${port}`;
 
 page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
 page.on('pageerror', (error) => errors.push(error.message));
-page.on('dialog', async (dialog) => { if (dialog.type() === 'confirm' && dialog.message().startsWith('Delete “smoke-report.txt”')) await dialog.accept(); else { dialogs.push(`${dialog.type()}: ${dialog.message()}`); await dialog.dismiss(); } });
+page.on('dialog', async (dialog) => { dialogs.push(`${dialog.type()}: ${dialog.message()}`); await dialog.dismiss(); });
 page.on('request', (request) => {
   const url = request.url();
   if (/^https?:/i.test(url) && !url.startsWith(harnessOrigin)) externalRequests.push(url);
@@ -49,6 +49,20 @@ try {
   await page.reload();
   await page.locator('#app').evaluate((element, html) => { element.srcdoc = html; }, artifact);
   await frame.getByRole('button', { name: /New project/ }).waitFor();
+  await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  // Reproduce a host that cancels native submit-button activation.
+  await frame.locator('body').evaluate((body) => body.addEventListener('click', (event) => {
+    if (event.target.closest('.directory-form button')) event.preventDefault();
+  }, true));
+  await frame.getByLabel('Name', { exact: true }).fill('SME Test User');
+  await frame.getByLabel('Email', { exact: true }).fill('sme@example.test');
+  await frame.getByRole('button', { name: 'Save user', exact: true }).click();
+  const smeRow = frame.locator('.directory-row').filter({ hasText: 'SME Test User' });
+  await smeRow.getByRole('button', { name: 'Edit', exact: true }).click();
+  await frame.getByLabel('Role', { exact: true }).selectOption('SME');
+  await frame.getByRole('button', { name: 'Save user', exact: true }).click();
+  await frame.getByRole('status').filter({ hasText: 'SME Test User saved as SME.' }).waitFor();
+  if (!(await smeRow.textContent()).includes('SME')) errors.push('Edit did not save SME role');
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
@@ -141,7 +155,7 @@ try {
   await frame.getByRole('heading', { name: 'Update task' }).waitFor();
   await frame.getByLabel('Est. Hours', { exact: true }).fill('3.5');
   await frame.getByLabel('Attach documents', { exact: true }).setInputFiles({ name: 'smoke-report.txt', mimeType: 'text/plain', buffer: Buffer.from('Task document smoke test') });
-  await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
   for (const theme of ['light', 'dark']) {
     await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
     const uploadStyle = await frame.getByLabel('Attach documents', { exact: true }).evaluate((input) => {
@@ -158,13 +172,16 @@ try {
   await frame.getByRole('button', { name: 'Save task' }).click();
   await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).waitFor();
   await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).locator('xpath=..').click({ position: { x: 110, y: 12 } });
-  await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
   if (await frame.getByLabel('Est. Hours', { exact: true }).inputValue() !== '3.5') errors.push('Estimated hours did not persist');
   await frame.locator('.modal').getByRole('button', { name: 'Cancel', exact: true }).click();
   await frame.getByRole('button', { name: 'Overview', exact: true }).click();
   const documents = frame.locator('.project-documents');
-  await documents.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
-  if (await documents.getByRole('link', { name: 'Download', exact: true }).getAttribute('download') !== 'smoke-report.txt') errors.push('Document download filename missing');
+  await documents.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
+  const downloadEvent = page.waitForEvent('download');
+  await documents.getByRole('button', { name: 'Download smoke-report.txt', exact: true }).click();
+  const download = await downloadEvent;
+  if (download.suggestedFilename() !== 'smoke-report.txt' || await fs.readFile(await download.path(), 'utf8') !== 'Task document smoke test') errors.push('Document download failed');
   await documents.getByRole('button', { name: 'Delete smoke-report.txt', exact: true }).click();
   await documents.getByText('No documents attached.', { exact: true }).waitFor();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
