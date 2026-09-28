@@ -62,7 +62,7 @@ try {
   await frame.getByLabel('Role', { exact: true }).selectOption('SME');
   await frame.getByRole('button', { name: 'Save user', exact: true }).click();
   await frame.getByRole('status').filter({ hasText: 'SME Test User saved as SME.' }).waitFor();
-  if (!(await smeRow.textContent()).includes('SME')) errors.push('Edit did not save SME role');
+  await smeRow.getByText('SME', { exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
