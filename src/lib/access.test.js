@@ -22,18 +22,21 @@ describe('role and task authorization', () => {
     expect(() => validateTask({ ...task, deferredDate: '2026-08-01', deferredJustification: 'Vendor delay' })).toThrow('after');
     expect(() => validateTask({ ...task, status: 'Not Required' })).toThrow('justification');
     expect(() => validateTask({ ...task, status: 'Not Required', notRequiredJustification: 'Outside scope' })).not.toThrow();
+    expect(() => validateTask({ ...task, assignedDate: '2026-02-30' })).toThrow();
     expect(() => validateTask({ ...task, deferredDate: '2026-02-30', deferredJustification: 'Delay' })).toThrow();
   });
   it('restricts every standard-user write to permitted task fields', async () => {
     const raw = { currentUser: async () => user, load: async () => structuredClone(data), saveTask: vi.fn(async (row) => row), saveProject: vi.fn(), recycle: vi.fn(), saveUser: vi.fn() };
     const store = authorizedStore(raw);
-    const saved = await store.saveTask({ ...task, title: 'Tampered', dueDate: '2099-01-01', ownerEmail: 'attacker', status: 'In Progress – At Program Office', deferredDate: '2026-10-01', deferredJustification: 'Vendor delay' });
+    const saved = await store.saveTask({ ...task, title: 'Tampered', assignedDate: '2099-01-01', dueDate: '2099-01-01', ownerEmail: 'attacker', status: 'In Progress – At Program Office', deferredDate: '2026-10-01', deferredJustification: 'Vendor delay' });
     expect(saved).toMatchObject({ title: 'Review', dueDate: '2026-09-01', ownerEmail: user.email, status: 'In Progress – At Program Office', deferredDate: '2026-10-01' });
     await expect(store.saveTask({ ...data.tasks[1], status: 'Complete' })).rejects.toThrow('assigned');
     await expect(store.saveTask({ ...task, id: 'new', projectKey: 'other' })).rejects.toThrow('own project');
     const added = await store.saveTask({ ...task, id: 'new', spId: 99, ownerKey: 'other', dueDate: '2099-01-01', status: 'Complete' });
     expect(added).toMatchObject({ status: 'Not Started', dueDate: '', ownerEmail: user.email });
     expect(added.spId).toBeUndefined();
+    expect(added.assignedDate).toBe(new Date().toISOString().slice(0, 10));
+    expect(saved.assignedDate).toBeUndefined();
     for (const method of ['saveProject', 'saveUser', 'recycle']) await expect(store[method]({})).rejects.toThrow('Only managers');
     expect(raw.saveProject).not.toHaveBeenCalled();
     expect((await store.load()).projects).toHaveLength(1);

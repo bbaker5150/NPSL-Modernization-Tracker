@@ -321,10 +321,10 @@ describe('application shell', () => {
     await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
     expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
-    expect(document.querySelector('.attention-group summary').textContent).toContain('In Progress – At Program Office');
+    expect(document.querySelector('.attention-group header').textContent).toContain('In Progress – At Program Office');
     expect(document.querySelector('.attention-group').textContent).not.toContain('skip task');
-    await act(async () => document.querySelector('.attention-group summary').click());
-    expect(document.querySelector('.attention-group').open).toBe(false);
+    await act(async () => document.querySelector('.attention-project-group summary').click());
+    expect(document.querySelector('.attention-project-group').open).toBe(true);
   });
 
   it('navigates from the active card and brand, and dismisses both project menus', async () => {
@@ -359,6 +359,30 @@ describe('application shell', () => {
     const promoted = (await createRepository().store.load()).users.find((row) => row.id === 'other');
     expect(promoted).toMatchObject({ role: 'Manager', email: 'other@example.test', loginName: 'i:0#.f|membership|other@example.test' });
     expect(document.querySelector('.directory-row').textContent).toContain('Manager');
+  });
+
+  it('collapses projects independently within a status and saves the assigned date', async () => {
+    const raw = createRepository().store;
+    for (const id of ['alpha', 'beta']) {
+      await raw.saveProject({ id, projectKey: id, title: id, ownerName: 'Engineer' });
+      await raw.saveTask({ id: `${id}-task`, projectKey: id, title: `${id} work`, phaseKey: 'requirement', status: 'In Progress' });
+    }
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('Needs attention')).click());
+    expect(document.querySelector('.attention-group').tagName).toBe('SECTION');
+    const groups = document.querySelectorAll('.attention-project-group');
+    expect(groups).toHaveLength(2);
+    expect([...groups].every((group) => !group.open)).toBe(true);
+    await act(async () => groups[0].querySelector('summary').click());
+    expect(groups[0].open).toBe(true);
+    expect(groups[1].open).toBe(false);
+    await act(async () => groups[0].querySelector('button').click());
+    await act(async () => document.querySelector('.upcoming-list button').click());
+    const field = [...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Assigned / creation date')).querySelector('input');
+    expect(field.value).toBe('');
+    await act(async () => changeValue(field, '2026-09-15'));
+    await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Save task').click());
+    expect((await createRepository().store.load()).tasks.find((row) => row.id === 'alpha-task').assignedDate).toBe('2026-09-15');
   });
 
 });

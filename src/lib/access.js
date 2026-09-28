@@ -21,7 +21,7 @@ export function visibleData(data, user) {
 export function validateTask(task) {
   if (!task.title?.trim()) throw new Error('Enter a task name.');
   if (!['Not Started', 'In Progress', 'In Progress – At Program Office', 'Blocked', 'Complete', 'Not Required', 'Not Applicable'].includes(task.status)) throw new Error('Select a valid task status.');
-  for (const date of [task.dueDate, task.deferredDate]) {
+  for (const date of [task.dueDate, task.deferredDate, task.assignedDate]) {
     if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) !== date)) throw new Error('Enter a valid date.');
   }
   if (task.deferredDate && (!task.dueDate || task.deferredDate <= task.dueDate)) throw new Error('The deferred date must be after the original due date.');
@@ -80,6 +80,7 @@ export function authorizedStore(raw, config = {}) {
             next = { ...existing, status: row.status, deferredDate: row.deferredDate || '', deferredJustification: row.deferredJustification || '', notRequiredJustification: row.notRequiredJustification || '' };
           }
         }
+        if (!existing && !next.assignedDate) next.assignedDate = new Date().toISOString().slice(0, 10);
         validateTask(next);
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';
         return raw.saveTask(next);

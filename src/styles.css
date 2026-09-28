@@ -481,10 +481,10 @@ button { border: 0 !important; }
 .drawer-content, .drawer-tabs, .task-markers { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .project-drawer ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .attention-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(300px, 1fr); align-items: start; gap: 16px; overflow-x: auto; padding-bottom: 12px; }
-.attention-group > summary { display: flex; align-items: center; gap: 10px; padding: 18px 20px; cursor: pointer; list-style: none; }
-.attention-group > summary::-webkit-details-marker { display: none; }
-.attention-group > summary > .badge:first-of-type { white-space: normal; }
-.attention-group > summary > .badge:last-child { margin-left: auto; flex: none; }
+.attention-group > header { display: flex; align-items: center; gap: 10px; padding: 18px 20px; cursor: pointer; list-style: none; }
+.attention-group > header::-webkit-details-marker { display: none; }
+.attention-group > header > .badge:first-of-type { white-space: normal; }
+.attention-group > header > .badge:last-child { margin-left: auto; flex: none; }
 .attention-group[open] > summary > svg { transform: rotate(90deg); }
 .attention-group > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 20px 20px; }
 .attention-group .attention-task { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
@@ -513,3 +513,11 @@ button.brand { width: 100%; }
 .phase-node.selected .phase-line { background: var(--blue); }
 .phase-node.selected .phase-count { background: var(--blue); color: white; }
 .phase-node::before, .phase-node::after { display: none; }
+
+.attention-group > header { cursor: default; }
+.attention-project-group { min-width: 0; border: 1px solid var(--line); border-radius: 10px; }
+.attention-project-group > summary { display: flex; align-items: center; gap: 8px; padding: 14px 12px; cursor: pointer; list-style: none; }
+.attention-project-group > summary::-webkit-details-marker { display: none; }
+.attention-project-group > summary strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.attention-project-group[open] > summary > svg { transform: rotate(90deg); }
+.attention-project-group > div { display: grid; gap: 10px; padding: 0 10px 10px; }
