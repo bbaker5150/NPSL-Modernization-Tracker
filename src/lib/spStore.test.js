@@ -9,7 +9,7 @@ describe('SharePoint store', () => {
     expect(projects.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(tasks.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(updates.fields.map((field) => field.name)).toContain('AuthorKey');
-    expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition', 'SeedVersion']);
+    expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition', 'SeedVersion', 'Archived']);
   });
 
   it('follows SharePoint pagination links so exports include every item', async () => {
@@ -147,6 +147,7 @@ describe('SharePoint user role verification', () => {
 describe('native SharePoint task attachments', () => {
   it('uploads raw bytes to the persisted task and reads back its attachment list', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.archivedDocuments = vi.fn(async () => []);
     store.get = vi.fn().mockResolvedValueOnce({ value: [] }).mockResolvedValueOnce({ EnableAttachments: true }).mockResolvedValueOnce({ value: [{ FileName: "Engineer’s report.pdf", ServerRelativeUrl: '/sites/mod/Lists/ModernizationTasks/Attachments/42/report.pdf' }] });
     store.post = vi.fn(async () => ({}));
     const bytes = new Uint8Array([0, 255, 42]).buffer;
@@ -168,15 +169,37 @@ describe('native SharePoint task attachments', () => {
 });
 
 
-describe('SharePoint document deletion', () => {
-  it('deletes only an existing attachment and verifies its removal', async () => {
+describe('prompt-free SharePoint removal and downloads', () => {
+  it('archives an existing attachment through a verified metadata update', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
-    store.listTaskAttachments = vi.fn().mockResolvedValueOnce([{ name: "Owner's report.pdf" }]).mockResolvedValueOnce([]);
-    store.post = vi.fn();
-    await store.deleteTaskAttachment({ spId: 9 }, "Owner's report.pdf");
-    expect(store.post).toHaveBeenCalledWith(expect.stringContaining("/items(9)/AttachmentFiles/getByFileName('Owner''s%20report.pdf')"), { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
-    store.listTaskAttachments.mockResolvedValue([{ name: 'report.pdf' }]);
+    store.listTaskAttachments = vi.fn(async () => [{ name: 'report.pdf' }]);
+    store.archivedDocuments = vi.fn().mockResolvedValueOnce(['old.pdf']).mockResolvedValueOnce(['old.pdf', 'report.pdf']);
+    store.update = vi.fn();
+    await store.deleteTaskAttachment({ spId: 9 }, 'report.pdf');
+    expect(store.update).toHaveBeenCalledWith('tasks', 9, { ArchivedDocuments: '["old.pdf","report.pdf"]' });
+    store.archivedDocuments.mockResolvedValue([]);
     await expect(store.deleteTaskAttachment({ spId: 9 }, 'report.pdf')).rejects.toThrow('did not confirm');
     await expect(store.deleteTaskAttachment({ spId: 9 }, 'missing.pdf')).rejects.toThrow('no longer exists');
+  });
+  it('filters archived records and documents without delete or recycle requests', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.get = vi.fn(async () => ({ value: [{ Id: 1, Archived: true }, { Id: 2, Archived: false }] }));
+    expect(await store.listItems('tasks', ['Archived'], (row) => row.Id)).toEqual([2]);
+    store.post = vi.fn(async () => ({ value: [] }));
+    await store.recycle('tasks', 1);
+    expect(store.post.mock.calls[0][0]).toContain('/validateupdatelistitem');
+    expect(store.post.mock.calls[0][1].body.formValues).toContainEqual({ FieldName: 'Archived', FieldValue: '1' });
+    store.get = vi.fn(async () => ({ value: [{ FileName: 'deleted.pdf', ServerRelativeUrl: '/deleted.pdf' }, { FileName: 'active.pdf', ServerRelativeUrl: '/active.pdf' }] }));
+    store.archivedDocuments = vi.fn(async () => ['deleted.pdf']);
+    expect(await store.listTaskAttachments({ spId: 1 })).toEqual([{ name: 'active.pdf', url: 'https://tenant.sharepoint.com/active.pdf' }]);
+  });
+  it('downloads only a listed file as binary data', async () => {
+    const blob = new Blob(['contents']);
+    const fetchImpl = vi.fn(async () => ({ ok: true, blob: async () => blob }));
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod', fetchImpl });
+    store.listTaskAttachments = vi.fn(async () => [{ name: 'report.pdf', url: 'https://tenant.sharepoint.com/report.pdf' }]);
+    expect(await store.downloadTaskAttachment({ spId: 1 }, 'report.pdf')).toBe(blob);
+    expect(fetchImpl).toHaveBeenCalledWith('https://tenant.sharepoint.com/report.pdf', { credentials: 'include', headers: { Accept: '*/*' } });
+    await expect(store.downloadTaskAttachment({ spId: 1 }, 'missing.pdf')).rejects.toThrow('no longer exists');
   });
 });

@@ -32,6 +32,7 @@ class LocalStore {
   async provision() { return []; }
   async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey) })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey) })); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
+  async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
   async addTaskAttachment(task, file) { validateAttachment(file); await localAttachments(task.id, file); return this.listTaskAttachments(task); }
   async saveUser(row) { return this.upsert('users', row, 'user'); }

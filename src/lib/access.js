@@ -102,10 +102,11 @@ export function authorizedStore(raw, config = {}) {
         const tasks = data.tasks.filter((task) => task.projectKey === projectKey);
         return (await Promise.all(tasks.map(async (task) => (await raw.listTaskAttachments(task)).map((file) => ({ ...file, taskId: task.id, taskTitle: task.title }))))).flat();
       };
-      if (['listTaskAttachments', 'addTaskAttachment', 'deleteTaskAttachment'].includes(property)) return async (taskId, file) => {
+      if (['listTaskAttachments', 'addTaskAttachment', 'deleteTaskAttachment', 'downloadTaskAttachment'].includes(property)) return async (taskId, file) => {
         const { user, data, manager } = await context();
         const task = data.tasks.find((row) => row.id === taskId);
         if (!task || (!canViewPortfolio(user, data.users) && !canUpdateTask(task, user, data.projects))) throw new Error('You cannot access documents for this task.');
+        if (property === 'downloadTaskAttachment') return raw.downloadTaskAttachment(task, file);
         if (property === 'deleteTaskAttachment') {
           const project = data.projects.find((row) => row.projectKey === task.projectKey);
           if (isSME(user, data.users) || (!manager && !isOwnedByUser(project, user))) throw new Error('Only project owners and managers can delete documents.');

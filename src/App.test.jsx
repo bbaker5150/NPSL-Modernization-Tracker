@@ -93,7 +93,7 @@ describe('application shell', () => {
       document.querySelector('button[aria-label="Remove ABC"]').click();
       await Promise.resolve();
     });
-    expect(window.confirm).toHaveBeenCalledWith('Remove ABC from the shared glossary?');
+    expect(window.confirm).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain('Added By Collaborator');
     expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
@@ -137,6 +137,9 @@ describe('application shell', () => {
     const phaseButton = document.querySelector('.phase-required-button:not(:disabled)');
     const phaseSection = phaseButton.closest('.task-stage');
     await act(async () => { phaseButton.click(); await Promise.resolve(); });
+    await act(async () => changeValue(document.querySelector('.modal textarea'), 'Outside this project scope'));
+    await act(async () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Apply to phase').click());
+    expect(window.prompt).not.toHaveBeenCalled();
     expect(phaseSection.classList.contains('phase-not-required')).toBe(true);
     expect(phaseSection.textContent).toContain('Restore phase');
     await act(async () => { phaseSection.querySelector('.phase-required-button').click(); await Promise.resolve(); });
@@ -360,7 +363,10 @@ describe('application shell', () => {
     const form = document.querySelector('.directory-form');
     expect(form.checkValidity()).toBe(true);
     expect(form.querySelector('button').disabled).toBe(false);
+    const blockNativeSubmit = (event) => event.preventDefault();
+    form.addEventListener('click', blockNativeSubmit, true);
     await act(async () => form.querySelector('button').click());
+    form.removeEventListener('click', blockNativeSubmit, true);
     const saved = (await createRepository().store.load()).users.find((row) => row.id === 'other');
     expect(saved).toMatchObject({ role, email: '', loginName: 'i:0#.w|domain\\engineer' });
     expect(card.textContent).toContain(role);
