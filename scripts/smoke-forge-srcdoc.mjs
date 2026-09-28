@@ -20,7 +20,7 @@ const harnessOrigin = `http://127.0.0.1:${port}`;
 
 page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
 page.on('pageerror', (error) => errors.push(error.message));
-page.on('dialog', async (dialog) => { dialogs.push(`${dialog.type()}: ${dialog.message()}`); await dialog.dismiss(); });
+page.on('dialog', async (dialog) => { if (dialog.type() === 'confirm' && dialog.message().startsWith('Delete “smoke-report.txt”')) await dialog.accept(); else { dialogs.push(`${dialog.type()}: ${dialog.message()}`); await dialog.dismiss(); } });
 page.on('request', (request) => {
   const url = request.url();
   if (/^https?:/i.test(url) && !url.startsWith(harnessOrigin)) externalRequests.push(url);
@@ -142,6 +142,15 @@ try {
   await frame.getByLabel('Est. Hours', { exact: true }).fill('3.5');
   await frame.getByLabel('Attach documents', { exact: true }).setInputFiles({ name: 'smoke-report.txt', mimeType: 'text/plain', buffer: Buffer.from('Task document smoke test') });
   await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+  for (const theme of ['light', 'dark']) {
+    await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+    const uploadStyle = await frame.getByLabel('Attach documents', { exact: true }).evaluate((input) => {
+      const button = getComputedStyle(input, '::file-selector-button');
+      return { background: button.backgroundColor, color: button.color, radius: button.borderRadius };
+    });
+    if (uploadStyle.radius !== '7px' || uploadStyle.background === uploadStyle.color) errors.push(`Upload theme styling failed: ${theme}`);
+  }
+
 
   await frame.locator('.modal select option', { hasText: 'Not Required' }).waitFor({ state: 'attached' });
   await frame.locator('.modal select').filter({ has: frame.locator('option', { hasText: 'Not Required' }) }).selectOption({ label: 'Not Required' });
@@ -152,6 +161,12 @@ try {
   await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
   if (await frame.getByLabel('Est. Hours', { exact: true }).inputValue() !== '3.5') errors.push('Estimated hours did not persist');
   await frame.locator('.modal').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await frame.getByRole('button', { name: 'Overview', exact: true }).click();
+  const documents = frame.locator('.project-documents');
+  await documents.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+  if (await documents.getByRole('link', { name: 'Download', exact: true }).getAttribute('download') !== 'smoke-report.txt') errors.push('Document download filename missing');
+  await documents.getByRole('button', { name: 'Delete smoke-report.txt', exact: true }).click();
+  await documents.getByText('No documents attached.', { exact: true }).waitFor();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
   // The register should span the same content width as the pipeline panel.
   for (const width of [1440, 768]) {

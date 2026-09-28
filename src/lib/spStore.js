@@ -282,6 +282,14 @@ export class SharePointStore {
     });
   }
 
+  async deleteTaskAttachment(task, name) {
+    const files = await this.listTaskAttachments(task);
+    const file = files.find((entry) => entry.name === name);
+    if (!file) throw new Error('This document no longer exists. Refresh the documents list.');
+    await this.post(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})/AttachmentFiles/getByFileName('${escapeOData(file.name)}')`, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
+    if ((await this.listTaskAttachments(task)).some((entry) => entry.name === name)) throw new Error('SharePoint did not confirm the document deletion. Refresh and try again.');
+  }
+
   async addTaskAttachment(task, file) {
     validateAttachment(file);
     const files = await this.listTaskAttachments(task);

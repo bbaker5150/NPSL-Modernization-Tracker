@@ -96,10 +96,21 @@ export function authorizedStore(raw, config = {}) {
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';
         return raw.saveTask(next);
       };
-      if (['listTaskAttachments', 'addTaskAttachment'].includes(property)) return async (taskId, file) => {
+      if (property === 'listProjectAttachments') return async (projectKey) => {
+        const { user, data } = await context();
+        if (!visibleData(data, user).projects.some((project) => project.projectKey === projectKey)) throw new Error('You cannot access documents for this project.');
+        const tasks = data.tasks.filter((task) => task.projectKey === projectKey);
+        return (await Promise.all(tasks.map(async (task) => (await raw.listTaskAttachments(task)).map((file) => ({ ...file, taskId: task.id, taskTitle: task.title }))))).flat();
+      };
+      if (['listTaskAttachments', 'addTaskAttachment', 'deleteTaskAttachment'].includes(property)) return async (taskId, file) => {
         const { user, data, manager } = await context();
         const task = data.tasks.find((row) => row.id === taskId);
         if (!task || (!canViewPortfolio(user, data.users) && !canUpdateTask(task, user, data.projects))) throw new Error('You cannot access documents for this task.');
+        if (property === 'deleteTaskAttachment') {
+          const project = data.projects.find((row) => row.projectKey === task.projectKey);
+          if (isSME(user, data.users) || (!manager && !isOwnedByUser(project, user))) throw new Error('Only project owners and managers can delete documents.');
+          return raw.deleteTaskAttachment(task, file);
+        }
         if (property === 'addTaskAttachment') {
           if (isSME(user, data.users) || (!manager && !canUpdateTask(task, user, data.projects))) throw new Error('You cannot attach documents to this task.');
           validateAttachment(file);

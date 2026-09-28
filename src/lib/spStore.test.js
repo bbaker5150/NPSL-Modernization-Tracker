@@ -165,3 +165,17 @@ describe('native SharePoint task attachments', () => {
     expect(store.post).not.toHaveBeenCalled();
   });
 });
+
+
+describe('SharePoint document deletion', () => {
+  it('deletes only an existing attachment and verifies its removal', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.listTaskAttachments = vi.fn().mockResolvedValueOnce([{ name: "Owner's report.pdf" }]).mockResolvedValueOnce([]);
+    store.post = vi.fn();
+    await store.deleteTaskAttachment({ spId: 9 }, "Owner's report.pdf");
+    expect(store.post).toHaveBeenCalledWith(expect.stringContaining("/items(9)/AttachmentFiles/getByFileName('Owner''s%20report.pdf')"), { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
+    store.listTaskAttachments.mockResolvedValue([{ name: 'report.pdf' }]);
+    await expect(store.deleteTaskAttachment({ spId: 9 }, 'report.pdf')).rejects.toThrow('did not confirm');
+    await expect(store.deleteTaskAttachment({ spId: 9 }, 'missing.pdf')).rejects.toThrow('no longer exists');
+  });
+});

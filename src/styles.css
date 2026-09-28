@@ -536,3 +536,18 @@ button.brand { width: 100%; }
 .task-documents li { margin: 8px 0; overflow-wrap: anywhere; }
 .task-documents a { color: var(--blue); }
 .task-documents .inline-error { white-space: pre-wrap; }
+
+/* Document controls inherit the active light/dark palette. */
+.project-documents .task-documents { margin: 0; padding: 0; border: 0; }
+.task-documents .document-list { list-style: none; padding: 0; margin: 12px 0; }
+.document-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.document-name { min-width: 0; overflow-wrap: anywhere; }
+.document-name small { display: block; margin-top: 4px; color: var(--muted); }
+.document-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.document-actions .button { text-decoration: none; }
+.field .document-upload { padding: 6px; cursor: pointer; }
+.document-upload::file-selector-button { margin-right: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.document-upload:hover::file-selector-button { background: var(--blue-soft); color: var(--blue); }
+.document-upload:disabled::file-selector-button { color: var(--muted); cursor: not-allowed; }
+.document-actions a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+@media (max-width: 600px) { .document-list li { align-items: flex-start; flex-direction: column; } }

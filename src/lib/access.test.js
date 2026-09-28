@@ -116,3 +116,24 @@ describe('SME viewing and task documents', () => {
     for (const estimatedHours of [-1, 'bad', Infinity]) expect(() => validateTask({ ...task, estimatedHours })).toThrow('Estimated hours');
   });
 });
+
+
+describe('project document access', () => {
+  it('aggregates all project tasks and permits only owners or managers to delete', async () => {
+    const state = structuredClone(data);
+    state.tasks.push({ ...task, id: 't3', ownerEmail: 'someone@example.test' });
+    const raw = { currentUser: async () => user, load: async () => state, listTaskAttachments: vi.fn(async () => [{ name: 'report.pdf', url: '/report.pdf' }]), deleteTaskAttachment: vi.fn() };
+    const store = authorizedStore(raw);
+    expect(await store.listProjectAttachments('own')).toMatchObject([{ taskId: 't1', name: 'report.pdf' }, { taskId: 't3', name: 'report.pdf' }]);
+    await store.deleteTaskAttachment('t3', 'report.pdf');
+    expect(raw.deleteTaskAttachment).toHaveBeenCalledTimes(1);
+    state.projects[0].ownerEmail = 'different@example.test';
+    await expect(store.deleteTaskAttachment('t1', 'report.pdf')).rejects.toThrow('Only project owners');
+    await expect(store.listProjectAttachments('other')).rejects.toThrow('cannot access');
+    state.users = [{ email: user.email, role: 'Manager' }];
+    await store.deleteTaskAttachment('t2', 'report.pdf');
+    expect(raw.deleteTaskAttachment).toHaveBeenCalledTimes(2);
+    state.users[0].role = 'SME';
+    await expect(store.deleteTaskAttachment('t2', 'report.pdf')).rejects.toThrow('Only project owners');
+  });
+});
