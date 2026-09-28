@@ -241,7 +241,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Task ID', width: 22 }, { header: 'Project ID', width: 22 }, { header: 'Project', width: 30 },
       { header: 'Task', width: 46, wrap: true }, { header: 'Pipeline Stage', width: 26 }, { header: 'Sort Order', width: 11 },
       { header: 'Status', width: 16 }, { header: 'Owner', width: 22 }, { header: 'Owner Email', width: 30 }, { header: 'Owner Identity Key', width: 36 },
-      { header: 'Assigned / Creation Date', width: 22, numFmt: 'mmm d, yyyy' }, { header: 'Start Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Due Date', width: 15, numFmt: 'mmm d, yyyy' },
+      { header: 'Est. Hours', width: 12, numFmt: '0.##' }, { header: 'Assigned / Creation Date', width: 22, numFmt: 'mmm d, yyyy' }, { header: 'Start Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Due Date', width: 15, numFmt: 'mmm d, yyyy' },
       { header: 'Finish Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Reason', width: 36, wrap: true },
       { header: 'Notes / Data Issue', width: 44, wrap: true },
       { header: 'Deferred Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 44, wrap: true }, { header: 'Not Required Justification', width: 44, wrap: true },
@@ -249,7 +249,7 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     rows: tasks.map((task) => [
       task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.title,
       phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, displayName(task.ownerName || 'Unassigned'), task.ownerEmail || '', task.ownerKey || '',
-      toDate(task.assignedDate), toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '',
+      task.estimatedHours == null || task.estimatedHours === '' ? null : Number(task.estimatedHours), toDate(task.assignedDate), toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '',
     ]),
   });
   addDataSheet(workbook, {

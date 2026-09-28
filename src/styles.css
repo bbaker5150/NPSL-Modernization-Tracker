@@ -530,3 +530,9 @@ button.brand { width: 100%; }
 .attention-collapse[aria-expanded="true"] > svg { transform: rotate(90deg); }
 .attention-project-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 9px 7px; background: transparent; text-align: left; cursor: pointer; }
 .attention-project-open strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.task-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.task-documents { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.task-documents ul { padding-left: 20px; }
+.task-documents li { margin: 8px 0; overflow-wrap: anywhere; }
+.task-documents a { color: var(--blue); }
+.task-documents .inline-error { white-space: pre-wrap; }
