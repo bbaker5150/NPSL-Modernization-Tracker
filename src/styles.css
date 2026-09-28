@@ -554,3 +554,13 @@ button.brand { width: 100%; }
 
 .document-file-name { text-align: left; overflow-wrap: anywhere; color: var(--blue); }
 .document-actions .icon-button:disabled { opacity: .5; cursor: wait; }
+
+.people-invite { display: grid; gap: 12px; padding: 20px; }
+.people-invite h2, .people-invite p { margin: 0; }
+.people-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 280px; overflow: auto; }
+.people-results button { width: 100%; display: grid; gap: 4px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
+.people-results button:hover, .people-results button:focus-visible { border-color: var(--blue); background: var(--blue-soft); }
+.people-results span, .people-results small, .selected-person span { color: var(--muted); }
+.selected-person, .invitation-result { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
+.invite-actions { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.invite-actions a { text-decoration: none; }

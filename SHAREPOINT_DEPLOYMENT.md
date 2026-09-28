@@ -109,3 +109,11 @@ REST reference: https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/work
 On first load after this update, the app's existing automatic provisioning adds `Archived` to tracker lists and `ArchivedDocuments` to Tasks (the first loader needs permission to add list columns). Existing records and attachments remain intact. Delete now archives records or hides document attachments through normal metadata updates, following Uncertalytics; it does not issue DELETE, MERGE, recycle, or bulk-delete requests. Archived content remains in SharePoint for site-owner recovery. Deleted document names remain reserved; rename a replacement upload. Downloads fetch the file bytes and save a local blob instead of navigating to SharePoint's file-opening page. Browser download policy and tenant security controls still apply.
 
 Directory Save uses a direct click handler so it works when the embedded host blocks native form submission. SharePoint write errors remain visible in the form and roles are read back before success is shown.
+
+
+### People Picker invitations
+Managers can search organization people in Users and managers → Invite people, select a resolved user, choose an application role, and Add to tracker. Searches use SharePoint ClientPeoplePickerSearchUser with individual users only; ensureuser resolves the login before the existing role save/readback. Existing tracker users must be changed through Edit.
+
+After saving, Draft email invitation opens an addressed draft in the manager's email client; Copy invitation link is also available. No email is sent automatically. SharePoint Utility.SendEmail was retired; automatic email would require an approved Graph/Power Automate integration. The invitation does not grant SharePoint site/list/page permissions. A site owner must give the user the appropriate underlying access. People Picker and ensureuser respect tenant permissions and policy.
+
+Set `window.MOD_TRACKER_CONFIG.appUrl` to the published tracker page URL if necessary. Otherwise the invitation defaults to the same-origin parent page URL (for an embedded app), then the current page. Managers can check/edit the link before sharing. Local preview searches only saved users, not the tenant directory.

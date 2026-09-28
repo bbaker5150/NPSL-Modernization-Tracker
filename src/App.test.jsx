@@ -431,4 +431,26 @@ describe('application shell', () => {
     expect([...document.querySelectorAll('.modal button')].some((row) => row.textContent === 'Save task')).toBe(false);
   });
 
+  it('selects a directory person, saves the verified SME identity, and prepares an invitation', async () => {
+    const prototype = Object.getPrototypeOf(createRepository().store);
+    const candidate = { title: 'New Engineer', email: 'new@example.test', loginName: 'i:0#.f|membership|new@example.test' };
+    vi.spyOn(prototype, 'searchPeople').mockResolvedValue([candidate]);
+    const resolve = vi.spyOn(prototype, 'resolvePerson').mockResolvedValue(candidate);
+    window.MOD_TRACKER_CONFIG.appUrl = 'https://tenant.sharepoint-mil.us/sites/mod/SitePages/Tracker.aspx';
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    await act(async () => changeValue(document.querySelector('.people-invite input[type="search"]'), 'New Engineer'));
+    await act(async () => new Promise((done) => setTimeout(done, 400)));
+    await act(async () => document.querySelector('.people-results button').click());
+    await act(async () => changeValue(document.querySelector('.people-invite select'), 'SME'));
+    await act(async () => [...document.querySelectorAll('.people-invite button')].find((button) => button.textContent === 'Add to tracker').click());
+    expect(resolve).toHaveBeenCalledWith(candidate.loginName);
+    const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
+    expect(saved).toMatchObject({ ...candidate, role: 'SME' });
+    const invite = document.querySelector('.invitation-result a');
+    expect(decodeURIComponent(invite.href)).toContain('new@example.test');
+    expect(decodeURIComponent(invite.href)).toContain('Tracker.aspx');
+    expect(document.querySelector('.invitation-result').textContent).toContain('No email has been sent.');
+  });
+
 });
