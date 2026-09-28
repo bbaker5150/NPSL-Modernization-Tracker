@@ -57,13 +57,14 @@ describe('SharePoint store', () => {
     store.post = vi.fn(async () => ({ value: [] }));
     const task = {
       spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'requirement',
-      order: 1, status: 'In Progress', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
+      order: 1, status: 'In Progress', assignedDate: '2026-08-25', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
       ownerName: 'Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
     };
     await store.saveTask(task);
     expect(store.post.mock.calls[0][0]).toContain('/items(42)/validateupdatelistitem');
     const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
     expect(values).toMatchObject({
+      AssignedDate: '8/25/2026',
       StartDate: '9/1/2026',
       DueDate: '9/30/2026',
       FinishDate: '',

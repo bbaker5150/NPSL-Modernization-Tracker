@@ -146,13 +146,17 @@ function Overview({ projects, tasks, onOpen, phaseFilter, setPhaseFilter, onAtte
 function Attention({ projects, onOpen }) {
   const rows = projects.flatMap((project) => project.tasks.filter((task) => !isClosedTask(task)).map((task) => ({ project, task })));
   const statuses = [...new Set(['Blocked', 'In Progress – At Program Office', 'In Progress', 'Not Started', ...rows.map(({ task }) => task.status)])];
-  return <div className="page-stack"><section className="page-heading"><h1>Needs attention</h1><p>Outstanding tasks by status. Collapse a section to focus on the work that matters to you.</p></section><div className="attention-groups">{statuses.map((status) => {
+  return <div className="page-stack"><section className="page-heading"><h1>Needs attention</h1><p>Outstanding tasks by status. Expand a project to review its outstanding tasks.</p></section><div className="attention-groups">{statuses.map((status) => {
     const items = rows.filter(({ task }) => task.status === status);
-    return items.length > 0 && <details className="panel attention-group" key={status} open><summary><Icon name="chevron" size={16} /><Badge tone={statusTone(status)}>{status}</Badge><Badge tone={statusTone(status)}>{items.length}</Badge></summary><div>{items.map(({ project, task }) => <article className="attention-task" key={task.id}>
-      <button className="text-button" onClick={() => onOpen(project)}>{project.title}</button><h3>{task.title}</h3><p>Task owner: {displayName(task.ownerName || project.ownerName || 'Unassigned')}</p>
-      {task.dueDate && <Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{isOverdue(task) ? 'Overdue' : 'Due'} · {displayDate(task.dueDate)}</Badge>}
-      {task.deferredDate && <div><Badge tone="warn">Deferred · {displayDate(task.deferredDate)}</Badge><p>{task.deferredJustification}</p></div>}
-    </article>)}</div></details>;
+    return items.length > 0 && <section className="panel attention-group" key={status}><header><Badge tone={statusTone(status)}>{status}</Badge><Badge tone={statusTone(status)}>{items.length}</Badge></header><div>{projects.map((project) => {
+      const projectTasks = items.filter((item) => item.project.id === project.id).map((item) => item.task);
+      return projectTasks.length > 0 && <details className="attention-project-group" key={project.id}><summary><Icon name="chevron" size={14} /><strong>{project.title}</strong><Badge>{projectTasks.length}</Badge></summary><div><button className="text-button" onClick={() => onOpen(project)}>Open project</button>{projectTasks.map((task) => <article className="attention-task" key={task.id}>
+        <h3>{task.title}</h3><p>Task owner: {displayName(task.ownerName || project.ownerName || 'Unassigned')}</p>
+        {task.dueDate && <Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{isOverdue(task) ? 'Overdue' : 'Due'} · {displayDate(task.dueDate)}</Badge>}
+        {task.deferredDate && <div><Badge tone="warn">Deferred · {displayDate(task.deferredDate)}</Badge><p>{task.deferredJustification}</p></div>}
+      </article>)}</div></details>;
+    })}</div></section>;
+
   })}</div>{!rows.length && <EmptyState title="No outstanding tasks" message="There are no outstanding tasks to review." />}</div>;
 }
 
@@ -234,7 +238,7 @@ function ProjectEditor({ project, user, users, onClose, onSave }) {
 }
 
 function TaskEditor({ task, manager, canDefine = false, users = [], onClose, onSave, onDelete }) {
-  const [draft, setDraft] = useState(task);
+  const [draft, setDraft] = useState({ ...task, assignedDate: task.assignedDate || (canDefine ? todayIso() : '') });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
@@ -251,6 +255,7 @@ function TaskEditor({ task, manager, canDefine = false, users = [], onClose, onS
     <Field label="Task name" wide><input aria-label="Task name" disabled={!manager && !canDefine} value={draft.title} onChange={set('title')} /></Field>
     <Field label="Status"><select value={status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
     <Field label="Original due date"><input type="date" disabled={!manager} value={draft.dueDate || ''} onChange={set('dueDate')} /></Field>
+    <Field label="Assigned / creation date"><input type="date" disabled={!manager} value={draft.assignedDate || ''} onChange={set('assignedDate')} /></Field>
     <Field label="Deferred date"><input type="date" value={draft.deferredDate || ''} onChange={set('deferredDate')} /></Field>
     <Field label="Deferral justification" wide><textarea value={draft.deferredJustification || ''} onChange={set('deferredJustification')} /></Field>
     {status === 'Not Required' && <Field label="Not required justification" wide><textarea value={draft.notRequiredJustification || ''} onChange={set('notRequiredJustification')} /></Field>}
