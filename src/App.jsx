@@ -150,14 +150,22 @@ function Attention({ projects, onOpen }) {
     const items = rows.filter(({ task }) => task.status === status);
     return items.length > 0 && <section className="panel attention-group" key={status}><header><Badge tone={statusTone(status)}>{status}</Badge><Badge tone={statusTone(status)}>{items.length}</Badge></header><div>{projects.map((project) => {
       const projectTasks = items.filter((item) => item.project.id === project.id).map((item) => item.task);
-      return projectTasks.length > 0 && <details className="attention-project-group" key={project.id}><summary><Icon name="chevron" size={14} /><strong>{project.title}</strong><Badge>{projectTasks.length}</Badge></summary><div><button className="text-button" onClick={() => onOpen(project)}>Open project</button>{projectTasks.map((task) => <article className="attention-task" key={task.id}>
-        <h3>{task.title}</h3><p>Task owner: {displayName(task.ownerName || project.ownerName || 'Unassigned')}</p>
-        {task.dueDate && <Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{isOverdue(task) ? 'Overdue' : 'Due'} · {displayDate(task.dueDate)}</Badge>}
-        {task.deferredDate && <div><Badge tone="warn">Deferred · {displayDate(task.deferredDate)}</Badge><p>{task.deferredJustification}</p></div>}
-      </article>)}</div></details>;
+      return projectTasks.length > 0 && <AttentionProjectCard key={project.id} project={project} tasks={projectTasks} onOpen={onOpen} />;
     })}</div></section>;
 
   })}</div>{!rows.length && <EmptyState title="No outstanding tasks" message="There are no outstanding tasks to review." />}</div>;
+}
+
+function AttentionProjectCard({ project, tasks: projectTasks, onOpen }) {
+  const [expanded, setExpanded] = useState(false);
+  return <article className="attention-project-group" onClick={() => onOpen(project)}>
+    <header><button className="attention-collapse" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${project.title}`} aria-expanded={expanded} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded); }}><Icon name="chevron" size={14} /></button><button className="attention-project-open" onClick={(event) => { event.stopPropagation(); onOpen(project); }}><strong>{project.title}</strong><Badge>{projectTasks.length}</Badge></button></header>
+    {expanded && <div>{projectTasks.map((task) => <article className="attention-task" key={task.id}>
+        <h3>{task.title}</h3><p>Task owner: {displayName(task.ownerName || project.ownerName || 'Unassigned')}</p>
+        {task.dueDate && <Badge tone={isOverdue(task) ? 'bad' : 'neutral'}>{isOverdue(task) ? 'Overdue' : 'Due'} · {displayDate(task.dueDate)}</Badge>}
+        {task.deferredDate && <div><Badge tone="warn">Deferred · {displayDate(task.deferredDate)}</Badge><p>{task.deferredJustification}</p></div>}
+      </article>)}</div>}
+  </article>;
 }
 
 function ProgressChoice({ value, onChange, label = 'Progress calculation' }) {

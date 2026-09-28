@@ -188,6 +188,7 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('All projects');
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
     expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
+    await act(async () => document.querySelector('.attention-collapse').click());
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
     expect(document.body.textContent).not.toContain('Scope approved');
@@ -323,8 +324,8 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
     expect(document.querySelector('.attention-group header').textContent).toContain('In Progress – At Program Office');
     expect(document.querySelector('.attention-group').textContent).not.toContain('skip task');
-    await act(async () => document.querySelector('.attention-project-group summary').click());
-    expect(document.querySelector('.attention-project-group').open).toBe(true);
+    await act(async () => document.querySelector('.attention-collapse').click());
+    expect(document.querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('true');
   });
 
   it('navigates from the active card and brand, and dismisses both project menus', async () => {
@@ -372,11 +373,11 @@ describe('application shell', () => {
     expect(document.querySelector('.attention-group').tagName).toBe('SECTION');
     const groups = document.querySelectorAll('.attention-project-group');
     expect(groups).toHaveLength(2);
-    expect([...groups].every((group) => !group.open)).toBe(true);
-    await act(async () => groups[0].querySelector('summary').click());
-    expect(groups[0].open).toBe(true);
-    expect(groups[1].open).toBe(false);
-    await act(async () => groups[0].querySelector('button').click());
+    expect([...groups].every((group) => group.querySelector('.attention-collapse').getAttribute('aria-expanded') === 'false')).toBe(true);
+    await act(async () => groups[0].querySelector('.attention-collapse').click());
+    expect(groups[0].querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('true');
+    expect(groups[1].querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => groups[0].click());
     await act(async () => document.querySelector('.upcoming-list button').click());
     const field = [...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Assigned / creation date')).querySelector('input');
     expect(field.value).toBe('');
