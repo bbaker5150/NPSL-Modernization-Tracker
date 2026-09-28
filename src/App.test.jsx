@@ -349,17 +349,37 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Modernization at a glance');
   });
 
-  it('promotes another user while preserving the hidden SharePoint identity', async () => {
-    const raw = createRepository().store;
-    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'i:0#.f|membership|other@example.test', role: 'User' });
+  it.each(['SME', 'Manager', 'User'])('saves %s through Edit for a user without email and preserves SharePoint identity', async (role) => {
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: '', loginName: 'i:0#.w|domain\\engineer', role: role === 'User' ? 'SME' : 'User' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
-    expect(document.body.textContent).not.toContain('SharePoint login');
-    expect(document.body.textContent).not.toContain('i:0#.f|membership');
-    await act(async () => [...document.querySelectorAll('.directory-row button')].find((row) => row.textContent === 'Make manager').click());
-    const promoted = (await createRepository().store.load()).users.find((row) => row.id === 'other');
-    expect(promoted).toMatchObject({ role: 'Manager', email: 'other@example.test', loginName: 'i:0#.f|membership|other@example.test' });
-    expect(document.querySelector('.directory-row').textContent).toContain('Manager');
+    expect(document.body.textContent).not.toContain('Make manager');
+    const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
+    await act(async () => card.querySelector('button').click());
+    await act(async () => changeValue(document.querySelector('.directory-form select'), role));
+    const form = document.querySelector('.directory-form');
+    expect(form.checkValidity()).toBe(true);
+    expect(form.querySelector('button').disabled).toBe(false);
+    await act(async () => form.querySelector('button').click());
+    const saved = (await createRepository().store.load()).users.find((row) => row.id === 'other');
+    expect(saved).toMatchObject({ role, email: '', loginName: 'i:0#.w|domain\\engineer' });
+    expect(card.textContent).toContain(role);
+    expect(form.querySelector('[role="status"]').textContent).toContain(`saved as ${role}`);
+  });
+
+  it('keeps role edit errors visible and preserves the draft for retry', async () => {
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'User' });
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
+    await act(async () => card.querySelector('button').click());
+    await act(async () => changeValue(document.querySelector('.directory-form select'), 'SME'));
+    vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
+    await act(async () => document.querySelector('.directory-form button').click());
+    expect(document.querySelector('.directory-form [role="alert"]').textContent).toContain('403');
+    expect(document.querySelector('.directory-form select').value).toBe('SME');
+    expect(card.textContent).toContain('User');
+    expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
 
   it('collapses projects independently within a status and saves the assigned date', async () => {
