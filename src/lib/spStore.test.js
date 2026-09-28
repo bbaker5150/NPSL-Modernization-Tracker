@@ -57,14 +57,14 @@ describe('SharePoint store', () => {
     store.post = vi.fn(async () => ({ value: [] }));
     const task = {
       spId: 42, id: 'task-42', projectKey: 'project', wbs: '1.1', title: 'Review task', phaseKey: 'requirement',
-      order: 1, status: 'In Progress', assignedDate: '2026-08-25', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
+      order: 1, status: 'In Progress', estimatedHours: 2.5, assignedDate: '2026-08-25', startDate: '2026-09-01', dueDate: '2026-09-30', finishDate: '',
       ownerName: 'Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: '', notes: '', blockedReason: '', sourceStartLabel: '', dataIssue: '',
     };
     await store.saveTask(task);
     expect(store.post.mock.calls[0][0]).toContain('/items(42)/validateupdatelistitem');
     const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
     expect(values).toMatchObject({
-      AssignedDate: '8/25/2026',
+      EstimatedHours: '2.5', AssignedDate: '8/25/2026',
       StartDate: '9/1/2026',
       DueDate: '9/30/2026',
       FinishDate: '',
@@ -140,5 +140,28 @@ describe('SharePoint user role verification', () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ ValidateUpdateListItem: [{ FieldName: 'AppRole', HasException: true, ErrorMessage: 'Access denied' }] }));
     await expect(store.saveUser(row)).rejects.toThrow('Access denied');
+  });
+});
+
+describe('native SharePoint task attachments', () => {
+  it('uploads raw bytes to the persisted task and reads back its attachment list', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.get = vi.fn().mockResolvedValueOnce({ value: [] }).mockResolvedValueOnce({ EnableAttachments: true }).mockResolvedValueOnce({ value: [{ FileName: "Engineer’s report.pdf", ServerRelativeUrl: '/sites/mod/Lists/ModernizationTasks/Attachments/42/report.pdf' }] });
+    store.post = vi.fn(async () => ({}));
+    const bytes = new Uint8Array([0, 255, 42]).buffer;
+    const file = { name: "Engineer's report.pdf", size: 3, arrayBuffer: async () => bytes };
+    const files = await store.addTaskAttachment({ spId: 42 }, file);
+    expect(store.post.mock.calls[0][0]).toContain("/items(42)/AttachmentFiles/add(FileName='Engineer''s%20report.pdf')");
+    expect(store.post.mock.calls[0][1]).toMatchObject({ raw: true, body: bytes, headers: { 'Content-Type': 'application/octet-stream' } });
+    expect(files[0].url).toBe('https://tenant.sharepoint.com/sites/mod/Lists/ModernizationTasks/Attachments/42/report.pdf');
+  });
+  it('rejects duplicate names, invalid files, and unsaved tasks before posting', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.get = vi.fn(async () => ({ value: [{ FileName: 'REPORT.pdf', ServerRelativeUrl: '/report.pdf' }] }));
+    store.post = vi.fn();
+    await expect(store.addTaskAttachment({ spId: 42 }, { name: 'report.pdf', size: 1 })).rejects.toThrow('already attached');
+    await expect(store.addTaskAttachment({ spId: 42 }, { name: 'large.pdf', size: 21 * 1024 * 1024 })).rejects.toThrow('20 MB');
+    await expect(store.listTaskAttachments({})).rejects.toThrow('Save the task');
+    expect(store.post).not.toHaveBeenCalled();
   });
 });

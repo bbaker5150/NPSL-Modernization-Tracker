@@ -1,3 +1,4 @@
+import { localAttachments, validateAttachment } from './taskAttachments';
 import { workflowData, normalizePhaseKey } from '../data/workflow';
 import { DEFAULT_ACRONYM_VERSION, defaultAcronyms } from '../data/defaultAcronyms';
 import { resolveWebUrl } from './spContext';
@@ -30,6 +31,8 @@ class LocalStore {
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
   async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey) })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey) })); return data; }
+  async listTaskAttachments(task) { return localAttachments(task.id); }
+  async addTaskAttachment(task, file) { validateAttachment(file); await localAttachments(task.id, file); return this.listTaskAttachments(task); }
   async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row) { return this.upsert('projects', row, 'project'); }
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }

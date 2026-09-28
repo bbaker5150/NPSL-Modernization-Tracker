@@ -91,3 +91,15 @@ Original due dates remain stored for deferred and Not Required tasks. Deferred d
 The additive `ProgressMode` project field stores `phases` (default) or `tasks`. Owners may update only this project field through the dedicated repository method and may create tasks on their own projects with an initial Not Started status, no deadline, and themselves as owner. Manager-only project/assignment/deadline rules otherwise remain in place. In a tenant using restrictive list ACLs, these owner actions also require appropriate SharePoint write permissions; application code does not elevate permissions.
 
 Legacy phase keys are normalized on load without deleting records: Development and Production/Procurement become Procurement (EMD); Operation and Sustainment becomes Deployment (P&D). Requirement and Acquisition retain their keys. Both browser storage and SharePoint use the same mapping.
+
+## Task documents and SME rollout
+
+Task documents use the tasks list's native AttachmentFiles REST collection, not a separate library or file content in list text columns. New task lists are created with attachments enabled. On existing lists, a site owner must enable attachments in list Advanced settings if they are disabled; the app reports this condition rather than silently changing list settings. No extra file list or lookup-key synchronization is needed. Task deletion/recycling follows SharePoint's native item/attachment lifecycle. List attachments are suitable for task supporting documents; use a document library instead if a future requirement calls for independent document versioning, metadata, or approval workflows.
+
+Uploads use the existing authenticated SharePoint session, form digest, and binary request body. List and item permissions govern read/write access. Standard users need appropriate SharePoint item-edit permissions to upload, even though the app permits them to change only selected task fields. The app role restrictions are not server-side ACLs; grant SMEs read access at SharePoint where practical. Shared testing-manager access remains a testing feature and should be disabled for production as described above. SMEs cannot use that feature to promote themselves.
+
+Run the additive schema update with an account allowed to create fields before read-only SME users open the updated build. EstimatedHours is a Number column; existing tasks load with a blank estimate. AppRole is already text and needs no schema change to store SME.
+
+The app does not overwrite or delete attachments. If an upload fails, successfully uploaded files remain attached; refresh the list before retrying uncertain outcomes. Files over the app's 20 MB limit or duplicate filenames must be renamed/reduced or managed separately. Local preview attachments stay in the browser's IndexedDB and are not uploaded to SharePoint.
+
+REST reference: https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/working-with-folders-and-files-with-rest#working-with-files-attached-to-list-items-by-using-rest

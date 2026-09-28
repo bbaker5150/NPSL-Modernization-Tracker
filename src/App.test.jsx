@@ -386,4 +386,23 @@ describe('application shell', () => {
     expect((await createRepository().store.load()).tasks.find((row) => row.id === 'alpha-task').assignedDate).toBe('2026-09-15');
   });
 
+  it('gives SMEs full portfolio visibility with read-only task details', async () => {
+    const raw = createRepository().store;
+    await raw.saveUser({ id: 'sme', title: 'Local Engineer', loginName: 'local', role: 'SME' });
+    await raw.saveProject({ id: 'outside', projectKey: 'outside', title: 'Other project', ownerKey: 'other', ownerName: 'Other Engineer' });
+    await raw.saveTask({ id: 'outside-task', projectKey: 'outside', title: 'Other task', status: 'Not Started', phaseKey: 'requirement', estimatedHours: 4.5 });
+    await renderApp(false);
+    expect(document.body.textContent).toContain('Modernization at a glance');
+    expect(document.body.textContent).toContain('Other project');
+    expect(document.body.textContent).not.toContain('New project');
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    expect(document.querySelector('[aria-label="Project settings"]')).toBeNull();
+    await act(async () => document.querySelector('.upcoming-list button').click());
+    expect(document.querySelector('.modal h2').textContent).toBe('Task details');
+    expect(document.querySelector('.task-fields').disabled).toBe(true);
+    expect(document.querySelector('[aria-label="Est. Hours"]').value).toBe('4.5');
+    expect(document.querySelector('[aria-label="Attach documents"]')).toBeNull();
+    expect([...document.querySelectorAll('.modal button')].some((row) => row.textContent === 'Save task')).toBe(false);
+  });
+
 });

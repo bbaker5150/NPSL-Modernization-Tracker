@@ -1,3 +1,4 @@
+import { validateAttachment } from './taskAttachments';
 import { workflowData, normalizePhaseKey } from '../data/workflow';
 import { isOwnedByUser, userIdentityKey } from './repository';
 
@@ -6,11 +7,15 @@ export const DEFAULT_TEST_MANAGER_PASSWORD = 'admin123';
 export function isManager(user, users = []) {
   return users.some((entry) => entry.role === 'Manager' && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
 }
+export function isSME(user, users = []) {
+  return !isManager(user, users) && users.some((entry) => entry.role === 'SME' && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
+}
+export function canViewPortfolio(user, users = []) { return isManager(user, users) || isSME(user, users); }
 export function canUpdateTask(task, user, projects) {
   return isOwnedByUser(task, user) || projects.some((project) => project.projectKey === task.projectKey && isOwnedByUser(project, user));
 }
 export function visibleData(data, user) {
-  if (isManager(user, data.users)) return data;
+  if (canViewPortfolio(user, data.users)) return data;
   const tasks = data.tasks.filter((task) => canUpdateTask(task, user, data.projects));
   const keys = new Set(tasks.map((task) => task.projectKey));
   const projects = data.projects.filter((project) => isOwnedByUser(project, user) || keys.has(project.projectKey));
@@ -21,6 +26,7 @@ export function visibleData(data, user) {
 export function validateTask(task) {
   if (!task.title?.trim()) throw new Error('Enter a task name.');
   if (!['Not Started', 'In Progress', 'In Progress – At Program Office', 'Blocked', 'Complete', 'Not Required', 'Not Applicable'].includes(task.status)) throw new Error('Select a valid task status.');
+  if (task.estimatedHours !== '' && task.estimatedHours != null && (!Number.isFinite(Number(task.estimatedHours)) || Number(task.estimatedHours) < 0)) throw new Error('Estimated hours must be a nonnegative number or left blank.');
   for (const date of [task.dueDate, task.deferredDate, task.assignedDate]) {
     if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) !== date)) throw new Error('Enter a valid date.');
   }
@@ -48,7 +54,9 @@ export function authorizedStore(raw, config = {}) {
         const key = userIdentityKey(user);
         if (!key) throw new Error('Your signed-in identity could not be resolved.');
         const existing = (data.users || []).find((entry) => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
+        if (property === 'registerCurrentUser' && existing?.role === 'SME') return existing;
         if (property === 'activateTestingManager') {
+          if (isSME(user, data.users)) throw new Error('Ask a manager to change your SME role.');
           const expected = config.testingManagerPassword ?? DEFAULT_TEST_MANAGER_PASSWORD;
           if (!expected || password !== expected) throw new Error('Testing password is incorrect or testing access is disabled.');
         }
@@ -59,6 +67,7 @@ export function authorizedStore(raw, config = {}) {
       if (property === 'load') return async () => { const { data, user } = await context(); return visibleData(data, user); };
       if (property === 'saveProgressMode') return async (id, mode) => {
         const { user, data, manager } = await context();
+        if (isSME(user, data.users)) throw new Error('SME access is read-only.');
         const project = data.projects.find((row) => row.id === id);
         if (!project || (!manager && !isOwnedByUser(project, user))) throw new Error('Only the project owner or a manager can change progress calculation.');
         if (!['phases', 'tasks'].includes(mode)) throw new Error('Select a valid progress calculation.');
@@ -66,6 +75,7 @@ export function authorizedStore(raw, config = {}) {
       };
       if (property === 'saveTask') return async (row) => {
         const { user, data, manager } = await context();
+        if (isSME(user, data.users)) throw new Error('SME access is read-only.');
         const existing = data.tasks.find((task) => task.id === row.id);
         let next = { ...row };
         if (!manager) {
@@ -82,15 +92,27 @@ export function authorizedStore(raw, config = {}) {
         }
         if (!existing && !next.assignedDate) next.assignedDate = new Date().toISOString().slice(0, 10);
         validateTask(next);
+        next.estimatedHours = next.estimatedHours === '' || next.estimatedHours == null ? null : Number(next.estimatedHours);
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';
         return raw.saveTask(next);
+      };
+      if (['listTaskAttachments', 'addTaskAttachment'].includes(property)) return async (taskId, file) => {
+        const { user, data, manager } = await context();
+        const task = data.tasks.find((row) => row.id === taskId);
+        if (!task || (!canViewPortfolio(user, data.users) && !canUpdateTask(task, user, data.projects))) throw new Error('You cannot access documents for this task.');
+        if (property === 'addTaskAttachment') {
+          if (isSME(user, data.users) || (!manager && !canUpdateTask(task, user, data.projects))) throw new Error('You cannot attach documents to this task.');
+          validateAttachment(file);
+          return raw.addTaskAttachment(task, file);
+        }
+        return raw.listTaskAttachments(task);
       };
       if (property === 'saveTasks') return undefined;
       if (['saveProject', 'saveUpdate', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
         const { data, user } = await requireManager();
         if (property === 'saveUser') {
           const row = args[0];
-          if (!row.title?.trim() || !userIdentityKey(row) || !['Manager', 'User'].includes(row.role)) throw new Error('Name, login/email and role are required.');
+          if (!row.title?.trim() || !userIdentityKey(row) || !['Manager', 'SME', 'User'].includes(row.role)) throw new Error('Name, login/email and role are required.');
           if (data.users?.some((entry) => entry.id !== row.id && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, row))) throw new Error('This user is already in the directory.');
           if (row.role !== 'Manager' && isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, user)) throw new Error('Ask another manager to change your role.');
         }

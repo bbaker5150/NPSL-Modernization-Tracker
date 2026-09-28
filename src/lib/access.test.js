@@ -86,3 +86,33 @@ describe('role and task authorization', () => {
   });
 
 });
+
+describe('SME viewing and task documents', () => {
+  it('allows SME portfolio and attachment reads but denies mutations even on owned tasks', async () => {
+    const smeData = { ...structuredClone(data), users: [{ id: 'sme', email: user.email, role: 'SME' }] };
+    const raw = { currentUser: async () => user, load: async () => smeData, listTaskAttachments: vi.fn(async () => [{ name: 'review.pdf', url: '/review.pdf' }]), addTaskAttachment: vi.fn(), saveTask: vi.fn(), saveProject: vi.fn(), saveUser: vi.fn(), recycle: vi.fn() };
+    const store = authorizedStore(raw);
+    expect((await store.load()).projects).toHaveLength(2);
+    await expect(store.listTaskAttachments('t2')).resolves.toHaveLength(1);
+    await expect(store.saveTask({ ...task, status: 'Complete' })).rejects.toThrow('read-only');
+    await expect(store.saveProgressMode('p1', 'tasks')).rejects.toThrow('read-only');
+    await expect(store.addTaskAttachment('t1', new File(['x'], 'a.txt'))).rejects.toThrow('cannot attach');
+    await expect(store.saveUser({ role: 'Manager' })).rejects.toThrow('Only managers');
+    await expect(store.activateTestingManager('admin123')).rejects.toThrow('Ask a manager');
+    expect(raw.addTaskAttachment).not.toHaveBeenCalled();
+  });
+  it('allows a standard user to attach only to authorized saved tasks without saving task fields', async () => {
+    const raw = { currentUser: async () => user, load: async () => structuredClone(data), addTaskAttachment: vi.fn(async () => []), listTaskAttachments: vi.fn(async () => []), saveTask: vi.fn() };
+    const store = authorizedStore(raw);
+    const file = new File(['report'], 'report.txt');
+    await store.addTaskAttachment('t1', file);
+    expect(raw.addTaskAttachment).toHaveBeenCalledWith(task, file);
+    expect(raw.saveTask).not.toHaveBeenCalled();
+    await expect(store.addTaskAttachment('t2', file)).rejects.toThrow('cannot access');
+    await expect(store.listTaskAttachments('unknown')).rejects.toThrow('cannot access');
+  });
+  it('accepts optional estimated hours and rejects negative or nonnumeric values', () => {
+    for (const estimatedHours of [null, '', 0, 2.5]) expect(() => validateTask({ ...task, estimatedHours })).not.toThrow();
+    for (const estimatedHours of [-1, 'bad', Infinity]) expect(() => validateTask({ ...task, estimatedHours })).toThrow('Estimated hours');
+  });
+});

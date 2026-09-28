@@ -139,11 +139,19 @@ try {
   await reopenedTask.waitFor();
   await reopenedTask.locator('xpath=..').click({ position: { x: 110, y: 12 } });
   await frame.getByRole('heading', { name: 'Update task' }).waitFor();
+  await frame.getByLabel('Est. Hours', { exact: true }).fill('3.5');
+  await frame.getByLabel('Attach documents', { exact: true }).setInputFiles({ name: 'smoke-report.txt', mimeType: 'text/plain', buffer: Buffer.from('Task document smoke test') });
+  await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+
   await frame.locator('.modal select option', { hasText: 'Not Required' }).waitFor({ state: 'attached' });
   await frame.locator('.modal select').filter({ has: frame.locator('option', { hasText: 'Not Required' }) }).selectOption({ label: 'Not Required' });
   await frame.getByLabel('Not required justification').fill('Not applicable to this modernization project');
   await frame.getByRole('button', { name: 'Save task' }).click();
   await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).waitFor();
+  await frame.getByRole('button', { name: quickCompleteLabel.replace('Complete', 'Reopen'), exact: true }).locator('xpath=..').click({ position: { x: 110, y: 12 } });
+  await frame.getByRole('link', { name: 'smoke-report.txt', exact: true }).waitFor();
+  if (await frame.getByLabel('Est. Hours', { exact: true }).inputValue() !== '3.5') errors.push('Estimated hours did not persist');
+  await frame.locator('.modal').getByRole('button', { name: 'Cancel', exact: true }).click();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
   // The register should span the same content width as the pipeline panel.
   for (const width of [1440, 768]) {
