@@ -14,16 +14,16 @@ async function attachmentDb() {
     request.onerror = () => reject(new Error('Local attachment storage is unavailable.'));
   });
 }
-export async function localAttachments(taskId, file) {
+export async function localAttachments(taskId, file, deleteName) {
   const db = await attachmentDb();
   try {
     return await new Promise((resolve, reject) => {
-      const tx = db.transaction('files', file ? 'readwrite' : 'readonly');
+      const tx = db.transaction('files', file || deleteName ? 'readwrite' : 'readonly');
       const store = tx.objectStore('files');
-      const request = file ? store.add({ key: `${taskId}/${file.name.toLowerCase()}`, taskId, name: file.name, blob: file }) : store.getAll();
+      const request = deleteName ? store.delete(`${taskId}/${deleteName.toLowerCase()}`) : file ? store.add({ key: `${taskId}/${file.name.toLowerCase()}`, taskId, name: file.name, blob: file }) : store.getAll();
       let result;
       request.onsuccess = () => { result = request.result; };
-      tx.oncomplete = () => resolve(file ? undefined : result.filter((row) => row.taskId === taskId));
+      tx.oncomplete = () => resolve(file || deleteName ? undefined : result.filter((row) => row.taskId === taskId));
       tx.onerror = () => reject(new Error(file ? 'Could not store the file. A document with this name may already exist, or browser storage may be full.' : 'Could not read local attachments.'));
       tx.onabort = tx.onerror;
     });

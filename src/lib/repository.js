@@ -32,6 +32,7 @@ class LocalStore {
   async provision() { return []; }
   async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey) })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey) })); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
+  async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
   async addTaskAttachment(task, file) { validateAttachment(file); await localAttachments(task.id, file); return this.listTaskAttachments(task); }
   async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row) { return this.upsert('projects', row, 'project'); }
