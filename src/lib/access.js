@@ -49,6 +49,10 @@ export function authorizedStore(raw, config = {}) {
   };
   return new Proxy(raw, {
     get(target, property) {
+      if (['searchPeople', 'resolvePerson'].includes(property)) return async (value) => {
+        await requireManager();
+        return raw[property](value);
+      };
       if (property === 'registerCurrentUser' || property === 'activateTestingManager') return async (password) => {
         const { user, data } = await context();
         const key = userIdentityKey(user);

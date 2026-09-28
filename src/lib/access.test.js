@@ -137,3 +137,20 @@ describe('project document access', () => {
     await expect(store.deleteTaskAttachment('t2', 'report.pdf')).rejects.toThrow('Only project owners');
   });
 });
+
+
+describe('directory search authorization', () => {
+  it('limits people search and identity resolution to managers', async () => {
+    const state = structuredClone(data);
+    const raw = { currentUser: async () => user, load: async () => state, searchPeople: vi.fn(async () => []), resolvePerson: vi.fn(async () => ({ loginName: 'resolved' })) };
+    const store = authorizedStore(raw);
+    for (const role of ['User', 'SME']) {
+      state.users = [{ email: user.email, role }];
+      await expect(store.searchPeople('Engineer')).rejects.toThrow('Only managers');
+      await expect(store.resolvePerson('engineer')).rejects.toThrow('Only managers');
+    }
+    state.users[0].role = 'Manager';
+    await expect(store.searchPeople('Engineer')).resolves.toEqual([]);
+    await expect(store.resolvePerson('engineer')).resolves.toEqual({ loginName: 'resolved' });
+  });
+});

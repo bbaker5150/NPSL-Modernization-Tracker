@@ -1,3 +1,4 @@
+import { parsePeopleResults } from './peoplePicker';
 import { validateAttachment } from './taskAttachments';
 import { normalizePhaseKey } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
@@ -317,6 +318,22 @@ export class SharePointStore {
     if ((settings.d || settings).EnableAttachments === false) throw new Error('Attachments are disabled on the tasks list. Ask a site owner to enable list attachments.');
     await this.post(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})/AttachmentFiles/add(FileName='${escapeOData(file.name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() });
     return this.listTaskAttachments(task);
+  }
+
+  async searchPeople(query) {
+    if (query.trim().length < 2) return [];
+    const result = await this.post('/_api/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.clientPeoplePickerSearchUser', {
+      body: { queryParams: { AllowEmailAddresses: true, AllowMultipleEntities: false, AllUrlZones: false, MaximumEntitySuggestions: 15, PrincipalSource: 15, PrincipalType: 1, QueryString: query.trim() } },
+    });
+    return parsePeopleResults(result);
+  }
+
+  async resolvePerson(loginName) {
+    if (!loginName?.trim()) throw new Error('Select a person from the directory.');
+    const response = await this.post('/_api/web/ensureuser', { body: { logonName: loginName } });
+    const person = response.d || response;
+    if (!person.LoginName || !person.Title) throw new Error('SharePoint could not resolve this person. Search and select them again.');
+    return { title: person.Title, email: person.Email || '', loginName: person.LoginName };
   }
 
   async saveUser(row) {

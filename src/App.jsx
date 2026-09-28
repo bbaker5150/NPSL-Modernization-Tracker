@@ -1,3 +1,4 @@
+import { PeopleInvite } from './components/PeopleInvite';
 import { TaskDocuments } from './components/TaskDocuments';
 import { displayName } from './lib/displayName';
 import { projectProgress } from './data/workflow';
@@ -280,7 +281,7 @@ function UserPicker({ users, label, onSelect }) {
   return <Field label={label}><select value="" onChange={(event) => { const entry = users.find((row) => row.id === event.target.value); if (entry) onSelect(entry); }}><option value="">Select a saved user…</option>{users.map((entry) => <option key={entry.id} value={entry.id}>{displayName(entry.title)} — {entry.email || entry.loginName} ({entry.role})</option>)}</select></Field>;
 }
 
-function UserDirectory({ users, manager, testingEnabled, onActivate, onSave }) {
+function UserDirectory({ users, store, config, localPreview, manager, testingEnabled, onActivate, onSave }) {
   const [password, setPassword] = useState('');
   const [activationError, setActivationError] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -310,7 +311,7 @@ function UserDirectory({ users, manager, testingEnabled, onActivate, onSave }) {
     } catch (error) { setSaveError(error.message || 'User could not be saved. Please try again.'); }
     finally { setSaving(false); }
   }
-  return <section className="page-stack"><h1>Users and managers</h1><p>Signed-in users and their application roles.</p>{!manager && testingEnabled && <form className="panel directory-form" onSubmit={activate}><h2>Testing manager access</h2><p>Testing only: enter the shared testing password to grant your signed-in account manager access.</p><Field label="Testing password"><input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>{activationError && <p role="alert" className="inline-error">{activationError}</p>}<button type="button" className="button primary" onClick={activate} disabled={saving || !password}>{saving ? 'Saving and verifying role…' : 'Enable manager access'}</button>{saving && <p role="status">Please wait while your manager role is saved and verified.</p>}</form>}{manager && <form className="panel directory-form" noValidate onSubmit={saveDirectoryUser}>
+  return <section className="page-stack"><h1>Users and managers</h1><p>Signed-in users and their application roles.</p>{manager && <PeopleInvite store={store} config={config} localPreview={localPreview} onSave={async (person) => { if (users.some((entry) => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, person))) throw new Error('This person is already in the tracker. Use Edit to change their role.'); return onSave({ ...person, id: uid('user') }); }} />}{!manager && testingEnabled && <form className="panel directory-form" onSubmit={activate}><h2>Testing manager access</h2><p>Testing only: enter the shared testing password to grant your signed-in account manager access.</p><Field label="Testing password"><input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>{activationError && <p role="alert" className="inline-error">{activationError}</p>}<button type="button" className="button primary" onClick={activate} disabled={saving || !password}>{saving ? 'Saving and verifying role…' : 'Enable manager access'}</button>{saving && <p role="status">Please wait while your manager role is saved and verified.</p>}</form>}{manager && <form className="panel directory-form" noValidate onSubmit={saveDirectoryUser}>
     {['title', 'email'].map((key) => <Field key={key} label={{ title: 'Name', email: 'Email', loginName: 'SharePoint login' }[key]}><input type={key === 'email' ? 'email' : 'text'} required={key === 'title' || !draft.loginName?.trim()} disabled={saving} value={draft[key] || ''} onChange={(event) => setDraft((row) => ({ ...row, [key]: event.target.value }))} /></Field>)}
     <Field label="Role"><select aria-label="Role" disabled={saving} value={draft.role} onChange={(event) => setDraft((row) => ({ ...row, role: event.target.value }))}><option>User</option><option>SME</option><option>Manager</option></select></Field><button type="button" className="button primary" onClick={saveDirectoryUser} disabled={saving}>{saving ? 'Saving and verifying role…' : 'Save user'}</button>{draft.id && <button type="button" className="button secondary" disabled={saving} onClick={() => { setDraft(empty); setSaveError(''); setSaveMessage(''); }}>Cancel edit</button>}
     {saveError && <p role="alert" className="inline-error">{saveError}</p>}{saveMessage && <p role="status">{saveMessage}</p>}
@@ -445,7 +446,7 @@ export function App() {
   }
 
   async function saveUser(row) {
-    try { const saved = await repo.store.saveUser(row); setData((state) => ({ ...state, users: (state.users || []).some((entry) => entry.id === saved.id) ? state.users.map((entry) => entry.id === saved.id ? saved : entry) : [...(state.users || []), saved] })); setToast({ message: 'User saved.' }); return true; }
+    try { const saved = await repo.store.saveUser(row); setData((state) => ({ ...state, users: (state.users || []).some((entry) => entry.id === saved.id) ? state.users.map((entry) => entry.id === saved.id ? saved : entry) : [...(state.users || []), saved] })); setToast({ message: 'User saved.' }); return saved; }
     catch (caught) { setToast({ tone: 'bad', message: caught.message }); throw caught; }
   }
 
@@ -600,7 +601,7 @@ export function App() {
         {view === 'overview' && <Overview projects={enriched} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} onAttention={() => setView('attention')} onBoard={() => setView('board')} register={register} setRegister={setRegister} />}
         {view === 'board' && <Board projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} />}
         {view === 'attention' && <Attention projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} />}
-        {view === 'users' && <UserDirectory users={data.users || []} manager={manager} testingEnabled={!readOnly && repo.config.testingManagerPassword !== false && repo.config.testingManagerPassword !== ''} onActivate={async (password) => { const saved = await repo.store.activateTestingManager(password); const loaded = await repo.store.load(); if (!isManager(user, loaded.users)) throw new Error('The directory still reports your account as a basic user. Manager access could not be confirmed; please reload and try again.'); setData(loaded); setToast({ message: `Manager access confirmed for ${saved.title}.` }); }} onSave={saveUser} />}
+        {view === 'users' && <UserDirectory store={repo.store} config={repo.config} localPreview={repo.mode === 'local'} users={data.users || []} manager={manager} testingEnabled={!readOnly && repo.config.testingManagerPassword !== false && repo.config.testingManagerPassword !== ''} onActivate={async (password) => { const saved = await repo.store.activateTestingManager(password); const loaded = await repo.store.load(); if (!isManager(user, loaded.users)) throw new Error('The directory still reports your account as a basic user. Manager access could not be confirmed; please reload and try again.'); setData(loaded); setToast({ message: `Manager access confirmed for ${saved.title}.` }); }} onSave={saveUser} />}
         {view === 'my-work' && <MyWork projects={enriched} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
         {view === 'glossary' && <Glossary manager={manager} acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
       </main>

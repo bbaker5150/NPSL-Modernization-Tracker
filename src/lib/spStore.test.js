@@ -203,3 +203,19 @@ describe('prompt-free SharePoint removal and downloads', () => {
     await expect(store.downloadTaskAttachment({ spId: 1 }, 'missing.pdf')).rejects.toThrow('no longer exists');
   });
 });
+
+
+describe('SharePoint people picker', () => {
+  it('searches resolved individual users and resolves the selected identity before saving', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn().mockResolvedValueOnce({ d: { ClientPeoplePickerSearchUser: JSON.stringify([
+      { Key: 'claims|person', DisplayText: 'Person', IsResolved: true, EntityType: 'User', EntityData: { Email: 'person@example.test' } },
+      { Key: 'group', IsResolved: true, EntityType: 'SecGroup' },
+      { Key: 'unresolved', IsResolved: false, EntityType: 'User' },
+    ]) } }).mockResolvedValueOnce({ d: { Id: 3, Title: 'Person', Email: 'person@example.test', LoginName: 'claims|person' } });
+    expect(await store.searchPeople('Person')).toEqual([{ title: 'Person', email: 'person@example.test', loginName: 'claims|person', detail: '' }]);
+    expect(store.post.mock.calls[0][1].body.queryParams).toMatchObject({ PrincipalType: 1, QueryString: 'Person', MaximumEntitySuggestions: 15 });
+    expect(await store.resolvePerson('claims|person')).toEqual({ title: 'Person', email: 'person@example.test', loginName: 'claims|person' });
+    expect(store.post.mock.calls[1]).toEqual(['/_api/web/ensureuser', { body: { logonName: 'claims|person' } }]);
+  });
+});
