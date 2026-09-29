@@ -33,6 +33,14 @@ export function trackerPageUrl(value, webUrl) {
 
 export function invitationUrl(config = {}, win = window) {
   const candidates = [config.appUrl];
+  // This deployment's host can expose a Pages library view instead of the app.
+  // Keep explicit configuration authoritative; sharing still checks the file.
+  try {
+    const site = new URL(config.webUrl);
+    if (site.origin === 'https://flankspeed.sharepoint-mil.us' && site.pathname.replace(/\/$/, '').toLowerCase() === '/sites/iseameteng') {
+      candidates.push(`${site.origin}${site.pathname.replace(/\/$/, '')}/SitePages/Modernization%20Tracker.aspx`);
+    }
+  } catch { /* no recognized deployment */ }
   try { if (win.parent !== win) candidates.push(win.parent.location.href); } catch { /* cross-origin host */ }
   candidates.push(win.location?.href, win.document?.referrer);
   // Never substitute a site/library URL for the actual tracker page.
