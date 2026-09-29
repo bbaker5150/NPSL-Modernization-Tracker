@@ -472,7 +472,7 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('.invitation-result').textContent).toContain('invitation email requested automatically');
+    expect(document.querySelector('.invitation-result').textContent).toContain('one tracker invitation email requested');
     expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'SME', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 
