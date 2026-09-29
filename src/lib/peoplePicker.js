@@ -50,12 +50,3 @@ export function invitationUrl(config = {}, win = window) {
   }
   return '';
 }
-
-export function invitationMailto(person, role, url) {
-  const parsed = new URL(url);
-  if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('Enter a valid app link.');
-  if (!person.email || /[\r\n]/.test(person.email)) throw new Error('This person has no email address. Copy the invitation link instead.');
-  const subject = 'Invitation to the NPSL Modernization Tracker';
-  const body = `Hello ${person.title},\n\nYou have been added to the NPSL Modernization Tracker as ${role}.\n\nOpen the tracker: ${parsed.href}\n\nSign in with your Flank Speed account. If SharePoint says access is denied, contact the site owner for access.\n`;
-  return `mailto:${encodeURIComponent(person.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}

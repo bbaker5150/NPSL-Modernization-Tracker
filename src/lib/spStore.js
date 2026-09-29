@@ -57,6 +57,10 @@ export const CONTAINERS = [
   { key: 'users', suffix: 'Users', description: 'Tracker user directory and application roles.', fields: [
     ['RecordId', 'Record ID', FIELD.TEXT, true], ['LoginKey', 'Login Key', FIELD.TEXT, true], ['Email', 'Email', FIELD.TEXT], ['AppRole', 'Application Role', FIELD.TEXT],
   ] },
+  { key: 'references', suffix: 'ReferenceDocuments', description: 'Shared reference templates and folder organization.', fields: [
+    ['RecordId', 'Record ID', FIELD.TEXT, true], ['ReferenceParentId', 'Parent ID', FIELD.TEXT, true],
+    ['EntryKind', 'Entry Kind', FIELD.TEXT], ['FileName', 'File Name', FIELD.TEXT], ['FileSize', 'File Size', FIELD.NUMBER],
+  ] },
 ].map((container) => ({
   ...container,
   fields: [...container.fields, ['Archived', 'Archived', FIELD.BOOLEAN]].map(([name, title, type, indexed = false]) => ({ name, title, type, indexed, inView: type !== FIELD.NOTE })),
@@ -183,7 +187,7 @@ export class SharePointStore {
     const steps = [];
     for (const container of CONTAINERS) {
       if (!(await this.listExists(container.key))) {
-        await this.post('/_api/web/lists', { body: { Title: titleFor(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(container.key === 'tasks' ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: this.hideLists } });
+        await this.post('/_api/web/lists', { body: { Title: titleFor(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(['tasks', 'references'].includes(container.key) ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: this.hideLists } });
         steps.push(`Created ${titleFor(this.prefix, container.key)}`);
       }
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
@@ -318,6 +322,42 @@ export class SharePointStore {
     if ((settings.d || settings).EnableAttachments === false) throw new Error('Attachments are disabled on the tasks list. Ask a site owner to enable list attachments.');
     await this.post(`${apiFor(this.prefix, 'tasks')}/items(${task.spId})/AttachmentFiles/add(FileName='${escapeOData(file.name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() });
     return this.listTaskAttachments(task);
+  }
+
+  async listReferenceEntries() {
+    return this.listItems('references', ['RecordId', 'ReferenceParentId', 'EntryKind', 'FileName', 'FileSize', 'Archived'], (item) => ({
+      id: item.RecordId, spId: item.Id, name: item.Title, parentId: item.ReferenceParentId || '',
+      kind: item.EntryKind, fileName: item.FileName || '', size: item.FileSize || 0,
+    }));
+  }
+
+  async saveReferenceEntry(row, file) {
+    const next = { ...row, id: row.id || `ref-${crypto.randomUUID()}` };
+    const fields = { Title: next.name, RecordId: next.id, ReferenceParentId: next.parentId, EntryKind: next.kind, FileName: next.fileName || '', FileSize: next.size || 0 };
+    if (next.spId) await this.update('references', next.spId, fields);
+    else {
+      // Incomplete uploads stay hidden, and retries never replace another file.
+      next.spId = await this.create('references', { ...fields, Archived: !!file });
+      if (!next.spId) throw new Error('SharePoint did not return a reference item ID.');
+      if (file) {
+        await this.post(`${apiFor(this.prefix, 'references')}/items(${next.spId})/AttachmentFiles/add(FileName='${escapeOData(file.name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() });
+        await this.update('references', next.spId, { Archived: false });
+      }
+    }
+    const saved = (await this.listReferenceEntries()).find((entry) => entry.id === next.id);
+    if (!saved || saved.name !== next.name || saved.parentId !== next.parentId) throw new Error('SharePoint did not confirm the reference document changes.');
+    return saved;
+  }
+
+  async downloadReferenceEntry(row) {
+    const body = await this.get(`${apiFor(this.prefix, 'references')}/items(${row.spId})/AttachmentFiles?$select=FileName,ServerRelativeUrl`);
+    const file = (body.value || body.d?.results || []).find((entry) => entry.FileName === row.fileName);
+    if (!file) throw new Error('This reference document is unavailable.');
+    const url = new URL(file.ServerRelativeUrl, this.webUrl);
+    if (url.origin !== new URL(this.webUrl).origin) throw new Error('Unexpected reference document address.');
+    const response = await this.fetchImpl(url.href, { credentials: 'include', headers: { Accept: '*/*' } });
+    if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
+    return response.blob();
   }
 
   async shareSiteAccess(person, role, appUrl) {

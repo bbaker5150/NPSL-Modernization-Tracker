@@ -120,6 +120,14 @@ All tracker roles, including SME, receive the Members group's underlying SharePo
 
 Use the direct published tracker ASPX page as the email destination. Set window.MOD_TRACKER_CONFIG.appUrl to override detection. The known ISEA METENG deployment defaults to SitePages/Modernization Tracker.aspx; other deployments use available parent/current/referrer page hints. Site roots and Pages library views are rejected. The page must exist and be published; owners must publish or republish it themselves.
 
-Email is requested only after membership and access verification. Delivery is not confirmed. A failure preserves the saved directory role and allows Retry site invitation. Reinviting a user with the same role does not duplicate the directory record. Existing roles are changed through Edit. Retrying can request another email. Draft email and Copy invitation link remain fallbacks. Local preview cannot grant SharePoint access or send an automatic invitation.
+Email is requested only after membership and access verification. Delivery is not confirmed. A failure preserves the saved directory role and allows Retry site invitation. Reinviting a user with the same role does not duplicate the directory record. Existing roles are changed through Edit. Retrying can request another email. The invitation link is resolved internally; the link field and draft/copy controls are removed. Local preview cannot grant SharePoint access or send an automatic invitation.
 
 Directory editing uses Edit → Update User / Delete User. Delete archives the tracker directory entry, not SharePoint membership or permissions. Self-deletion is disabled.
+
+
+### Reference Documents
+Reference Documents appears below My work for all roles. Users and managers can upload (20 MB per file), create nested folders, rename entries, and move them between folders. SMEs can browse, search, and download. Search spans the shared library. Downloads fetch bytes without opening a SharePoint document page.
+
+The deployment adds the ModernizationReferenceDocuments list (or the configured prefix). Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
+
+The user directory now has compact scrollable rows and a name/email/role search while retaining each user's role badge and Edit menu.
