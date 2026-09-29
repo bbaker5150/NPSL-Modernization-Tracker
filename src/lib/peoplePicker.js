@@ -25,16 +25,20 @@ export function normalizeInvitationUrl(value, webUrl) {
   } catch { throw new Error('Enter the full published tracker page URL in App invitation link. It must be on this SharePoint site.'); }
 }
 
+export function trackerPageUrl(value, webUrl) {
+  const url = new URL(normalizeInvitationUrl(value, webUrl));
+  if (!/\.(aspx|html?)$/i.test(url.pathname) || /\/(Forms|_layouts)\//i.test(url.pathname)) throw new Error('Use the direct published tracker page URL, not the site address or Pages library view.');
+  return url.href;
+}
+
 export function invitationUrl(config = {}, win = window) {
   const candidates = [config.appUrl];
   try { if (win.parent !== win) candidates.push(win.parent.location.href); } catch { /* cross-origin host */ }
   candidates.push(win.location?.href, win.document?.referrer);
-  // srcdoc/blob frames may expose only the SharePoint web context. Provide a
-  // usable site link as the final fallback; the manager can replace it with the app page.
-  candidates.push(config.webUrl);
+  // Never substitute a site/library URL for the actual tracker page.
   for (const candidate of candidates) {
     if (!candidate || /^(about|blob|data):/i.test(candidate)) continue;
-    try { return normalizeInvitationUrl(candidate, config.webUrl); } catch { /* next host hint */ }
+    try { return trackerPageUrl(candidate, config.webUrl); } catch { /* next host hint */ }
   }
   return '';
 }

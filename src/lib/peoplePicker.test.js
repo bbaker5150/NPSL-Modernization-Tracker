@@ -8,8 +8,8 @@ describe('embedded invitation URLs', () => {
     Object.defineProperty(win, 'parent', { get() { throw new Error('cross origin'); } });
     expect(invitationUrl({ webUrl }, win)).toBe(`${webUrl}/SitePages/Tracker.aspx`);
   });
-  it('falls back to the site when host details are unavailable', () => {
-    expect(invitationUrl({ webUrl }, { location: { href: 'blob:https://host/abc' } })).toBe(webUrl);
+  it('requires a direct page when host details are unavailable', () => {
+    expect(invitationUrl({ webUrl }, { location: { href: 'blob:https://host/abc' } })).toBe('');
   });
   it('resolves explicit server-relative links and rejects empty or external links', () => {
     expect(invitationUrl({ webUrl, appUrl: '/sites/mod/app.aspx' }, {})).toBe(`${webUrl}/app.aspx`);
