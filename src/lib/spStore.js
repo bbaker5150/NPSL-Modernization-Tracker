@@ -329,11 +329,21 @@ export class SharePointStore {
     catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
     if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
     if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
-    // Use Contribute, not Full Control or site-design Edit, for working roles.
-    const kind = role === 'SME' ? 2 : 3;
-    const definitions = await this.get(`/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq ${kind}`);
-    const definition = (definitions.value || definitions.d?.results || []).find((entry) => entry.RoleTypeKind === kind);
-    if (!definition?.Id) throw new Error('The required SharePoint permission level is unavailable. Ask a site owner.');
+    const groupResponse = await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
+    const group = groupResponse.d || groupResponse;
+    if (!Number.isInteger(group.Id) || group.Id <= 0) throw new Error('The site Members group is unavailable. Ask a site owner to configure it.');
+    const membersApi = `/_api/web/sitegroups(${group.Id})/users`;
+    const membershipUrl = `${membersApi}?$select=Id,LoginName&$filter=LoginName eq '${escapeOData(person.loginName)}'`;
+    const isMember = async () => {
+      const response = await this.get(membershipUrl);
+      return (response.value || response.d?.results || []).some((user) => user.LoginName?.toLowerCase() === person.loginName.toLowerCase());
+    };
+    try {
+      if (!(await isMember())) await this.post(membersApi, { body: { LoginName: person.loginName } });
+      if (!(await isMember())) throw new Error('SharePoint did not confirm group membership.');
+    } catch (error) {
+      throw new Error(`Could not verify membership in ${group.Title || 'the site Members group'}. The inviting account must be allowed to manage this group. No invitation email was requested. ${error.message}`);
+    }
     const share = async (url, roleId, sendEmail) => {
     const response = await this.post('/_api/SP.Web.ShareObject', { body: {
       url,
@@ -347,21 +357,19 @@ export class SharePointStore {
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
     if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm sharing. The inviting manager must have permission to share this site.');
     };
-    const readDefinitions = kind === 2 ? definitions : await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
+    const readDefinitions = await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
     const readRole = (readDefinitions.value || readDefinitions.d?.results || []).find((entry) => entry.RoleTypeKind === 2);
     if (!readRole?.Id) throw new Error('The Read permission level is unavailable. Ask a site owner.');
-    await share(this.webUrl, definition.Id, false);
-    await share(link.href, readRole.Id, false);
     const permissions = await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
     const effective = permissions?.d?.GetUserEffectivePermissions || permissions?.GetUserEffectivePermissions || permissions?.d || permissions;
-    const required = role === 'SME' ? 1 : 7;
+    const required = 1;
     if (!Number.isFinite(Number(effective?.Low)) || (Number(effective.Low) & required) !== required) throw new Error('Sharing was accepted, but site access could not be verified. Ask a site owner to check permissions before retrying.');
     const pagePermissions = await this.get(`${fileApi}/ListItemAllFields/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
     const pageEffective = pagePermissions?.d?.GetUserEffectivePermissions || pagePermissions?.GetUserEffectivePermissions || pagePermissions?.d || pagePermissions;
     if (!Number.isFinite(Number(pageEffective?.Low)) || (Number(pageEffective.Low) & 33) !== 33) throw new Error('Site access was granted, but tracker page access could not be verified. No invitation email was requested. Ask a site owner to check the page permissions.');
     // Send only the page-targeted notification, after both checks pass.
     await share(link.href, readRole.Id, true);
-    return { access: role === 'SME' ? 'Read' : 'Contribute', emailRequested: true };
+    return { access: group.Title || 'Site Members', emailRequested: true };
   }
 
   async searchPeople(query) {

@@ -226,35 +226,58 @@ describe('page-targeted invitations', () => {
   const pageUrl = `${site}/SitePages/Tracker.aspx`;
   function setup(low = 7, pageLow = 33, level = 1) {
     const store = new SharePointStore({ webUrl: site });
+    let member = false;
     store.get = vi.fn(async (path) => {
+      if (path.includes('associatedmembergroup')) return { Id: 9, Title: 'ISEA METENG Members' };
+      if (path.includes('sitegroups(9)/users')) return { value: member ? [{ LoginName: 'claims|person' }] : [] };
       if (path.includes('getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: String(path.includes('ListItemAllFields') ? pageLow : low) } };
       if (path.includes('roledefinitions')) return { value: [{ Id: 123, RoleTypeKind: 3 }, { Id: 124, RoleTypeKind: 2 }] };
       return { Exists: true, Level: level };
     });
-    store.post = vi.fn(async () => ({ StatusCode: 0 }));
+    store.post = vi.fn(async (path) => {
+      if (path.includes('sitegroups(9)/users')) member = true;
+      return { StatusCode: 0 };
+    });
     return store;
   }
-  it.each(['SME', 'User', 'Manager'])('shares site and page for %s, then sends only a page invitation', async (role) => {
+  it.each(['SME', 'User', 'Manager'])('adds %s to Members, verifies access, then sends only a page invitation', async (role) => {
     const store = setup();
-    await store.shareSiteAccess({ loginName: 'claims|person' }, role, pageUrl);
-    const requests = store.post.mock.calls.map(([, options]) => options.body);
+    expect(await store.shareSiteAccess({ loginName: 'claims|person' }, role, pageUrl)).toMatchObject({ access: 'ISEA METENG Members' });
+    expect(store.post.mock.calls[0]).toEqual(['/_api/web/sitegroups(9)/users', { body: { LoginName: 'claims|person' } }]);
+    const requests = store.post.mock.calls.filter(([path]) => path.includes('ShareObject')).map(([, options]) => options.body);
     expect(requests.map((row) => [row.url, row.sendEmail, row.roleValue])).toEqual([
-      [site, false, role === 'SME' ? 'role:124' : 'role:123'], [pageUrl, false, 'role:124'], [pageUrl, true, 'role:124'],
+      [pageUrl, true, 'role:124'],
     ]);
     expect(requests.every((row) => row.propagateAcl === false && row.includeAnonymousLinkInEmail === false)).toBe(true);
     expect(store.get.mock.calls.some(([path]) => path.includes('ListItemAllFields/getusereffectivepermissions'))).toBe(true);
   });
+  it('does not add existing members again on retry', async () => {
+    const store = setup();
+    await store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl);
+    await store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl);
+    expect(store.post.mock.calls.filter(([path]) => path.includes('sitegroups'))).toHaveLength(1);
+  });
+  it('blocks email when membership is missing or cannot be confirmed', async () => {
+    const store = setup();
+    store.post.mockResolvedValue({ StatusCode: 0 });
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('did not confirm group membership');
+    expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
+    const get = store.get;
+    store.get = vi.fn((path) => path.includes('associatedmembergroup') ? {} : get(path));
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('Members group is unavailable');
+  });
   it('does not share or email an unpublished page or invalid library link', async () => {
     const store = setup(7, 1, 2);
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('Publish or republish');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('Publish or republish');
     await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
     expect(store.post).not.toHaveBeenCalled();
   });
   it('never sends an invitation when page access verification or sharing fails', async () => {
     const store = setup(7, 0);
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('tracker page access could not be verified');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('tracker page access could not be verified');
     expect(store.post.mock.calls.every(([, options]) => !options.body.sendEmail)).toBe(true);
-    store.post.mockResolvedValue({ StatusCode: -1, ErrorMessage: 'Access denied' });
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('Access denied');
+    store.get.mockImplementation(async (path) => path.includes('associatedmembergroup') ? { Id: 9, Title: 'Members' } : path.includes('users?') ? { value: [] } : { Exists: true, Level: 1 });
+    store.post.mockRejectedValue(new Error('Access denied'));
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('Access denied');
   });
 });

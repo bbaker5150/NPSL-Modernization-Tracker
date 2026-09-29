@@ -111,28 +111,15 @@ On first load after this update, the app's existing automatic provisioning adds 
 Directory Save uses a direct click handler so it works when the embedded host blocks native form submission. SharePoint write errors remain visible in the form and roles are read back before success is shown.
 
 
-### People Picker invitations
-Managers can search organization people in Users and managers → Invite people, select a resolved user, choose an application role, and Add to tracker. Searches use SharePoint ClientPeoplePickerSearchUser with individual users only; ensureuser resolves the login before the existing role save/readback. Existing tracker users must be changed through Edit.
+### People Picker invitations (no Power Automate)
+Managers can search organization people, select a resolved individual, choose a tracker role, and invite them. SharePoint People Picker and ensureuser resolve the identity; the tracker saves and verifies the directory role.
 
-After saving, Draft email invitation opens an addressed draft in the manager's email client; Copy invitation link is also available. No email is sent automatically. SharePoint Utility.SendEmail was retired; automatic email would require an approved Graph/Power Automate integration. The invitation does not grant SharePoint site/list/page permissions. A site owner must give the user the appropriate underlying access. People Picker and ensureuser respect tenant permissions and policy.
+Every invitee joins the site's associated Members SharePoint group (ISEA METENG Members on this deployment). Existing members are not added again. Membership is read back, and effective site and tracker-page access must pass before a page-targeted SP.Web.ShareObject notification is requested. No Owners membership is granted. The inviter needs SharePoint permission to manage the group and share the page; application Manager status does not elevate SharePoint permissions.
 
-Set `window.MOD_TRACKER_CONFIG.appUrl` to the published tracker page URL if necessary. Otherwise the invitation defaults to the same-origin parent page URL (for an embedded app), then the current page. Managers can check/edit the link before sharing. Local preview searches only saved users, not the tenant directory.
+All tracker roles, including SME, receive the Members group's underlying SharePoint permissions. The selected directory role controls tracker features only. Pages, documents, and lists accessible to Members are covered; content with unique permissions that exclude Members requires separate administration. Configure manager-only directory writes separately as appropriate.
 
+Use the direct published tracker ASPX page as the email destination. Set window.MOD_TRACKER_CONFIG.appUrl to override detection. The known ISEA METENG deployment defaults to SitePages/Modernization Tracker.aspx; other deployments use available parent/current/referrer page hints. Site roots and Pages library views are rejected. The page must exist and be published; owners must publish or republish it themselves.
 
-### Direct SharePoint site invitations (no Power Automate)
-The Invite people panel now saves the selected tracker role, calls `SP.Web.ShareObject` for the current web with `sendEmail: true`, and verifies effective site permissions. SMEs receive the site's Read role definition; Users/Managers receive Contribute. No Full Control/Owners membership is granted. The current manager must already have SharePoint permission to share the site; application Manager status does not elevate that permission. SharePoint policy, channel-site restrictions, and email configuration still apply.
+Email is requested only after membership and access verification. Delivery is not confirmed. A failure preserves the saved directory role and allows Retry site invitation. Reinviting a user with the same role does not duplicate the directory record. Existing roles are changed through Edit. Retrying can request another email. Draft email and Copy invitation link remain fallbacks. Local preview cannot grant SharePoint access or send an automatic invitation.
 
-The invitation link is shown before the action and must be on the configured SharePoint web. Sharing applies to the site and inheriting content, not only this app. `propagateAcl` is false: unique list/page permissions are never overwritten. Configure the tracker lists separately where required, particularly manager-only directory writes. Existing broader permissions are not downgraded by inviting someone as SME.
-
-The app reports email as requested, not delivered. A failed sharing call leaves the saved role intact and exposes Retry site invitation. Existing users with the same role can be invited again without a duplicate directory entry; changing an existing role still uses Edit. Retries can request another notification. Local preview cannot grant permissions or send a SharePoint invitation. Draft email/copy link remain fallbacks. This supersedes the earlier draft-only invitation behavior.
-
-
-Invitation URL detection now also uses the embedding page referrer and the detected SharePoint web when frame URLs are `about:srcdoc`/`blob:` or parent access is blocked. A site-only fallback must be reviewed and replaced with the published app page when necessary; `MOD_TRACKER_CONFIG.appUrl` remains the preferred explicit deployment setting. Relative configured links are resolved against the SharePoint web. Invalid links produce an inline instruction before any user save or sharing request.
-
-Directory editing now uses Edit → Update User / Delete User. The update form appears only after Update User and closes on save or cancel. Delete User acts directly from the menu, with self-deletion disabled.
-
-
-### Page-targeted invitations
-Invitations now require the direct tracker `.aspx`/HTML URL, not the site root or a Site Pages library view. Configure `MOD_TRACKER_CONFIG.appUrl` when the embedded host cannot expose the page address. The app checks the target exists and is published before sharing. Owners must publish/republish a draft or checked-out page themselves; this workflow does not publish content automatically.
-
-The site grant suppresses email. A separate Read grant is applied to the specific tracker page without changing unrelated unique permissions. Effective site and page permissions are checked, then a page-targeted sharing notification is requested so the email's shared-object link targets the tracker page. Existing stronger permissions are preserved. Other separately secured tracker lists or embedded HTML assets still require their own access. This supersedes site-root fallback and site-level email behavior described above.
+Directory editing uses Edit → Update User / Delete User. Delete archives the tracker directory entry, not SharePoint membership or permissions. Self-deletion is disabled.
