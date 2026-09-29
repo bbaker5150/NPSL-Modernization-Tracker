@@ -42,6 +42,26 @@ describe('reference document organization', () => {
     await store.saveReferenceEntry(row, file);
     expect(store.update).toHaveBeenCalledWith('references', 8, { Archived: false });
   });
+  it('deletes only resolved entries and blocks SME and nonempty-folder deletion', async () => {
+    const raw = { currentUser: async () => ({ loginName: 'reader' }), load: async () => ({ users: [] }), listReferenceEntries: async () => entries, deleteReferenceEntry: vi.fn() };
+    const store = authorizedStore(raw);
+    await store.deleteReferenceEntry('doc');
+    expect(raw.deleteReferenceEntry).toHaveBeenCalledWith(entries[2]);
+    await expect(store.deleteReferenceEntry('a')).rejects.toThrow('contents');
+    await expect(store.deleteReferenceEntry('missing')).rejects.toThrow('no longer exists');
+    raw.load = async () => ({ users: [{ loginName: 'reader', role: 'SME' }] });
+    await expect(store.deleteReferenceEntry('doc')).rejects.toThrow('read-only');
+    expect(raw.deleteReferenceEntry).toHaveBeenCalledTimes(1);
+  });
+  it('archives SharePoint references without a native delete and verifies persistence', async () => {
+    const store = new SharePointStore({ webUrl: 'https://example.sharepoint.com/sites/mod' });
+    store.update = vi.fn();
+    store.get = vi.fn(async () => ({ Archived: true }));
+    await store.deleteReferenceEntry(entries[2]);
+    expect(store.update).toHaveBeenCalledWith('references', 3, { Archived: true });
+    store.get.mockResolvedValue({ Archived: false });
+    await expect(store.deleteReferenceEntry(entries[2])).rejects.toThrow('did not confirm');
+  });
   it('downloads reference bytes without navigating to SharePoint', async () => {
     const blob = new Blob(['template']);
     const fetchImpl = vi.fn(async () => ({ ok: true, blob: async () => blob }));

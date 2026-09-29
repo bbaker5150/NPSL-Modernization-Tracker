@@ -595,3 +595,8 @@ button.brand { width: 100%; }
 }
 .directory-list-heading input, .reference-toolbar input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface-2); font: inherit; }
 .directory-list-heading input:focus, .reference-toolbar input:focus { outline: 2px solid var(--blue); outline-offset: 2px; }
+.reference-list { padding-bottom: 160px; }
+.reference-actions { position: relative; flex-shrink: 0; }
+.reference-action-menu { position: absolute; z-index: 5; right: 0; top: calc(100% + 4px); min-width: 140px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: 0 8px 24px #0002; }
+.reference-action-menu button { display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.reference-action-menu button:hover, .reference-action-menu button:focus-visible { background: var(--surface-2); outline: 2px solid var(--blue); outline-offset: -2px; }

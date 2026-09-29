@@ -1,6 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { referencePath } from '../lib/referenceDocuments';
+
+function ReferenceActions({ row, busy, readOnly, onDownload, onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event) => { if (event.type === 'keydown' ? event.key === 'Escape' : !ref.current?.contains(event.target)) setOpen(false); };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', dismiss);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', dismiss); };
+  }, [open]);
+  const action = (callback) => { setOpen(false); callback(); };
+  return <div className="reference-actions" ref={ref}>
+    <button type="button" className="button secondary" disabled={busy} aria-label={`Edit ${row.name}`} aria-expanded={open} onClick={() => setOpen(!open)}>Edit</button>
+    {open && <div className="reference-action-menu" aria-label={`Actions for ${row.name}`}>
+      {row.kind === 'file' && <button type="button" onClick={() => action(() => onDownload(row))}>Download</button>}
+      {!readOnly && <><button type="button" onClick={() => action(() => onEdit(row, 'rename'))}>Rename</button><button type="button" onClick={() => action(() => onEdit(row, 'move'))}>Move</button><button type="button" onClick={() => action(() => onDelete(row))}>Delete</button></>}
+    </div>}
+  </div>;
+}
 
 export function ReferenceDocuments({ store, readOnly }) {
   const [entries, setEntries] = useState([]);
@@ -22,7 +42,7 @@ export function ReferenceDocuments({ store, readOnly }) {
   async function save() {
     if (busy) return;
     setBusy(true); setError(''); setMessage('');
-    try { await store.saveReferenceEntry(draft); await refresh(); setDraft(null); setMessage('Reference library updated.'); }
+    try { await store.saveReferenceEntry(draft.id ? draft : { ...draft, parentId: folder }); await refresh(); setDraft(null); setMessage('Reference library updated.'); }
     catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
@@ -53,6 +73,13 @@ export function ReferenceDocuments({ store, readOnly }) {
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
+  async function remove(row) {
+    if (busy) return;
+    setBusy(true); setError(''); setMessage('');
+    try { await store.deleteReferenceEntry(row.id); await refresh(); setDraft(null); setMessage(`${row.name} deleted.`); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
   function navigate(id) { setFolder(id); setQuery(''); setDraft(null); setError(''); }
   const search = query.trim().toLowerCase();
   const rows = entries.filter((row) => search ? row.name.toLowerCase().includes(search) : row.parentId === folder)
@@ -69,10 +96,10 @@ export function ReferenceDocuments({ store, readOnly }) {
         {referencePath(entries, folder).map((row) => <React.Fragment key={row.id}><Icon name="chevron" size={14} /><button type="button" disabled={busy} onClick={() => navigate(row.id)}>{row.name}</button></React.Fragment>)}
       </nav>
       {draft && <div className="reference-editor">
-        <h2>{draft.id ? 'Organize reference' : 'Create folder'}</h2>
-        <label className="field"><span>{draft.kind === 'file' ? 'Document name' : 'Folder name'}</span><input autoFocus value={draft.name} disabled={busy} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-        <label className="field"><span>Folder location</span><select aria-label="Folder location" value={draft.parentId} disabled={busy} onChange={(event) => setDraft({ ...draft, parentId: event.target.value })}><option value="">All references</option>{folders.map((row) => <option key={row.id} value={row.id}>{referencePath(entries, row.id).map((part) => part.name).join(' / ')}</option>)}</select></label>
-        <div className="invite-actions"><button type="button" className="button primary" disabled={busy || !draft.name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save reference'}</button><button type="button" className="button secondary" disabled={busy} onClick={() => setDraft(null)}>Cancel</button></div>
+        <h2>{draft.id ? draft.mode === 'move' ? 'Move to folder' : 'Rename' : 'New folder'}</h2>
+        {draft.mode !== 'move' && <label className="field"><span>{draft.kind === 'file' ? 'Document name' : 'Folder name'}</span><input autoFocus value={draft.name} disabled={busy} onChange={(event) => setDraft({ ...draft, name: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); save(); } }} /></label>}
+        {draft.id && draft.mode === 'move' && <label className="field"><span>Folder location</span><select aria-label="Folder location" value={draft.parentId} disabled={busy} onChange={(event) => setDraft({ ...draft, parentId: event.target.value })}><option value="">All references</option>{folders.map((row) => <option key={row.id} value={row.id}>{referencePath(entries, row.id).map((part) => part.name).join(' / ')}</option>)}</select></label>}
+        <div className="invite-actions"><button type="button" className="button primary" disabled={busy || !draft.name.trim()} onClick={save}>{busy ? 'Saving…' : draft.id ? 'Save reference' : 'Create folder'}</button><button type="button" className="button secondary" disabled={busy} onClick={() => setDraft(null)}>Cancel</button></div>
       </div>}
       {loading && <p role="status">Loading references…</p>}
       {!loading && !rows.length && <p className="empty-state">{search ? 'No matching references.' : 'No references in this folder yet.'}</p>}
@@ -81,9 +108,8 @@ export function ReferenceDocuments({ store, readOnly }) {
         <div className="reference-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => row.kind === 'folder' ? navigate(row.id) : download(row)}>{row.name}</button>
           <small>{row.kind === 'folder' ? `${entries.filter((entry) => entry.parentId === row.id).length} items` : `${Math.max(1, Math.round(row.size / 1024)).toLocaleString()} KB`}{search && ` · ${referencePath(entries, row.parentId).map((part) => part.name).join(' / ') || 'All references'}`}</small>
         </div>
-        <div className="document-actions">{row.kind === 'file' && <button type="button" className="icon-button" disabled={busy} title="Download document" aria-label={`Download ${row.name}`} onClick={() => download(row)}><Icon name="download" /></button>}
-          {!readOnly && <button type="button" className="button secondary" disabled={busy} aria-label={`Organize ${row.name}`} onClick={() => { setDraft({ ...row }); setError(''); }}>Edit</button>}
-        </div>
+        {(!readOnly || row.kind === 'file') && <ReferenceActions row={row} busy={busy} readOnly={readOnly} onDownload={download} onEdit={(entry, mode) => { setDraft({ ...entry, mode }); setError(''); }} onDelete={remove} />}
+
       </li>)}</ul>
       {!readOnly && <label className="field"><span>Upload to {entries.find((row) => row.id === folder)?.name || 'All references'} (up to 20 MB each)</span><input type="file" multiple className="document-upload" aria-label="Upload reference documents" disabled={busy || loading} onChange={upload} /></label>}
       {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}

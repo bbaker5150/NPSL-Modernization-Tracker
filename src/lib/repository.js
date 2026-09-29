@@ -42,6 +42,10 @@ class LocalStore {
     if (file) await localAttachments(next.id, file);
     return this.upsert('references', next, 'reference');
   }
+  async deleteReferenceEntry(row) {
+    this.data.references = this.data.references.filter((entry) => entry.id !== row.id);
+    this.persist();
+  }
   async downloadReferenceEntry(row) {
     const file = (await localAttachments(row.id)).find((entry) => entry.name === row.fileName);
     if (!file) throw new Error('This reference document is unavailable.');

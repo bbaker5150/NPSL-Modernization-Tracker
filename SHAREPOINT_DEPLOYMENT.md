@@ -131,3 +131,6 @@ Reference Documents appears below My work for all roles. Users and managers can 
 The deployment adds the ModernizationReferenceDocuments list (or the configured prefix). Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
 
 The user directory now has compact scrollable rows and a name/email/role search while retaining each user's role badge and Edit menu.
+
+
+Reference actions use a text-only Edit menu: Download, Rename, Move, and Delete (SMEs can only Download). New folder asks only for a name and uses the currently open folder. Delete archives the reference entry and preserves its underlying bytes in SharePoint; readback verifies removal. Nonempty folders must have their contents moved/deleted first. The local preview likewise removes directory metadata without purging stored bytes.
