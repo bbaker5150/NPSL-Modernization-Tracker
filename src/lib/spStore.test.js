@@ -253,8 +253,9 @@ describe('page-targeted invitations', () => {
       roleValue: 'role:124',
       groupId: 0, propagateAcl: false, sendEmail: true,
       includeAnonymousLinkInEmail: false,
-      emailBody: `You have been added to the <a href="${pageUrl}">NPSL Modernization Tracker</a> as <strong>${role}</strong>.`,
+      emailBody: `You have been added to the NPSL Modernization Tracker. Assigned role: ${role.toUpperCase()}.`,
     }) }]);
+    expect(requests[0][1].body.emailBody).not.toMatch(/<[^>]+>|https?:\/\//);
     expect(store.get.mock.calls.some(([path]) => path.includes('ListItemAllFields/getusereffectivepermissions'))).toBe(true);
   });
   it('does not add existing members again on retry', async () => {
