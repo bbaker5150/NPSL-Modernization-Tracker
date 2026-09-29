@@ -214,6 +214,46 @@ try {
   await frame.locator('.project-card').nth(beforeDelete - 1).waitFor({ state: 'detached' });
   const afterDelete = await frame.locator('.project-card').count();
   if (afterDelete !== beforeDelete - 1) errors.push(`Prompt-free project deletion did not update immediately (${beforeDelete} -> ${afterDelete})`);
+
+  // Shared references must persist folders and bytes inside the same srcdoc host.
+  await frame.getByRole('button', { name: 'Reference Documents', exact: true }).click();
+  await frame.getByRole('button', { name: 'New folder', exact: true }).click();
+  await frame.getByLabel('Folder name', { exact: true }).fill('Templates');
+  await frame.getByRole('button', { name: 'Save reference', exact: true }).click();
+  await frame.getByRole('button', { name: 'Templates', exact: true }).click();
+  await frame.getByLabel('Upload reference documents').setInputFiles({ name: 'sample-template.txt', mimeType: 'text/plain', buffer: Buffer.from('Modernization template sample') });
+  await frame.getByRole('status').filter({ hasText: '1 of 1 documents uploaded.' }).waitFor();
+  const downloadPromise = page.waitForEvent('download');
+  await frame.getByRole('button', { name: 'Download sample-template.txt', exact: true }).click();
+  const downloaded = await downloadPromise;
+  if ((await fs.readFile(await downloaded.path(), 'utf8')) !== 'Modernization template sample') errors.push('Reference download content did not match upload');
+  await frame.getByRole('button', { name: 'Organize sample-template.txt', exact: true }).click();
+  await frame.getByLabel('Folder location', { exact: true }).selectOption('');
+  await frame.getByRole('button', { name: 'Save reference', exact: true }).click();
+  await frame.getByRole('button', { name: 'All references', exact: true }).click();
+  await frame.getByRole('button', { name: 'sample-template.txt', exact: true }).waitFor();
+  for (const theme of ['light', 'dark']) {
+    await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const style = await frame.getByLabel('Upload reference documents').evaluate((input) => {
+        const selector = getComputedStyle(input, '::file-selector-button');
+        return { fg: selector.color, bg: selector.backgroundColor };
+      });
+      if (style.fg === style.bg || style.bg === 'rgba(0, 0, 0, 0)') errors.push('Reference upload lacks themed file control');
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.reload();
+  await page.locator('#app').evaluate((element, html) => { element.srcdoc = html; }, artifact);
+  await frame.getByRole('button', { name: 'Reference Documents', exact: true }).click();
+  await frame.getByRole('button', { name: 'sample-template.txt', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  await frame.getByLabel('Search users', { exact: true }).fill('SME Test');
+  if (await frame.locator('.directory-row').count() !== 1) errors.push('Directory search did not filter users');
+  await frame.locator('.directory-row').getByRole('button', { name: 'Edit', exact: true }).click();
+  if (await frame.getByRole('button', { name: 'Delete User', exact: true }).locator('svg').count()) errors.push('Delete User still has an icon');
+  if (await frame.locator('.people-invite input[type="url"], .people-invite a[href^="mailto:"]').count()) errors.push('Invitation link/draft controls were not removed');
   if (dialogs.length) errors.push(`Native browser dialog(s) displayed: ${dialogs.join(' | ')}`);
   const overlays = await frame.locator('#pdc-open, #test-recorder-launcher, #test-recorder-panel, .test-recorder-ui').evaluateAll((elements) => elements.filter((element) => getComputedStyle(element).display !== 'none').length);
   if (overlays) errors.push(`${overlays} Forge runtime control(s) were visible`);

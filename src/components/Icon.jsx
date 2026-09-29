@@ -1,6 +1,7 @@
 import React from 'react';
 
 const paths = {
+  folder: '<path d="M3 7V4h6l3 3h9v13H3z"/>',
   overview: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
   board: '<rect x="3" y="4" width="5" height="16" rx="2"/><rect x="10" y="4" width="5" height="10" rx="2"/><rect x="17" y="4" width="4" height="13" rx="2"/>',
   projects: '<path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M4 11h16"/>',

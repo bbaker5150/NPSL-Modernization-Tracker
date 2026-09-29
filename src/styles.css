@@ -564,3 +564,34 @@ button.brand { width: 100%; }
 .selected-person, .invitation-result { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
 .invite-actions { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
 .invite-actions a { text-decoration: none; }
+
+.directory-list-panel { padding: 0; overflow: hidden; }
+.directory-list-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.directory-list-heading h2 { margin: 0; white-space: nowrap; }
+.directory-list-heading small { color: var(--muted); font-weight: 400; }
+.directory-list-heading input { max-width: 380px; width: 100%; }
+.directory-list { max-height: 55vh; overflow: auto; scrollbar-gutter: stable; padding-bottom: 90px; }
+.directory-list .directory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.directory-identity { min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.directory-identity span { color: var(--muted); font-size: 12px; }
+.reference-panel { padding: 24px; }
+.reference-toolbar { display: flex; align-items: center; gap: 16px; }
+.reference-toolbar > input { flex: 1; min-width: 0; }
+.reference-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 20px 0; }
+.reference-breadcrumbs button { border: 0; background: transparent; color: var(--blue); cursor: pointer; font: inherit; overflow-wrap: anywhere; text-align: left; }
+.reference-editor { display: grid; gap: 14px; padding: 20px; margin: 16px 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
+.reference-editor h2 { margin: 0; }
+.reference-list { padding: 0; margin: 0 0 24px; list-style: none; max-height: 55vh; overflow: auto; }
+.reference-list li { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.reference-list li > svg { flex-shrink: 0; color: var(--muted); }
+.reference-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.reference-name small { display: block; color: var(--muted); margin-top: 5px; }
+.reference-library .inline-error { white-space: pre-line; }
+@media (max-width: 600px) {
+  .directory-list-heading, .reference-toolbar { align-items: stretch; flex-direction: column; }
+  .directory-list .directory-row { gap: 8px; padding: 12px; }
+  .reference-panel { padding: 16px; }
+  .reference-list li { flex-wrap: wrap; }
+}
+.directory-list-heading input, .reference-toolbar input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface-2); font: inherit; }
+.directory-list-heading input:focus, .reference-toolbar input:focus { outline: 2px solid var(--blue); outline-offset: 2px; }

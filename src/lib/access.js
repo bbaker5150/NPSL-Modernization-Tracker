@@ -1,3 +1,4 @@
+import { validateReference } from './referenceDocuments';
 import { validateAttachment } from './taskAttachments';
 import { workflowData, normalizePhaseKey } from '../data/workflow';
 import { isOwnedByUser, userIdentityKey } from './repository';
@@ -49,6 +50,17 @@ export function authorizedStore(raw, config = {}) {
   };
   return new Proxy(raw, {
     get(target, property) {
+      if (property === 'saveReferenceEntry') return async (row, file) => {
+        const { user, data } = await context();
+        if (isSME(user, data.users)) throw new Error('SME access is read-only.');
+        const entries = await raw.listReferenceEntries();
+        return raw.saveReferenceEntry(validateReference(entries, row, file), file);
+      };
+      if (property === 'downloadReferenceEntry') return async (id) => {
+        const row = (await raw.listReferenceEntries()).find((entry) => entry.id === id && entry.kind === 'file');
+        if (!row) throw new Error('This reference document no longer exists.');
+        return raw.downloadReferenceEntry(row);
+      };
       if (property === 'shareSiteAccess') return async (person, role, appUrl) => {
         const { data } = await requireManager();
         const saved = data.users.find((entry) => entry.loginName === person.loginName && entry.role === role);

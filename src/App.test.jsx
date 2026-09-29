@@ -237,7 +237,7 @@ describe('application shell', () => {
 
   it('registers standard users and grants testing manager access only after the right password', async () => {
     await renderApp(false);
-    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['My work0', 'Acronym glossary', 'Users and managers']);
+    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['My work0', 'Reference Documents', 'Acronym glossary', 'Users and managers']);
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0]).toMatchObject({ title: 'Local Engineer', role: 'User' });
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
@@ -452,9 +452,8 @@ describe('application shell', () => {
     expect(resolve).toHaveBeenCalledWith(candidate.loginName);
     const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
     expect(saved).toMatchObject({ ...candidate, role: 'SME' });
-    const invite = document.querySelector('.invitation-result a');
-    expect(decodeURIComponent(invite.href)).toContain('new@example.test');
-    expect(decodeURIComponent(invite.href)).toContain('Tracker.aspx');
+    expect(document.querySelector('.people-invite input[type="url"]')).toBeNull();
+    expect(document.querySelector('.invitation-result a')).toBeNull();
     expect(document.querySelector('.invitation-result').textContent).toContain('Preview only: no site access granted or email sent.');
   });
 
@@ -467,20 +466,35 @@ describe('application shell', () => {
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
     await act(async () => changeValue(document.querySelector('select'), 'SME'));
-    await act(async () => changeValue(document.querySelector('input[type="url"]'), ''));
-    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
-    expect(document.querySelector('[role="alert"]').textContent).toContain('Enter the full published tracker page URL');
-    expect(save).not.toHaveBeenCalled();
-    expect(store.shareSiteAccess).not.toHaveBeenCalled();
-    await act(async () => changeValue(document.querySelector('input[type="url"]'), 'https://tenant.sharepoint.com/sites/mod/app.aspx'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
     expect(document.querySelector('.invitation-result').textContent).toContain('not yet confirmed');
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('.invitation-result').textContent).toContain('Read membership and tracker page read access verified');
-    expect(document.querySelector('.invitation-result').textContent).toContain('email delivery is not confirmed');
+    expect(document.querySelector('.invitation-result').textContent).toContain('Invitation sent to SharePoint for delivery.');
+    expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'SME', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
+  });
+
+  it('creates nested references and moves a folder with persistence', async () => {
+    await renderApp(false);
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Reference Documents').click());
+    const click = async (text) => act(async () => [...document.querySelectorAll('.reference-library button')].find((row) => row.textContent === text).click());
+    await click('New folder');
+    await act(async () => changeValue(document.querySelector('.reference-editor input'), 'Templates'));
+    await click('Save reference');
+    await click('Templates');
+    await click('New folder');
+    await act(async () => changeValue(document.querySelector('.reference-editor input'), 'Acquisition'));
+    await click('Save reference');
+    let rows = await createRepository().store.listReferenceEntries();
+    const parent = rows.find((row) => row.name === 'Templates');
+    expect(rows.find((row) => row.name === 'Acquisition').parentId).toBe(parent.id);
+    await act(async () => document.querySelector('[aria-label="Organize Acquisition"]').click());
+    await act(async () => changeValue(document.querySelector('.reference-editor select'), ''));
+    await click('Save reference');
+    rows = await createRepository().store.listReferenceEntries();
+    expect(rows.find((row) => row.name === 'Acquisition').parentId).toBe('');
   });
 
   it('deletes a user only from Edit, preserves assignments, and hides self-deletion', async () => {
