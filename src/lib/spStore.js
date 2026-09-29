@@ -390,6 +390,9 @@ export class SharePointStore {
     } catch (error) {
       throw new Error(`Could not verify membership in ${group.Title || 'the site Members group'}. The inviting account must be allowed to manage this group. No invitation email was requested. ${error.message}`);
     }
+    const readDefinitions = await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
+    const readRole = (readDefinitions.value || readDefinitions.d?.results || []).find((entry) => entry.RoleTypeKind === 2);
+    if (!readRole?.Id) throw new Error('The Read permission level is unavailable. Ask a site owner.');
     const permissions = await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
     const effective = permissions?.d?.GetUserEffectivePermissions || permissions?.GetUserEffectivePermissions || permissions?.d || permissions;
     const required = 1;
@@ -397,21 +400,20 @@ export class SharePointStore {
     const pagePermissions = await this.get(`${fileApi}/ListItemAllFields/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
     const pageEffective = pagePermissions?.d?.GetUserEffectivePermissions || pagePermissions?.GetUserEffectivePermissions || pagePermissions?.d || pagePermissions;
     if (!Number.isFinite(Number(pageEffective?.Low)) || (Number(pageEffective.Low) & 33) !== 33) throw new Error('Site access was granted, but tracker page access could not be verified. No invitation email was requested. Ask a site owner to check the page permissions.');
-    const email = String(person.email || person.loginName.split('|').pop() || '').trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Access was granted, but this person has no usable email address. No invitation email was sent.');
-    // Access is already established through the Members group. Send a direct
-    // email instead of invoking ShareObject and its tenant sharing prompts.
-    await this.post('/_api/SP.Utilities.Utility.SendEmail', {
-      verbose: true,
-      body: {
-        properties: {
-          __metadata: { type: 'SP.Utilities.EmailProperties' },
-          To: { results: [email] },
-          Subject: 'Invitation to the NPSL Modernization Tracker',
-          Body: `You have been added to the NPSL Modernization Tracker as ${role}.<br><br><a href="${link.href}">Open the Modernization Tracker</a>`,
-        },
-      },
-    });
+    // Flank Speed has retired SP.Utilities.Utility.SendEmail. Make exactly one
+    // page-targeted ShareObject request after membership and access pass.
+    const response = await this.post('/_api/SP.Web.ShareObject', { body: {
+      url: link.href,
+      peoplePickerInput: JSON.stringify([{ Key: person.loginName }]),
+      roleValue: 'role:' + readRole.Id,
+      groupId: 0, propagateAcl: false, sendEmail: true,
+      includeAnonymousLinkInEmail: false,
+      emailSubject: 'Invitation to the NPSL Modernization Tracker',
+      emailBody: 'You have been added to the NPSL Modernization Tracker as ' + role + '. Open the tracker: ' + link.href,
+      useSimplifiedRoles: false,
+    } });
+    const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
+    if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm the invitation email request.');
     return { access: group.Title || 'Site Members', emailRequested: true };
   }
 

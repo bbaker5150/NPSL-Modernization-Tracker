@@ -231,6 +231,7 @@ describe('page-targeted invitations', () => {
       if (path.includes('associatedmembergroup')) return { Id: 9, Title: 'ISEA METENG Members' };
       if (path.includes('sitegroups(9)/users')) return { value: member ? [{ LoginName: 'claims|person' }] : [] };
       if (path.includes('getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: String(path.includes('ListItemAllFields') ? pageLow : low) } };
+      if (path.includes('roledefinitions')) return { value: [{ Id: 124, RoleTypeKind: 2 }] };
       return { Exists: true, Level: level };
     });
     store.post = vi.fn(async (path) => {
@@ -239,21 +240,20 @@ describe('page-targeted invitations', () => {
     });
     return store;
   }
-  it.each(['SME', 'User', 'Manager'])('adds %s to Members, verifies access, then sends one silent email', async (role) => {
+  it.each(['SME', 'User', 'Manager'])('adds %s to Members, verifies access, then makes exactly one invitation request', async (role) => {
     const store = setup();
     expect(await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, role, pageUrl)).toMatchObject({ access: 'ISEA METENG Members' });
     expect(store.post.mock.calls[0]).toEqual(['/_api/web/sitegroups(9)/users', { body: { LoginName: 'claims|person' } }]);
-    expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
-    const email = store.post.mock.calls.find(([path]) => path.includes('Utility.SendEmail'));
-    expect(email).toEqual(['/_api/SP.Utilities.Utility.SendEmail', {
-      verbose: true,
-      body: { properties: expect.objectContaining({
-        __metadata: { type: 'SP.Utilities.EmailProperties' },
-        To: { results: ['person@example.test'] },
-        Subject: 'Invitation to the NPSL Modernization Tracker',
-        Body: expect.stringContaining(pageUrl),
-      }) },
-    }]);
+    expect(store.post.mock.calls.some(([path]) => path.includes('Utility.SendEmail'))).toBe(false);
+    const requests = store.post.mock.calls.filter(([path]) => path.includes('ShareObject'));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toEqual(['/_api/SP.Web.ShareObject', { body: expect.objectContaining({
+      url: pageUrl,
+      peoplePickerInput: JSON.stringify([{ Key: 'claims|person' }]),
+      roleValue: 'role:124',
+      groupId: 0, propagateAcl: false, sendEmail: true,
+      includeAnonymousLinkInEmail: false,
+    }) }]);
     expect(store.get.mock.calls.some(([path]) => path.includes('ListItemAllFields/getusereffectivepermissions'))).toBe(true);
   });
   it('does not add existing members again on retry', async () => {
@@ -277,17 +277,14 @@ describe('page-targeted invitations', () => {
     await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
     expect(store.post).not.toHaveBeenCalled();
   });
-  it('never sends an invitation when page access verification fails and rejects missing email', async () => {
+  it('never sends an invitation when page access verification fails and reports invitation failures', async () => {
     const store = setup(7, 0);
     await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('tracker page access could not be verified');
-    expect(store.post.mock.calls.some(([path]) => path.includes('Utility.SendEmail'))).toBe(false);
-    const missingEmail = setup();
-    await expect(missingEmail.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('no usable email address');
-    expect(missingEmail.post.mock.calls.some(([path]) => path.includes('Utility.SendEmail'))).toBe(false);
+    expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
     const emailFailure = setup();
     const post = emailFailure.post.getMockImplementation();
     emailFailure.post.mockImplementation(async (path) => {
-      if (!path.includes('Utility.SendEmail')) return post(path);
+      if (!path.includes('ShareObject')) return post(path);
       throw new Error('Email denied');
     });
     await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'SME', pageUrl)).rejects.toThrow('Email denied');
