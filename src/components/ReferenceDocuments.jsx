@@ -71,7 +71,7 @@ export function ReferenceDocuments({ store, readOnly }) {
       {draft && <div className="reference-editor">
         <h2>{draft.id ? 'Organize reference' : 'Create folder'}</h2>
         <label className="field"><span>{draft.kind === 'file' ? 'Document name' : 'Folder name'}</span><input autoFocus value={draft.name} disabled={busy} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-        <label className="field"><span>Folder location</span><select value={draft.parentId} disabled={busy} onChange={(event) => setDraft({ ...draft, parentId: event.target.value })}><option value="">All references</option>{folders.map((row) => <option key={row.id} value={row.id}>{referencePath(entries, row.id).map((part) => part.name).join(' / ')}</option>)}</select></label>
+        <label className="field"><span>Folder location</span><select aria-label="Folder location" value={draft.parentId} disabled={busy} onChange={(event) => setDraft({ ...draft, parentId: event.target.value })}><option value="">All references</option>{folders.map((row) => <option key={row.id} value={row.id}>{referencePath(entries, row.id).map((part) => part.name).join(' / ')}</option>)}</select></label>
         <div className="invite-actions"><button type="button" className="button primary" disabled={busy || !draft.name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save reference'}</button><button type="button" className="button secondary" disabled={busy} onClick={() => setDraft(null)}>Cancel</button></div>
       </div>}
       {loading && <p role="status">Loading references…</p>}
