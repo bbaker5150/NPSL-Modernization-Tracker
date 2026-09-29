@@ -242,6 +242,8 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
     expect(document.querySelector('.directory-row button')).toBeNull();
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true, cancelable: true })));
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'wrong'));
     await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Enable manager access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('incorrect');
@@ -278,6 +280,7 @@ describe('application shell', () => {
   it('shows a persistent activation error when the directory write fails', async () => {
     await renderApp(false);
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true, cancelable: true })));
     vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
     await act(async () => [...document.querySelectorAll('.directory-form button')].find((row) => row.textContent === 'Enable manager access').click());
@@ -453,8 +456,7 @@ describe('application shell', () => {
     const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
     expect(saved).toMatchObject({ ...candidate, role: 'SME' });
     expect(document.querySelector('.people-invite input[type="url"]')).toBeNull();
-    expect(document.querySelector('.invitation-result a')).toBeNull();
-    expect(document.querySelector('.invitation-result').textContent).toContain('Preview only: no site access granted or email sent.');
+    expect(document.querySelector('.invitation-result')).toBeNull();
   });
 
   it('retries failed site sharing without duplicating a saved user', async () => {
@@ -468,11 +470,12 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('select'), 'SME'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
-    expect(document.querySelector('.invitation-result').textContent).toContain('not yet confirmed');
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('.invitation-result').textContent).toContain('one tracker invitation email requested');
+    expect(document.querySelector('.invitation-result')).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').disabled).toBe(true);
     expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'SME', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 
