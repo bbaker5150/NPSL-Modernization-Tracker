@@ -560,7 +560,7 @@ button.brand { width: 100%; }
 .people-results button { width: 100%; display: grid; gap: 4px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
 .people-results button:hover, .people-results button:focus-visible { border-color: var(--blue); background: var(--blue-soft); }
 .people-results span, .people-results small, .selected-person span { color: var(--muted); }
-.selected-person, .invitation-result { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
+.selected-person { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
 .invite-actions { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
 .invite-actions a { text-decoration: none; }
 
@@ -569,7 +569,7 @@ button.brand { width: 100%; }
 .directory-list-heading h2 { margin: 0; white-space: nowrap; }
 .directory-list-heading small { color: var(--muted); font-weight: 400; }
 .directory-list-heading input { max-width: 380px; width: 100%; }
-.directory-list { max-height: 55vh; overflow: auto; scrollbar-gutter: stable; padding-bottom: 90px; }
+.directory-list { max-height: 55vh; overflow: auto; scrollbar-gutter: stable; }
 .directory-list .directory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
 .directory-identity { min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .directory-identity span { color: var(--muted); font-size: 12px; }

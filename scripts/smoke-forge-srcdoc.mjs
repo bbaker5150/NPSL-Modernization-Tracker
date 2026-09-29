@@ -48,6 +48,8 @@ try {
   if (loadingLogoStyle.animationName !== 'none' || loadingLogoStyle.boxShadow !== 'none' || loadingLogoStyle.filter !== 'none') errors.push(`Loading logo still glows or animates: ${JSON.stringify(loadingLogoStyle)}`);
   if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
   await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  if (await frame.getByLabel('Testing password').count()) errors.push('Testing manager access was visible before Ctrl+M');
+  await frame.locator('body').press('Control+m');
   await frame.getByLabel('Testing password').fill('incorrect-password');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('alert').filter({ hasText: 'Testing password is incorrect' }).waitFor();
