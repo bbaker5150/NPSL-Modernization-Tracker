@@ -56,6 +56,15 @@ export function authorizedStore(raw, config = {}) {
         const entries = await raw.listReferenceEntries();
         return raw.saveReferenceEntry(validateReference(entries, row, file), file);
       };
+      if (property === 'deleteReferenceEntry') return async (id) => {
+        const { user, data } = await context();
+        if (isSME(user, data.users)) throw new Error('SME access is read-only.');
+        const entries = await raw.listReferenceEntries();
+        const row = entries.find((entry) => entry.id === id);
+        if (!row) throw new Error('This reference item no longer exists.');
+        if (row.kind === 'folder' && entries.some((entry) => entry.parentId === row.id)) throw new Error('Move or delete the contents before deleting this folder.');
+        return raw.deleteReferenceEntry(row);
+      };
       if (property === 'downloadReferenceEntry') return async (id) => {
         const row = (await raw.listReferenceEntries()).find((entry) => entry.id === id && entry.kind === 'file');
         if (!row) throw new Error('This reference document no longer exists.');

@@ -349,6 +349,12 @@ export class SharePointStore {
     return saved;
   }
 
+  async deleteReferenceEntry(row) {
+    await this.update('references', row.spId, { Archived: true });
+    const response = await this.get(`${apiFor(this.prefix, 'references')}/items(${row.spId})?$select=Archived`);
+    if ((response.d || response).Archived !== true) throw new Error('SharePoint did not confirm reference deletion.');
+  }
+
   async downloadReferenceEntry(row) {
     const body = await this.get(`${apiFor(this.prefix, 'references')}/items(${row.spId})/AttachmentFiles?$select=FileName,ServerRelativeUrl`);
     const file = (body.value || body.d?.results || []).find((entry) => entry.FileName === row.fileName);
