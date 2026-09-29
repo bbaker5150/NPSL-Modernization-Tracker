@@ -154,3 +154,15 @@ describe('directory search authorization', () => {
     await expect(store.resolvePerson('engineer')).resolves.toEqual({ loginName: 'resolved' });
   });
 });
+
+
+it('requires a manager and a saved matching role before granting site access', async () => {
+  const state = structuredClone(data);
+  const raw = { currentUser: async () => user, load: async () => state, shareSiteAccess: vi.fn(async () => ({ access: 'Read' })) };
+  const store = authorizedStore(raw);
+  await expect(store.shareSiteAccess({ loginName: 'other' }, 'SME', 'https://site')).rejects.toThrow('Only managers');
+  state.users = [{ email: user.email, role: 'Manager' }, { loginName: 'other', role: 'SME' }];
+  await expect(store.shareSiteAccess({ loginName: 'other' }, 'Manager', 'https://site')).rejects.toThrow('Save the person');
+  await expect(store.shareSiteAccess({ loginName: 'other' }, 'SME', 'https://site')).resolves.toEqual({ access: 'Read' });
+  expect(raw.shareSiteAccess).toHaveBeenCalledTimes(1);
+});
