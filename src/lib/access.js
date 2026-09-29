@@ -132,6 +132,13 @@ export function authorizedStore(raw, config = {}) {
       if (property === 'saveTasks') return undefined;
       if (['saveProject', 'saveUpdate', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
         const { data, user } = await requireManager();
+        if (property === 'recycle' && args[0] === 'users') {
+          const row = data.users.find((entry) => args[2] ? entry.id === args[2] : entry.spId != null && entry.spId === args[1]);
+          if (!row) throw new Error('This user is no longer in the directory.');
+          if (isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, user)) throw new Error('You cannot delete your own account. Ask another manager.');
+          // Resolve the persisted record, never trust an edited identity or supplied item ID.
+          return raw.recycle('users', row.spId, row.id);
+        }
         if (property === 'saveUser') {
           const row = args[0];
           if (!row.title?.trim() || !userIdentityKey(row) || !['Manager', 'SME', 'User'].includes(row.role)) throw new Error('Name, login/email and role are required.');

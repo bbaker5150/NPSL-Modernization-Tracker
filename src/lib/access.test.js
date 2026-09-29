@@ -166,3 +166,18 @@ it('requires a manager and a saved matching role before granting site access', a
   await expect(store.shareSiteAccess({ loginName: 'other' }, 'SME', 'https://site')).resolves.toEqual({ access: 'Read' });
   expect(raw.shareSiteAccess).toHaveBeenCalledTimes(1);
 });
+
+
+it('allows managers to delete persisted directory users but never themselves', async () => {
+  const state = structuredClone(data);
+  state.users = [{ id: 'me', spId: 1, email: user.email, role: 'Manager' }, { id: 'other', spId: 2, loginName: 'other', role: 'SME' }];
+  const raw = { currentUser: async () => user, load: async () => state, recycle: vi.fn() };
+  const store = authorizedStore(raw);
+  await expect(store.recycle('users', 2, 'me')).rejects.toThrow('own account');
+  await store.recycle('users', 1, 'other');
+  expect(raw.recycle).toHaveBeenCalledWith('users', 2, 'other');
+  await expect(store.recycle('users', 99, 'missing')).rejects.toThrow('no longer');
+  state.users[0].role = 'User';
+  await expect(store.recycle('users', 2, 'other')).rejects.toThrow('Only managers');
+  expect(raw.recycle).toHaveBeenCalledTimes(1);
+});
