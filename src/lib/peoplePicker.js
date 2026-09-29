@@ -11,11 +11,32 @@ export function parsePeopleResults(response) {
   })).filter((row) => { const key = row.loginName.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
 }
 
+export function normalizeInvitationUrl(value, webUrl) {
+  try {
+    if (!String(value || '').trim()) throw new Error();
+    const url = webUrl ? new URL(String(value).trim(), `${webUrl.replace(/\/$/, '')}/`) : new URL(String(value).trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error();
+    if (webUrl) {
+      const site = new URL(webUrl);
+      const path = site.pathname.replace(/\/$/, '');
+      if (url.origin !== site.origin || !(url.pathname === path || url.pathname.startsWith(`${path}/`))) throw new Error();
+    }
+    return url.href;
+  } catch { throw new Error('Enter the full published tracker page URL in App invitation link. It must be on this SharePoint site.'); }
+}
+
 export function invitationUrl(config = {}, win = window) {
   const candidates = [config.appUrl];
   try { if (win.parent !== win) candidates.push(win.parent.location.href); } catch { /* cross-origin host */ }
-  candidates.push(win.location.href);
-  return candidates.find((value) => { try { return ['https:', 'http:'].includes(new URL(value).protocol); } catch { return false; } }) || '';
+  candidates.push(win.location?.href, win.document?.referrer);
+  // srcdoc/blob frames may expose only the SharePoint web context. Provide a
+  // usable site link as the final fallback; the manager can replace it with the app page.
+  candidates.push(config.webUrl);
+  for (const candidate of candidates) {
+    if (!candidate || /^(about|blob|data):/i.test(candidate)) continue;
+    try { return normalizeInvitationUrl(candidate, config.webUrl); } catch { /* next host hint */ }
+  }
+  return '';
 }
 
 export function invitationMailto(person, role, url) {

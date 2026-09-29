@@ -1,4 +1,4 @@
-import { parsePeopleResults } from './peoplePicker';
+import { normalizeInvitationUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment } from './taskAttachments';
 import { normalizePhaseKey } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
@@ -322,9 +322,7 @@ export class SharePointStore {
 
   async shareSiteAccess(person, role, appUrl) {
     if (!['User', 'SME', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
-    const site = new URL(this.webUrl);
-    const link = new URL(appUrl);
-    if (link.origin !== site.origin || !(link.pathname === site.pathname || link.pathname.startsWith(`${site.pathname.replace(/\/$/, '')}/`))) throw new Error('The invitation link must point to this SharePoint site.');
+    const link = new URL(normalizeInvitationUrl(appUrl, this.webUrl));
     // Use Contribute, not Full Control or site-design Edit, for working roles.
     const kind = role === 'SME' ? 2 : 3;
     const definitions = await this.get(`/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq ${kind}`);

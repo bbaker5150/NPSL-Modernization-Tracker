@@ -360,6 +360,8 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('Make manager');
     const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
     await act(async () => card.querySelector('button').click());
+    expect(document.querySelector('.directory-form')).toBeNull();
+    await act(async () => [...card.querySelectorAll('button')].find((button) => button.textContent === 'Update User').click());
     await act(async () => changeValue(document.querySelector('.directory-form select'), role));
     const form = document.querySelector('.directory-form');
     expect(form.checkValidity()).toBe(true);
@@ -371,7 +373,7 @@ describe('application shell', () => {
     const saved = (await createRepository().store.load()).users.find((row) => row.id === 'other');
     expect(saved).toMatchObject({ role, email: '', loginName: 'i:0#.w|domain\\engineer' });
     expect(card.textContent).toContain(role);
-    expect(form.querySelector('[role="status"]').textContent).toContain(`saved as ${role}`);
+    expect(document.querySelector('.page-stack > [role="status"]').textContent).toContain(`saved as ${role}`);
   });
 
   it('keeps role edit errors visible and preserves the draft for retry', async () => {
@@ -380,10 +382,12 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
     await act(async () => card.querySelector('button').click());
+    expect(document.querySelector('.directory-form')).toBeNull();
+    await act(async () => [...card.querySelectorAll('button')].find((button) => button.textContent === 'Update User').click());
     await act(async () => changeValue(document.querySelector('.directory-form select'), 'SME'));
     vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
     await act(async () => document.querySelector('.directory-form button').click());
-    expect(document.querySelector('.directory-form [role="alert"]').textContent).toContain('403');
+    expect(document.querySelector('.page-stack > [role="alert"]').textContent).toContain('403');
     expect(document.querySelector('.directory-form select').value).toBe('SME');
     expect(card.textContent).toContain('User');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
@@ -463,6 +467,12 @@ describe('application shell', () => {
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
     await act(async () => changeValue(document.querySelector('select'), 'SME'));
+    await act(async () => changeValue(document.querySelector('input[type="url"]'), ''));
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Enter the full published tracker page URL');
+    expect(save).not.toHaveBeenCalled();
+    expect(store.shareSiteAccess).not.toHaveBeenCalled();
+    await act(async () => changeValue(document.querySelector('input[type="url"]'), 'https://tenant.sharepoint.com/sites/mod/app.aspx'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
     expect(document.querySelector('.invitation-result').textContent).toContain('not yet confirmed');
@@ -482,14 +492,15 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('Delete user');
     const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
     await act(async () => card.querySelector('button').click());
-    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Delete user').click());
+    await act(async () => [...card.querySelectorAll('button')].find((button) => button.textContent === 'Delete User').click());
     const loaded = await createRepository().store.load();
     expect(loaded.users.some((row) => row.id === 'other')).toBe(false);
     expect(loaded.tasks.find((row) => row.id === 'assigned').ownerKey).toBe('other');
-    expect(document.querySelector('.directory-form [role="status"]').textContent).toContain('removed');
+    expect(document.querySelector('.page-stack > [role="status"]').textContent).toContain('removed');
     expect(window.confirm).not.toHaveBeenCalled();
     await act(async () => document.querySelector('.directory-row button').click());
-    expect([...document.querySelectorAll('.directory-form button')].some((button) => button.textContent === 'Delete user')).toBe(false);
+    expect([...document.querySelectorAll('.directory-row button')].find((button) => button.textContent === 'Delete User').disabled).toBe(true);
+    expect(document.querySelector('.directory-form')).toBeNull();
   });
 
 });
