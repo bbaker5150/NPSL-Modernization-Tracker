@@ -125,3 +125,8 @@ The Invite people panel now saves the selected tracker role, calls `SP.Web.Share
 The invitation link is shown before the action and must be on the configured SharePoint web. Sharing applies to the site and inheriting content, not only this app. `propagateAcl` is false: unique list/page permissions are never overwritten. Configure the tracker lists separately where required, particularly manager-only directory writes. Existing broader permissions are not downgraded by inviting someone as SME.
 
 The app reports email as requested, not delivered. A failed sharing call leaves the saved role intact and exposes Retry site invitation. Existing users with the same role can be invited again without a duplicate directory entry; changing an existing role still uses Edit. Retries can request another notification. Local preview cannot grant permissions or send a SharePoint invitation. Draft email/copy link remain fallbacks. This supersedes the earlier draft-only invitation behavior.
+
+
+Invitation URL detection now also uses the embedding page referrer and the detected SharePoint web when frame URLs are `about:srcdoc`/`blob:` or parent access is blocked. A site-only fallback must be reviewed and replaced with the published app page when necessary; `MOD_TRACKER_CONFIG.appUrl` remains the preferred explicit deployment setting. Relative configured links are resolved against the SharePoint web. Invalid links produce an inline instruction before any user save or sharing request.
+
+Directory editing now uses Edit → Update User / Delete User. The update form appears only after Update User and closes on save or cancel. Delete User acts directly from the menu, with self-deletion disabled.

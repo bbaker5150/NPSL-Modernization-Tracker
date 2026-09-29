@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { invitationMailto, invitationUrl } from '../lib/peoplePicker';
+import { invitationMailto, invitationUrl, normalizeInvitationUrl } from '../lib/peoplePicker';
 
 export function PeopleInvite({ store, config, onSave, localPreview }) {
   const [query, setQuery] = useState('');
@@ -10,7 +10,7 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [added, setAdded] = useState(null);
-  const [link, setLink] = useState(() => invitationUrl(config));
+  const [link, setLink] = useState(() => invitationUrl({ ...config, webUrl: store.webUrl || config?.webUrl }));
   const [access, setAccess] = useState(null);
   const [copied, setCopied] = useState(false);
   const generation = useRef(0);
@@ -32,10 +32,12 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
     if (!selected || busy) return;
     setBusy(true); setError('');
     try {
+      const validLink = normalizeInvitationUrl(link, store.webUrl || config?.webUrl);
+      setLink(validLink);
       const person = added || await store.resolvePerson(selected.loginName);
       const saved = added || await onSave({ ...person, role });
       setAdded(saved); setCopied(false);
-      if (!localPreview) setAccess(await store.shareSiteAccess(saved, saved.role, link));
+      if (!localPreview) setAccess(await store.shareSiteAccess(saved, saved.role, validLink));
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
@@ -50,7 +52,7 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
     {!!results.length && <ul className="people-results" aria-label="Matching people">{results.map((person) => <li key={person.loginName}><button type="button" onClick={() => { setSelected(person); setRole('User'); setResults([]); setQuery(person.title); setAdded(null); setAccess(null); }}><strong>{person.title}</strong><span>{person.email || person.loginName}</span>{person.detail && <small>{person.detail}</small>}</button></li>)}</ul>}
     {selected && <div className="selected-person"><strong>{selected.title}</strong><span>{selected.email || selected.loginName}</span></div>}
     <div className="invite-actions"><label className="field"><span>Invitation role</span><select aria-label="Invitation role" value={role} disabled={busy || !!added} onChange={(event) => setRole(event.target.value)}><option>User</option><option>SME</option><option>Manager</option></select></label><button type="button" className="button primary" disabled={!selected || busy || !!access || (localPreview && !!added)} onClick={add}>{busy ? 'Saving and granting access…' : localPreview ? 'Add to tracker' : added ? 'Retry site invitation' : 'Invite and grant access'}</button></div>
-    <label className="field"><span>App invitation link</span><input type="url" disabled={busy || !!access} value={link} onChange={(event) => { setLink(event.target.value); setCopied(false); }} /></label><p className="field-hint">Grants {role === 'SME' ? 'Read' : 'Contribute'} access to this site and content that inherits its permissions. Requires permission to share the site. Separately secured pages/lists need site-owner access; existing broader permissions are not removed.</p>
+    <label className="field"><span>App invitation link</span><input type="url" disabled={busy || !!access} value={link} onChange={(event) => { setLink(event.target.value); setCopied(false); }} /></label><p className="field-hint">Check that the link opens the tracker page. If only the site address was detected, replace it with the published app page URL.</p><p className="field-hint">Grants {role === 'SME' ? 'Read' : 'Contribute'} access to this site and content that inherits its permissions. Requires permission to share the site. Separately secured pages/lists need site-owner access; existing broader permissions are not removed.</p>
     {added && <div className="invitation-result"><p role="status">{added.title} saved as {added.role}. {access ? `${access.access} site access verified. SharePoint invitation email requested.` : localPreview ? 'Preview only: no site access granted or email sent.' : 'Site invitation is not yet confirmed. Retry below if sharing failed.'}</p><div className="invite-actions">{mailto && <a className="button secondary" href={mailto}>Draft email invitation</a>}<button type="button" className="button secondary" onClick={async () => { try { if (!/^https?:\/\//i.test(link)) throw new Error('Enter a valid app link.'); await navigator.clipboard.writeText(link); setCopied(true); } catch (err) { setError('Could not copy. Select and copy the app invitation link above.'); } }}>Copy invitation link</button></div><p>{copied ? 'Invitation link copied.' : access ? 'SharePoint accepted the invitation request; email delivery is not confirmed. The draft option is available as a fallback.' : 'The email option opens a draft in your email app. No email has been sent by this draft option.'}</p></div>}
     {error && <p className="inline-error" role="alert">{error}</p>}
   </section>;

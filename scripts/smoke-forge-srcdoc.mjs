@@ -46,6 +46,12 @@ try {
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('button', { name: /New project/ }).waitFor();
   // Reload the packaged application to verify persisted role, not just UI state.
+  await page.evaluate(() => {
+    const key = 'modernization-project-tracker:v2';
+    const data = JSON.parse(localStorage.getItem(key));
+    data.users.push({ id: 'smoke-user', title: 'SME Test User', email: 'sme@example.test', loginName: 'sme@example.test', role: 'User' });
+    localStorage.setItem(key, JSON.stringify(data));
+  });
   await page.reload();
   await page.locator('#app').evaluate((element, html) => { element.srcdoc = html; }, artifact);
   await frame.getByRole('button', { name: /New project/ }).waitFor();
@@ -54,11 +60,11 @@ try {
   await frame.locator('body').evaluate((body) => body.addEventListener('click', (event) => {
     if (event.target.closest('.directory-form button')) event.preventDefault();
   }, true));
-  await frame.getByLabel('Name', { exact: true }).fill('SME Test User');
-  await frame.getByLabel('Email', { exact: true }).fill('sme@example.test');
-  await frame.getByRole('button', { name: 'Save user', exact: true }).click();
+  if (await frame.locator('.directory-form').count()) errors.push('User edit form displayed without Update User');
   const smeRow = frame.locator('.directory-row').filter({ hasText: 'SME Test User' });
   await smeRow.getByRole('button', { name: 'Edit', exact: true }).click();
+  if (await frame.locator('.directory-form').count()) errors.push('Edit opened form instead of menu');
+  await smeRow.getByRole('button', { name: 'Update User', exact: true }).click();
   await frame.getByLabel('Role', { exact: true }).selectOption('SME');
   await frame.getByRole('button', { name: 'Save user', exact: true }).click();
   await frame.getByRole('status').filter({ hasText: 'SME Test User saved as SME.' }).waitFor();
