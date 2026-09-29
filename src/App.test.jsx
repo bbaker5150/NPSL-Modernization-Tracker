@@ -473,4 +473,23 @@ describe('application shell', () => {
     expect(document.querySelector('.invitation-result').textContent).toContain('email delivery is not confirmed');
   });
 
+  it('deletes a user only from Edit, preserves assignments, and hides self-deletion', async () => {
+    const raw = createRepository().store;
+    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'SME' });
+    await raw.saveTask({ id: 'assigned', projectKey: 'project', title: 'Assigned task', ownerKey: 'other' });
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Users and managers').click());
+    expect(document.body.textContent).not.toContain('Delete user');
+    const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
+    await act(async () => card.querySelector('button').click());
+    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Delete user').click());
+    const loaded = await createRepository().store.load();
+    expect(loaded.users.some((row) => row.id === 'other')).toBe(false);
+    expect(loaded.tasks.find((row) => row.id === 'assigned').ownerKey).toBe('other');
+    expect(document.querySelector('.directory-form [role="status"]').textContent).toContain('removed');
+    expect(window.confirm).not.toHaveBeenCalled();
+    await act(async () => document.querySelector('.directory-row button').click());
+    expect([...document.querySelectorAll('.directory-form button')].some((button) => button.textContent === 'Delete user')).toBe(false);
+  });
+
 });
