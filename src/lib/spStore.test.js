@@ -219,3 +219,26 @@ describe('SharePoint people picker', () => {
     expect(store.post.mock.calls[1]).toEqual(['/_api/web/ensureuser', { body: { logonName: 'claims|person' } }]);
   });
 });
+
+
+describe('direct site invitations', () => {
+  it.each([['SME', 2, 1, 'Read'], ['User', 3, 7, 'Contribute'], ['Manager', 3, 7, 'Contribute']])('shares %s without granting ownership and checks effective permissions', async (role, kind, low, access) => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.get = vi.fn().mockResolvedValueOnce({ value: [{ Id: 123, RoleTypeKind: kind }] }).mockResolvedValueOnce({ d: { GetUserEffectivePermissions: { Low: String(low), High: '0' } } });
+    store.post = vi.fn(async () => ({ d: { ShareObject: { StatusCode: 0, ErrorMessage: null } } }));
+    expect(await store.shareSiteAccess({ loginName: 'claims|person' }, role, 'https://tenant.sharepoint.com/sites/mod/SitePages/Tracker.aspx')).toEqual({ access, emailRequested: true });
+    expect(store.post).toHaveBeenCalledWith('/_api/SP.Web.ShareObject', { body: expect.objectContaining({ url: store.webUrl, roleValue: 'role:123', sendEmail: true, propagateAcl: false, includeAnonymousLinkInEmail: false, groupId: 0 }) });
+    expect(JSON.parse(store.post.mock.calls[0][1].body.peoplePickerInput)).toEqual([{ Key: 'claims|person' }]);
+    expect(store.get.mock.calls[1][0]).toContain('getusereffectivepermissions');
+  });
+  it('rejects foreign links and failed sharing responses instead of claiming success', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.get = vi.fn(async () => ({ value: [{ Id: 123, RoleTypeKind: 2 }] }));
+    store.post = vi.fn(async () => ({ StatusCode: -1, ErrorMessage: 'Access denied' }));
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', 'https://other.example/app')).rejects.toThrow('this SharePoint site');
+    expect(store.post).not.toHaveBeenCalled();
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', store.webUrl)).rejects.toThrow('Access denied');
+    store.post.mockResolvedValue({ StatusCode: 0 });
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', store.webUrl)).rejects.toThrow('could not be verified');
+  });
+});

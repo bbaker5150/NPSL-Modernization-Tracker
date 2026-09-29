@@ -1,3 +1,4 @@
+import { PeopleInvite } from './components/PeopleInvite';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -450,7 +451,26 @@ describe('application shell', () => {
     const invite = document.querySelector('.invitation-result a');
     expect(decodeURIComponent(invite.href)).toContain('new@example.test');
     expect(decodeURIComponent(invite.href)).toContain('Tracker.aspx');
-    expect(document.querySelector('.invitation-result').textContent).toContain('No email has been sent.');
+    expect(document.querySelector('.invitation-result').textContent).toContain('Preview only: no site access granted or email sent.');
+  });
+
+  it('retries failed site sharing without duplicating a saved user', async () => {
+    const person = { title: 'Invite Engineer', email: 'invite@example.test', loginName: 'claims|invite' };
+    const store = { searchPeople: vi.fn(async () => [person]), resolvePerson: vi.fn(async () => person), shareSiteAccess: vi.fn().mockRejectedValueOnce(new Error('Site sharing denied')).mockResolvedValueOnce({ access: 'Read', emailRequested: true }) };
+    const save = vi.fn(async (row) => ({ ...row, id: 'invited' }));
+    await act(async () => { root = createRoot(document.getElementById('root')); root.render(<PeopleInvite store={store} config={{ appUrl: 'https://tenant.sharepoint.com/sites/mod/app.aspx' }} onSave={save} localPreview={false} />); });
+    await act(async () => changeValue(document.querySelector('input[type="search"]'), 'Invite'));
+    await act(async () => new Promise((done) => setTimeout(done, 400)));
+    await act(async () => document.querySelector('.people-results button').click());
+    await act(async () => changeValue(document.querySelector('select'), 'SME'));
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
+    expect(document.querySelector('.invitation-result').textContent).toContain('not yet confirmed');
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.invitation-result').textContent).toContain('Read site access verified');
+    expect(document.querySelector('.invitation-result').textContent).toContain('email delivery is not confirmed');
   });
 
 });

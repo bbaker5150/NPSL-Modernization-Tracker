@@ -320,6 +320,34 @@ export class SharePointStore {
     return this.listTaskAttachments(task);
   }
 
+  async shareSiteAccess(person, role, appUrl) {
+    if (!['User', 'SME', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
+    const site = new URL(this.webUrl);
+    const link = new URL(appUrl);
+    if (link.origin !== site.origin || !(link.pathname === site.pathname || link.pathname.startsWith(`${site.pathname.replace(/\/$/, '')}/`))) throw new Error('The invitation link must point to this SharePoint site.');
+    // Use Contribute, not Full Control or site-design Edit, for working roles.
+    const kind = role === 'SME' ? 2 : 3;
+    const definitions = await this.get(`/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq ${kind}`);
+    const definition = (definitions.value || definitions.d?.results || []).find((entry) => entry.RoleTypeKind === kind);
+    if (!definition?.Id) throw new Error('The required SharePoint permission level is unavailable. Ask a site owner.');
+    const response = await this.post('/_api/SP.Web.ShareObject', { body: {
+      url: this.webUrl,
+      peoplePickerInput: JSON.stringify([{ Key: person.loginName }]),
+      roleValue: `role:${definition.Id}`, groupId: 0, propagateAcl: false,
+      sendEmail: true, includeAnonymousLinkInEmail: false,
+      emailSubject: 'Invitation to the NPSL Modernization Tracker',
+      emailBody: `You have been added to the NPSL Modernization Tracker as ${role}. Open the tracker: ${link.href}`,
+      useSimplifiedRoles: false,
+    } });
+    const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
+    if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm sharing. The inviting manager must have permission to share this site.');
+    const permissions = await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
+    const effective = permissions?.d?.GetUserEffectivePermissions || permissions?.GetUserEffectivePermissions || permissions?.d || permissions;
+    const required = role === 'SME' ? 1 : 7;
+    if (!Number.isFinite(Number(effective?.Low)) || (Number(effective.Low) & required) !== required) throw new Error('Sharing was accepted, but site access could not be verified. Ask a site owner to check permissions before retrying.');
+    return { access: role === 'SME' ? 'Read' : 'Contribute', emailRequested: true };
+  }
+
   async searchPeople(query) {
     if (query.trim().length < 2) return [];
     const result = await this.post('/_api/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.clientPeoplePickerSearchUser', {

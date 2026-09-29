@@ -35,6 +35,7 @@ class LocalStore {
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
   async addTaskAttachment(task, file) { validateAttachment(file); await localAttachments(task.id, file); return this.listTaskAttachments(task); }
+  async shareSiteAccess() { throw new Error('Site sharing is available only when the tracker is hosted in SharePoint.'); }
   async searchPeople(query) { const text = query.trim().toLowerCase(); return this.data.users.filter((row) => `${row.title} ${row.email}`.toLowerCase().includes(text)).map(({ title, email, loginName }) => ({ title, email, loginName: loginName || email })); }
   async resolvePerson(loginName) { const person = this.data.users.find((row) => (row.loginName || row.email) === loginName); if (!person) throw new Error('Preview mode can only select saved tracker users.'); return { title: person.title, email: person.email || '', loginName }; }
   async saveUser(row) { return this.upsert('users', row, 'user'); }

@@ -49,6 +49,12 @@ export function authorizedStore(raw, config = {}) {
   };
   return new Proxy(raw, {
     get(target, property) {
+      if (property === 'shareSiteAccess') return async (person, role, appUrl) => {
+        const { data } = await requireManager();
+        const saved = data.users.find((entry) => entry.loginName === person.loginName && entry.role === role);
+        if (!saved) throw new Error('Save the person and role in the tracker before granting site access.');
+        return raw.shareSiteAccess(saved, role, appUrl);
+      };
       if (['searchPeople', 'resolvePerson'].includes(property)) return async (value) => {
         await requireManager();
         return raw[property](value);
