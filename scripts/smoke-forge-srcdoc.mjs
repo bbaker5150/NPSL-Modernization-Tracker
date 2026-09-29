@@ -36,6 +36,16 @@ try {
   const frame = page.frameLocator('#app');
 
   await frame.getByRole('heading', { name: 'My work', exact: true }).waitFor({ timeout: 20_000 });
+  const loadingLogoStyle = await frame.locator('body').evaluate((body) => {
+    const logo = document.createElement('img');
+    logo.className = 'brand-logo loading-logo';
+    body.appendChild(logo);
+    const style = getComputedStyle(logo);
+    const result = { animationName: style.animationName, boxShadow: style.boxShadow, filter: style.filter };
+    logo.remove();
+    return result;
+  });
+  if (loadingLogoStyle.animationName !== 'none' || loadingLogoStyle.boxShadow !== 'none' || loadingLogoStyle.filter !== 'none') errors.push(`Loading logo still glows or animates: ${JSON.stringify(loadingLogoStyle)}`);
   if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
   await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
   await frame.getByLabel('Testing password').fill('incorrect-password');

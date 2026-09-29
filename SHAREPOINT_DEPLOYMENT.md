@@ -114,7 +114,7 @@ Directory Save uses a direct click handler so it works when the embedded host bl
 ### People Picker invitations (no Power Automate)
 Managers can search organization people, select a resolved individual, choose a tracker role, and invite them. SharePoint People Picker and ensureuser resolve the identity; the tracker saves and verifies the directory role.
 
-Every invitee joins the site's associated Members SharePoint group (ISEA METENG Members on this deployment). Existing members are not added again. Membership is read back, and effective site and tracker-page access must pass before a page-targeted SP.Web.ShareObject notification is requested. No Owners membership is granted. The inviter needs SharePoint permission to manage the group and share the page; application Manager status does not elevate SharePoint permissions.
+Every invitee joins the site's associated Members SharePoint group (ISEA METENG Members on this deployment). Existing members are not added again. Membership is read back, and effective site and tracker-page access must pass before a direct SharePoint email is requested. The app does not invoke ShareObject, so the tenant's sharing confirmations are not shown. No Owners membership is granted. The inviter needs SharePoint permission to manage the group and send mail; application Manager status does not elevate SharePoint permissions.
 
 All tracker roles, including SME, receive the Members group's underlying SharePoint permissions. The selected directory role controls tracker features only. Pages, documents, and lists accessible to Members are covered; content with unique permissions that exclude Members requires separate administration. Configure manager-only directory writes separately as appropriate.
 
