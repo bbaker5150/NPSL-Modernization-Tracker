@@ -253,6 +253,7 @@ describe('page-targeted invitations', () => {
       roleValue: 'role:124',
       groupId: 0, propagateAcl: false, sendEmail: true,
       includeAnonymousLinkInEmail: false,
+      emailBody: `You have been added to the <a href="${pageUrl}">NPSL Modernization Tracker</a> as <strong>${role}</strong>.`,
     }) }]);
     expect(store.get.mock.calls.some(([path]) => path.includes('ListItemAllFields/getusereffectivepermissions'))).toBe(true);
   });
