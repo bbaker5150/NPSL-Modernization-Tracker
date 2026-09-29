@@ -259,6 +259,8 @@ try {
   if (overlays) errors.push(`${overlays} Forge runtime control(s) were visible`);
 } catch (error) {
   errors.push(error.stack || error.message);
+  const referenceState = await page.frameLocator('#app').locator('.reference-library').textContent().catch(() => 'Reference view unavailable');
+  errors.push(`Reference view at failure: ${referenceState}`);
 }
 
 if (externalRequests.length) errors.push(`External requests: ${externalRequests.join(', ')}`);
