@@ -221,24 +221,40 @@ describe('SharePoint people picker', () => {
 });
 
 
-describe('direct site invitations', () => {
-  it.each([['SME', 2, 1, 'Read'], ['User', 3, 7, 'Contribute'], ['Manager', 3, 7, 'Contribute']])('shares %s without granting ownership and checks effective permissions', async (role, kind, low, access) => {
-    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
-    store.get = vi.fn().mockResolvedValueOnce({ value: [{ Id: 123, RoleTypeKind: kind }] }).mockResolvedValueOnce({ d: { GetUserEffectivePermissions: { Low: String(low), High: '0' } } });
-    store.post = vi.fn(async () => ({ d: { ShareObject: { StatusCode: 0, ErrorMessage: null } } }));
-    expect(await store.shareSiteAccess({ loginName: 'claims|person' }, role, 'https://tenant.sharepoint.com/sites/mod/SitePages/Tracker.aspx')).toEqual({ access, emailRequested: true });
-    expect(store.post).toHaveBeenCalledWith('/_api/SP.Web.ShareObject', { body: expect.objectContaining({ url: store.webUrl, roleValue: 'role:123', sendEmail: true, propagateAcl: false, includeAnonymousLinkInEmail: false, groupId: 0 }) });
-    expect(JSON.parse(store.post.mock.calls[0][1].body.peoplePickerInput)).toEqual([{ Key: 'claims|person' }]);
-    expect(store.get.mock.calls[1][0]).toContain('getusereffectivepermissions');
+describe('page-targeted invitations', () => {
+  const site = 'https://tenant.sharepoint.com/sites/mod';
+  const pageUrl = `${site}/SitePages/Tracker.aspx`;
+  function setup(low = 7, pageLow = 33, level = 1) {
+    const store = new SharePointStore({ webUrl: site });
+    store.get = vi.fn(async (path) => {
+      if (path.includes('getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: String(path.includes('ListItemAllFields') ? pageLow : low) } };
+      if (path.includes('roledefinitions')) return { value: [{ Id: 123, RoleTypeKind: 3 }, { Id: 124, RoleTypeKind: 2 }] };
+      return { Exists: true, Level: level };
+    });
+    store.post = vi.fn(async () => ({ StatusCode: 0 }));
+    return store;
+  }
+  it.each(['SME', 'User', 'Manager'])('shares site and page for %s, then sends only a page invitation', async (role) => {
+    const store = setup();
+    await store.shareSiteAccess({ loginName: 'claims|person' }, role, pageUrl);
+    const requests = store.post.mock.calls.map(([, options]) => options.body);
+    expect(requests.map((row) => [row.url, row.sendEmail, row.roleValue])).toEqual([
+      [site, false, role === 'SME' ? 'role:124' : 'role:123'], [pageUrl, false, 'role:124'], [pageUrl, true, 'role:124'],
+    ]);
+    expect(requests.every((row) => row.propagateAcl === false && row.includeAnonymousLinkInEmail === false)).toBe(true);
+    expect(store.get.mock.calls.some(([path]) => path.includes('ListItemAllFields/getusereffectivepermissions'))).toBe(true);
   });
-  it('rejects foreign links and failed sharing responses instead of claiming success', async () => {
-    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
-    store.get = vi.fn(async () => ({ value: [{ Id: 123, RoleTypeKind: 2 }] }));
-    store.post = vi.fn(async () => ({ StatusCode: -1, ErrorMessage: 'Access denied' }));
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', 'https://other.example/app')).rejects.toThrow('this SharePoint site');
+  it('does not share or email an unpublished page or invalid library link', async () => {
+    const store = setup(7, 1, 2);
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('Publish or republish');
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
     expect(store.post).not.toHaveBeenCalled();
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', store.webUrl)).rejects.toThrow('Access denied');
-    store.post.mockResolvedValue({ StatusCode: 0 });
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', store.webUrl)).rejects.toThrow('could not be verified');
+  });
+  it('never sends an invitation when page access verification or sharing fails', async () => {
+    const store = setup(7, 0);
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('tracker page access could not be verified');
+    expect(store.post.mock.calls.every(([, options]) => !options.body.sendEmail)).toBe(true);
+    store.post.mockResolvedValue({ StatusCode: -1, ErrorMessage: 'Access denied' });
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', pageUrl)).rejects.toThrow('Access denied');
   });
 });

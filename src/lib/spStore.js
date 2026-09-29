@@ -1,4 +1,4 @@
-import { normalizeInvitationUrl, parsePeopleResults } from './peoplePicker';
+import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment } from './taskAttachments';
 import { normalizePhaseKey } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
@@ -322,27 +322,45 @@ export class SharePointStore {
 
   async shareSiteAccess(person, role, appUrl) {
     if (!['User', 'SME', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
-    const link = new URL(normalizeInvitationUrl(appUrl, this.webUrl));
+    const link = new URL(trackerPageUrl(appUrl, this.webUrl));
+    const fileApi = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(link.pathname))}')`;
+    let page;
+    try { const response = await this.get(`${fileApi}?$select=Exists,Level`); page = response.d || response; }
+    catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
+    if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
+    if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
     // Use Contribute, not Full Control or site-design Edit, for working roles.
     const kind = role === 'SME' ? 2 : 3;
     const definitions = await this.get(`/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq ${kind}`);
     const definition = (definitions.value || definitions.d?.results || []).find((entry) => entry.RoleTypeKind === kind);
     if (!definition?.Id) throw new Error('The required SharePoint permission level is unavailable. Ask a site owner.');
+    const share = async (url, roleId, sendEmail) => {
     const response = await this.post('/_api/SP.Web.ShareObject', { body: {
-      url: this.webUrl,
+      url,
       peoplePickerInput: JSON.stringify([{ Key: person.loginName }]),
-      roleValue: `role:${definition.Id}`, groupId: 0, propagateAcl: false,
-      sendEmail: true, includeAnonymousLinkInEmail: false,
+      roleValue: `role:${roleId}`, groupId: 0, propagateAcl: false,
+      sendEmail, includeAnonymousLinkInEmail: false,
       emailSubject: 'Invitation to the NPSL Modernization Tracker',
       emailBody: `You have been added to the NPSL Modernization Tracker as ${role}. Open the tracker: ${link.href}`,
       useSimplifiedRoles: false,
     } });
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
     if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm sharing. The inviting manager must have permission to share this site.');
+    };
+    const readDefinitions = kind === 2 ? definitions : await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
+    const readRole = (readDefinitions.value || readDefinitions.d?.results || []).find((entry) => entry.RoleTypeKind === 2);
+    if (!readRole?.Id) throw new Error('The Read permission level is unavailable. Ask a site owner.');
+    await share(this.webUrl, definition.Id, false);
+    await share(link.href, readRole.Id, false);
     const permissions = await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
     const effective = permissions?.d?.GetUserEffectivePermissions || permissions?.GetUserEffectivePermissions || permissions?.d || permissions;
     const required = role === 'SME' ? 1 : 7;
     if (!Number.isFinite(Number(effective?.Low)) || (Number(effective.Low) & required) !== required) throw new Error('Sharing was accepted, but site access could not be verified. Ask a site owner to check permissions before retrying.');
+    const pagePermissions = await this.get(`${fileApi}/ListItemAllFields/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
+    const pageEffective = pagePermissions?.d?.GetUserEffectivePermissions || pagePermissions?.GetUserEffectivePermissions || pagePermissions?.d || pagePermissions;
+    if (!Number.isFinite(Number(pageEffective?.Low)) || (Number(pageEffective.Low) & 33) !== 33) throw new Error('Site access was granted, but tracker page access could not be verified. No invitation email was requested. Ask a site owner to check the page permissions.');
+    // Send only the page-targeted notification, after both checks pass.
+    await share(link.href, readRole.Id, true);
     return { access: role === 'SME' ? 'Read' : 'Contribute', emailRequested: true };
   }
 

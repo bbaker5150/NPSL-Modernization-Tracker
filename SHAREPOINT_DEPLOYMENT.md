@@ -130,3 +130,9 @@ The app reports email as requested, not delivered. A failed sharing call leaves 
 Invitation URL detection now also uses the embedding page referrer and the detected SharePoint web when frame URLs are `about:srcdoc`/`blob:` or parent access is blocked. A site-only fallback must be reviewed and replaced with the published app page when necessary; `MOD_TRACKER_CONFIG.appUrl` remains the preferred explicit deployment setting. Relative configured links are resolved against the SharePoint web. Invalid links produce an inline instruction before any user save or sharing request.
 
 Directory editing now uses Edit → Update User / Delete User. The update form appears only after Update User and closes on save or cancel. Delete User acts directly from the menu, with self-deletion disabled.
+
+
+### Page-targeted invitations
+Invitations now require the direct tracker `.aspx`/HTML URL, not the site root or a Site Pages library view. Configure `MOD_TRACKER_CONFIG.appUrl` when the embedded host cannot expose the page address. The app checks the target exists and is published before sharing. Owners must publish/republish a draft or checked-out page themselves; this workflow does not publish content automatically.
+
+The site grant suppresses email. A separate Read grant is applied to the specific tracker page without changing unrelated unique permissions. Effective site and page permissions are checked, then a page-targeted sharing notification is requested so the email's shared-object link targets the tracker page. Existing stronger permissions are preserved. Other separately secured tracker lists or embedded HTML assets still require their own access. This supersedes site-root fallback and site-level email behavior described above.
