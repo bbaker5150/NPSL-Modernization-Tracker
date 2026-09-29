@@ -402,6 +402,7 @@ export class SharePointStore {
     if (!Number.isFinite(Number(pageEffective?.Low)) || (Number(pageEffective.Low) & 33) !== 33) throw new Error('Site access was granted, but tracker page access could not be verified. No invitation email was requested. Ask a site owner to check the page permissions.');
     // Flank Speed has retired SP.Utilities.Utility.SendEmail. Make exactly one
     // page-targeted ShareObject request after membership and access pass.
+    const emailBody = `You have been added to the <a href="${escapeXml(link.href)}">NPSL Modernization Tracker</a> as <strong>${escapeXml(role)}</strong>.`;
     const response = await this.post('/_api/SP.Web.ShareObject', { body: {
       url: link.href,
       peoplePickerInput: JSON.stringify([{ Key: person.loginName }]),
@@ -409,7 +410,7 @@ export class SharePointStore {
       groupId: 0, propagateAcl: false, sendEmail: true,
       includeAnonymousLinkInEmail: false,
       emailSubject: 'Invitation to the NPSL Modernization Tracker',
-      emailBody: 'You have been added to the NPSL Modernization Tracker as ' + role + '. Open the tracker: ' + link.href,
+      emailBody,
       useSimplifiedRoles: false,
     } });
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
