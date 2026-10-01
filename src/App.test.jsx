@@ -106,6 +106,9 @@ describe('application shell', () => {
     const nameInput = document.querySelector('.modal .field input');
     const assignMe = [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Assign me');
     const ownerEditing = document.querySelector('.modal input[type="checkbox"]');
+    expect(ownerEditing.getAttribute('aria-label')).toBe('Allow project owner to edit project');
+    expect(ownerEditing.closest('.project-owner-field')).not.toBeNull();
+    expect(document.querySelector('.modal .checkbox-field')).toBeNull();
     await act(async () => {
       changeValue(nameInput, 'Owned modernization project');
       changeValue([...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Organization')).querySelector('select'), 'ISE');
