@@ -7,6 +7,7 @@ describe('SharePoint store', () => {
     const tasks = CONTAINERS.find((container) => container.key === 'tasks');
     const updates = CONTAINERS.find((container) => container.key === 'updates');
     expect(projects.fields.map((field) => field.name)).toContain('OwnerKey');
+    expect(projects.fields.map((field) => field.name)).toEqual(expect.arrayContaining(['Organization', 'OwnerCanEdit']));
     expect(tasks.fields.map((field) => field.name)).toContain('OwnerKey');
     expect(updates.fields.map((field) => field.name)).toContain('AuthorKey');
     expect(CONTAINERS.find((container) => container.key === 'acronyms').fields.map((field) => field.name)).toEqual(['RecordId', 'Acronym', 'FullTerm', 'Definition', 'SeedVersion', 'Archived']);
@@ -72,6 +73,14 @@ describe('SharePoint store', () => {
     expect(JSON.stringify(store.post.mock.calls[0])).not.toContain('X-HTTP-Method');
   });
 
+  it('persists project organization and manager-controlled owner editing', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    store.post = vi.fn(async () => ({ value: [] }));
+    await store.saveProject({ spId: 4, id: 'p4', projectKey: 'p4', title: 'Modernize', organization: 'ISE', ownerCanEdit: true });
+    const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
+    expect(values).toMatchObject({ Organization: 'ISE', OwnerCanEdit: '1' });
+  });
+
   it('creates acronyms in the shared SharePoint glossary list', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.create = vi.fn(async () => 81);
@@ -122,7 +131,7 @@ describe('tasking schema round trip', () => {
 
 describe('SharePoint user role verification', () => {
   const row = { spId: 7, id: 'u7', title: 'Engineer', loginName: 'i:0#.f|membership|engineer@example.test', email: 'engineer@example.test', role: 'Manager' };
-  it.each(['Manager', 'SME', 'User'])('reads the saved SharePoint role back before confirming %s', async (role) => {
+  it.each(['Manager', 'User'])('reads the saved SharePoint role back before confirming %s', async (role) => {
     const requested = { ...row, role };
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ value: [{ FieldName: 'AppRole', HasException: false, ErrorMessage: null }] }));
@@ -162,7 +171,7 @@ describe('native SharePoint task attachments', () => {
     store.get = vi.fn(async () => ({ value: [{ FileName: 'REPORT.pdf', ServerRelativeUrl: '/report.pdf' }] }));
     store.post = vi.fn();
     await expect(store.addTaskAttachment({ spId: 42 }, { name: 'report.pdf', size: 1 })).rejects.toThrow('already attached');
-    await expect(store.addTaskAttachment({ spId: 42 }, { name: 'large.pdf', size: 21 * 1024 * 1024 })).rejects.toThrow('20 MB');
+    await expect(store.addTaskAttachment({ spId: 42 }, { name: 'large.pdf', size: 51 * 1024 * 1024 })).rejects.toThrow('50 MB');
     await expect(store.listTaskAttachments({})).rejects.toThrow('Save the task');
     expect(store.post).not.toHaveBeenCalled();
   });
@@ -170,6 +179,17 @@ describe('native SharePoint task attachments', () => {
 
 
 describe('prompt-free SharePoint removal and downloads', () => {
+  it('renames an attachment by copying its bytes and archiving the previous name', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+    const blob = new Blob(['report'], { type: 'application/pdf' });
+    store.listTaskAttachments = vi.fn(async () => [{ name: 'old.pdf' }]);
+    store.downloadTaskAttachment = vi.fn(async () => blob);
+    store.addTaskAttachment = vi.fn(async () => []);
+    store.deleteTaskAttachment = vi.fn(async () => undefined);
+    await store.renameTaskAttachment({ spId: 9 }, 'old.pdf', 'new.pdf');
+    expect(store.addTaskAttachment).toHaveBeenCalledWith({ spId: 9 }, expect.objectContaining({ name: 'new.pdf', size: blob.size }));
+    expect(store.deleteTaskAttachment).toHaveBeenCalledWith({ spId: 9 }, 'old.pdf');
+  });
   it('archives an existing attachment through a verified metadata update', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.listTaskAttachments = vi.fn(async () => [{ name: 'report.pdf' }]);
@@ -240,7 +260,7 @@ describe('page-targeted invitations', () => {
     });
     return store;
   }
-  it.each(['SME', 'User', 'Manager'])('adds %s to Members, verifies access, then makes exactly one invitation request', async (role) => {
+  it.each(['User', 'Manager'])('adds %s to Members, verifies access, then makes exactly one invitation request', async (role) => {
     const store = setup();
     expect(await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, role, pageUrl)).toMatchObject({ access: 'ISEA METENG Members' });
     expect(store.post.mock.calls[0]).toEqual(['/_api/web/sitegroups(9)/users', { body: { LoginName: 'claims|person' } }]);
@@ -275,13 +295,13 @@ describe('page-targeted invitations', () => {
   });
   it('does not share or email an unpublished page or invalid library link', async () => {
     const store = setup(7, 1, 2);
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('Publish or republish');
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'SME', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('Publish or republish');
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'User', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
     expect(store.post).not.toHaveBeenCalled();
   });
   it('never sends an invitation when page access verification fails and reports invitation failures', async () => {
     const store = setup(7, 0);
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'SME', pageUrl)).rejects.toThrow('tracker page access could not be verified');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('tracker page access could not be verified');
     expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
     const emailFailure = setup();
     const post = emailFailure.post.getMockImplementation();
@@ -289,6 +309,6 @@ describe('page-targeted invitations', () => {
       if (!path.includes('ShareObject')) return post(path);
       throw new Error('Email denied');
     });
-    await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'SME', pageUrl)).rejects.toThrow('Email denied');
+    await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'User', pageUrl)).rejects.toThrow('Email denied');
   });
 });

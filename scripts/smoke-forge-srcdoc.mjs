@@ -77,10 +77,10 @@ try {
   await smeRow.getByRole('button', { name: 'Edit', exact: true }).click();
   if (await frame.locator('.directory-form').count()) errors.push('Edit opened form instead of menu');
   await smeRow.getByRole('button', { name: 'Update User', exact: true }).click();
-  await frame.getByLabel('Role', { exact: true }).selectOption('SME');
+  await frame.getByLabel('Role', { exact: true }).selectOption('Manager');
   await frame.getByRole('button', { name: 'Save user', exact: true }).click();
-  await frame.getByRole('status').filter({ hasText: 'SME Test User saved as SME.' }).waitFor();
-  await smeRow.getByText('SME', { exact: true }).waitFor();
+  await frame.getByRole('status').filter({ hasText: 'SME Test User saved as Manager.' }).waitFor();
+  await smeRow.getByText('Manager', { exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
@@ -196,11 +196,13 @@ try {
   await frame.getByRole('button', { name: 'Overview', exact: true }).click();
   const documents = frame.locator('.project-documents');
   await documents.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
+  await documents.getByRole('button', { name: 'Edit smoke-report.txt', exact: true }).click();
   const downloadEvent = page.waitForEvent('download');
-  await documents.getByRole('button', { name: 'Download smoke-report.txt', exact: true }).click();
+  await documents.getByRole('button', { name: 'Download', exact: true }).click();
   const download = await downloadEvent;
   if (download.suggestedFilename() !== 'smoke-report.txt' || await fs.readFile(await download.path(), 'utf8') !== 'Task document smoke test') errors.push('Document download failed');
-  await documents.getByRole('button', { name: 'Delete smoke-report.txt', exact: true }).click();
+  await documents.getByRole('button', { name: 'Edit smoke-report.txt', exact: true }).click();
+  await documents.getByRole('button', { name: 'Delete', exact: true }).click();
   await documents.getByText('No documents attached.', { exact: true }).waitFor();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
   // The register should span the same content width as the pipeline panel.

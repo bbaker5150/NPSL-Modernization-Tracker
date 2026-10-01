@@ -216,16 +216,16 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
 
   addSummary(workbook, { projects, tasks, updates, risks, phases, user, sourceLabel });
   addDataSheet(workbook, {
-    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [4],
+    name: 'Projects', tableName: 'ProjectsTable', statusColumns: [5],
     columns: [
       { header: 'Project', width: 34, wrap: true }, { header: 'Owner', width: 24 },
-      { header: 'Stage', width: 26 }, { header: 'Health', width: 16 },
+      { header: 'Organization', width: 20 }, { header: 'Stage', width: 26 }, { header: 'Health', width: 16 },
       { header: 'Progress', width: 12, numFmt: '0%' }, { header: 'Progress View', width: 18 },
       { header: 'Next Milestone', width: 40, wrap: true }, { header: 'Milestone Date', width: 16, numFmt: 'mmm d, yyyy' },
       { header: 'Target Finish', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Owner Email', width: 30 },
       { header: 'Phase Progress', width: 15, numFmt: '0%' }, { header: 'Task Progress', width: 15, numFmt: '0%' },
     ],
-    rows: projects.map((project) => [project.title, displayName(project.ownerName || 'Unassigned'), phaseName(phases, project.currentStageKey), project.health,
+    rows: projects.map((project) => [project.title, displayName(project.ownerName || 'Unassigned'), project.organization || 'NPSL', phaseName(phases, project.currentStageKey), project.health,
       Number(project.percentComplete || 0) / 100, project.progressMode === 'tasks' ? 'By task' : 'By phase', project.nextMilestone || '', toDate(project.nextMilestoneDate), toDate(project.targetFinish), project.ownerEmail || '',
       projectProgress(tasks.filter((task) => task.projectKey === project.projectKey), 'phases').percentComplete / 100,
       projectProgress(tasks.filter((task) => task.projectKey === project.projectKey), 'tasks').percentComplete / 100]),

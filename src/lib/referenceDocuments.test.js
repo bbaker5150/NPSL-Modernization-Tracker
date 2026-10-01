@@ -17,14 +17,14 @@ describe('reference document organization', () => {
     expect(referencePath(entries, 'b').map((row) => row.name)).toEqual(['Templates', 'Acquisition']);
     expect(validateReference(entries, { id: 'doc', name: 'Updated.docx', parentId: '' })).toMatchObject({ spId: 3, fileName: 'Template.docx', name: 'Updated.docx', parentId: '' });
   });
-  it('blocks SME mutations but permits download; user mutations are validated', async () => {
-    const raw = { currentUser: async () => ({ loginName: 'reader' }), load: async () => ({ users: [{ loginName: 'reader', role: 'SME' }] }), listReferenceEntries: async () => entries, saveReferenceEntry: vi.fn(), downloadReferenceEntry: vi.fn() };
+  it('allows users to download while only managers can update references', async () => {
+    const raw = { currentUser: async () => ({ loginName: 'reader' }), load: async () => ({ users: [{ loginName: 'reader', role: 'User' }] }), listReferenceEntries: async () => entries, saveReferenceEntry: vi.fn(), downloadReferenceEntry: vi.fn() };
     const store = authorizedStore(raw);
-    await expect(store.saveReferenceEntry({ name: 'Folder' })).rejects.toThrow('read-only');
+    await expect(store.saveReferenceEntry({ name: 'Folder' })).rejects.toThrow('Only managers');
     await store.downloadReferenceEntry('doc');
     expect(raw.downloadReferenceEntry).toHaveBeenCalledWith(entries[2]);
     await expect(store.downloadReferenceEntry('a')).rejects.toThrow('no longer exists');
-    raw.load = async () => ({ users: [] });
+    raw.load = async () => ({ users: [{ loginName: 'reader', role: 'Manager' }] });
     await store.saveReferenceEntry({ name: 'New', parentId: '' });
     expect(raw.saveReferenceEntry).toHaveBeenCalledWith({ name: 'New', parentId: '', kind: 'folder' }, undefined);
   });
@@ -42,15 +42,15 @@ describe('reference document organization', () => {
     await store.saveReferenceEntry(row, file);
     expect(store.update).toHaveBeenCalledWith('references', 8, { Archived: false });
   });
-  it('deletes only resolved entries and blocks SME and nonempty-folder deletion', async () => {
-    const raw = { currentUser: async () => ({ loginName: 'reader' }), load: async () => ({ users: [] }), listReferenceEntries: async () => entries, deleteReferenceEntry: vi.fn() };
+  it('deletes only resolved entries and blocks users and nonempty-folder deletion', async () => {
+    const raw = { currentUser: async () => ({ loginName: 'reader' }), load: async () => ({ users: [{ loginName: 'reader', role: 'Manager' }] }), listReferenceEntries: async () => entries, deleteReferenceEntry: vi.fn() };
     const store = authorizedStore(raw);
     await store.deleteReferenceEntry('doc');
     expect(raw.deleteReferenceEntry).toHaveBeenCalledWith(entries[2]);
     await expect(store.deleteReferenceEntry('a')).rejects.toThrow('contents');
     await expect(store.deleteReferenceEntry('missing')).rejects.toThrow('no longer exists');
-    raw.load = async () => ({ users: [{ loginName: 'reader', role: 'SME' }] });
-    await expect(store.deleteReferenceEntry('doc')).rejects.toThrow('read-only');
+    raw.load = async () => ({ users: [{ loginName: 'reader', role: 'User' }] });
+    await expect(store.deleteReferenceEntry('doc')).rejects.toThrow('Only managers');
     expect(raw.deleteReferenceEntry).toHaveBeenCalledTimes(1);
   });
   it('archives SharePoint references without a native delete and verifies persistence', async () => {

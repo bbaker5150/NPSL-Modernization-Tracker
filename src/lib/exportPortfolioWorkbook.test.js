@@ -33,7 +33,7 @@ describe('portfolio Excel export', () => {
     expect(reopened.getWorksheet('Tasks').rowCount).toBe(tasks.length + 1);
     expect(reopened.getWorksheet('Projects').getCell('A1').font.bold).toBe(true);
     expect(reopened.getWorksheet('Projects').getCell('A1').fill.fgColor.argb).toBe('0B2942');
-    expect(reopened.getWorksheet('Projects').getCell('E2').numFmt).toBe('0%');
+    expect(reopened.getWorksheet('Projects').getCell('F2').numFmt).toBe('0%');
     expect(reopened.getWorksheet('Pipeline Reference').rowCount).toBe(workflowData.phases.length + 1);
     expect(reopened.getWorksheet('Acronym Glossary').rowCount).toBe(glossary.length + 1);
     expect(reopened.getWorksheet('Portfolio Summary').getCell('A1').value).toBe('Modernization Project Tracker');

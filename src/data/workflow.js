@@ -6,6 +6,10 @@ export const normalizePhaseKey = (key) => ({
   'production-procurement': 'procurement', 'operation-sustainment': 'deployment',
 }[key] || key || 'requirement');
 
+export const ORGANIZATIONS = ['Program Office', 'NPSL', 'ISE'];
+export const normalizeOrganization = (value) => ORGANIZATIONS.includes(value) ? value : 'NPSL';
+export const normalizeTaskStatus = (value) => value === 'In Progress – At Program Office' ? 'In Progress' : (value || 'Not Started');
+
 export const workflowData = {
   phases: [
     { key: 'requirement', name: 'Requirement (MSA)', short: 'MSA', acronym: 'MSA', description: 'Requirement / Materiel Solution Analysis. ICP and workload analysis.' },
