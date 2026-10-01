@@ -107,7 +107,7 @@ export function authorizedStore(raw, config = {}) {
             throw new Error('Only managers or authorized project owners can add tasks.');
           } else {
             if (!canUpdateTask(existing, user, data.projects)) throw new Error('You can only update your assigned tasks.');
-            next = { ...existing, status: row.status, deferredDate: row.deferredDate || '', deferredJustification: row.deferredJustification || '', notRequiredJustification: row.notRequiredJustification || '' };
+            next = { ...existing, deferredDate: row.deferredDate || '', deferredJustification: row.deferredJustification || '', notRequiredJustification: row.notRequiredJustification || '' };
           }
         }
         next.status = normalizeTaskStatus(next.status);
@@ -120,7 +120,7 @@ export function authorizedStore(raw, config = {}) {
       if (property === 'listProjectAttachments') return async (projectKey) => {
         const { user, data } = await context();
         if (!visibleData(data, user).projects.some((project) => project.projectKey === projectKey)) throw new Error('You cannot access documents for this project.');
-        const tasks = data.tasks.filter((task) => task.projectKey === projectKey);
+        const tasks = data.tasks.filter((task) => task.projectKey === projectKey && (isManager(user, data.users) || canUpdateTask(task, user, data.projects)));
         return (await Promise.all(tasks.map(async (task) => (await raw.listTaskAttachments(task)).map((file) => ({ ...file, taskId: task.id, taskTitle: task.title }))))).flat();
       };
       if (['listTaskAttachments', 'addTaskAttachment', 'deleteTaskAttachment', 'renameTaskAttachment', 'downloadTaskAttachment'].includes(property)) return async (taskId, file, nextName) => {

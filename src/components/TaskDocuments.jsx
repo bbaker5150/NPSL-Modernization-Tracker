@@ -19,7 +19,7 @@ function DocumentActions({ file, busy, canEdit, onDownload, onRename, onDelete }
   </div>;
 }
 
-export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete = false, refreshKey }) {
+export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete = false, refreshKey, onChange }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -54,6 +54,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
       catch (err) { failures.push(`${file.name}: ${err.message}`); }
     }
     setMessage(`${uploaded} of ${selected.length} documents uploaded.`);
+    if (uploaded) onChange?.();
     setError(failures.join('\n')); setBusy(false); setRefresh((value) => value + 1);
   }
   async function download(file) {
@@ -70,7 +71,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
   }
   async function remove(file) {
     setBusy(true); setError(''); setMessage('');
-    try { await store.deleteTaskAttachment(file.taskId || taskId, file.name); setMessage(`${file.name} deleted.`); }
+    try { await store.deleteTaskAttachment(file.taskId || taskId, file.name); setMessage(`${file.name} deleted.`); onChange?.(); }
     catch (err) { setError(err.message); }
     finally { setBusy(false); setRefresh((value) => value + 1); }
   }
@@ -80,6 +81,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     try {
       await store.renameTaskAttachment(renaming.file.taskId || taskId, renaming.file.name, renaming.name.trim());
       setMessage(`${renaming.file.name} renamed.`); setRenaming(null);
+      onChange?.();
     } catch (err) { setError(err.message); }
     finally { setBusy(false); setRefresh((value) => value + 1); }
   }

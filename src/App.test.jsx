@@ -246,6 +246,7 @@ describe('application shell', () => {
     await act(async () => document.querySelector('.upcoming-list button').click());
     expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
     expect(document.querySelector('.modal input[aria-label="Task name"]').disabled).toBe(true);
+    expect([...document.querySelectorAll('.modal select')].find((select) => [...select.options].some((option) => option.value === 'Complete')).disabled).toBe(true);
     expect([...document.querySelectorAll('.modal button')].some((button) => button.textContent.includes('Delete task'))).toBe(false);
   });
 
@@ -309,7 +310,7 @@ describe('application shell', () => {
     expect(document.querySelector('.topbar input')).toBeNull();
   });
 
-  it('filters by organization and sorts each portfolio column', async () => {
+  it('filters by organization and sorts project names', async () => {
     const raw = createRepository().store;
     await raw.saveProject({ id: 'zulu', projectKey: 'zulu', title: 'Zulu project', organization: 'NPSL', ownerName: 'Zulu Owner', currentStageKey: 'procurement', health: 'At Risk' });
     await raw.saveProject({ id: 'alpha', projectKey: 'alpha', title: 'Alpha project', organization: 'ISE', ownerName: 'Alpha Owner', currentStageKey: 'requirement', health: 'On Track' });
@@ -322,6 +323,67 @@ describe('application shell', () => {
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toContain('Alpha project');
     expect(rows()[0]).toContain('ISE');
+  });
+
+  it('sorts all portfolio data columns in both directions', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'a', projectKey: 'a', title: 'Alpha', ownerName: 'Zulu', organization: 'Program Office', currentStageKey: 'procurement', health: 'On Track' });
+    await raw.saveProject({ id: 'z', projectKey: 'z', title: 'Zulu', ownerName: 'Alpha', organization: 'ISE', currentStageKey: 'requirement', health: 'Blocked' });
+    await raw.saveTask({ id: 'ad', projectKey: 'a', title: 'Done', phaseKey: 'requirement', status: 'Complete' });
+    await raw.saveTask({ id: 'an', projectKey: 'a', title: 'Alpha milestone', phaseKey: 'procurement', status: 'Not Started' });
+    await raw.saveTask({ id: 'zn', projectKey: 'z', title: 'Zulu milestone', phaseKey: 'requirement', status: 'Not Started' });
+    await renderApp();
+    const first = () => document.querySelector('.project-table-row:not(.table-header) > span > strong').textContent;
+    for (const [label, ascending] of [['Owner', 'Zulu'], ['Organization', 'Zulu'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
+      const heading = () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.startsWith(label));
+      await act(async () => heading().click());
+      expect(first(), `${label} ascending`).toBe(ascending);
+      await act(async () => heading().click());
+      expect(first(), `${label} descending`).toBe(ascending === 'Alpha' ? 'Zulu' : 'Alpha');
+    }
+  });
+
+  it('scopes each attention card to its organization and sorts board cards', async () => {
+    const raw = createRepository().store;
+    for (const [id, organization] of [['p', 'Program Office'], ['n', 'NPSL'], ['i', 'ISE']]) {
+      await raw.saveProject({ id, projectKey: id, title: `${organization} project`, organization, currentStageKey: 'requirement' });
+      await raw.saveTask({ id: `${id}-t`, projectKey: id, title: `${organization} task`, phaseKey: 'requirement', status: 'Not Started' });
+    }
+    await renderApp();
+    expect(document.querySelector('.kpi-grid').textContent).not.toContain('Portfolio Progress');
+    for (const organization of ['Program Office', 'NPSL', 'ISE']) {
+      await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(`${organization} Needs Attention`)).click());
+      expect(document.querySelector('h1').textContent).toBe(`${organization} Needs Attention`);
+      expect(document.querySelector('.attention-groups').textContent).toContain(`${organization} project`);
+      for (const other of ['Program Office', 'NPSL', 'ISE'].filter((value) => value !== organization)) expect(document.querySelector('.attention-groups').textContent).not.toContain(`${other} project`);
+      await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Portfolio').click());
+    }
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Pipeline board').click());
+    await act(async () => changeValue(document.querySelector('[aria-label="Sort pipeline projects"]'), 'organization'));
+    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['ISE project', 'NPSL project', 'Program Office project']);
+  });
+
+  it('places project documents after upcoming work and names files in the phase indicator', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'p', projectKey: 'p', title: 'Document project', currentStageKey: 'requirement' });
+    await raw.saveTask({ id: 't', projectKey: 'p', title: 'Review plan', phaseKey: 'requirement', status: 'Not Started' });
+    const attached = [{ name: 'Plan.pdf' }, { name: 'Evidence.docx' }];
+    vi.spyOn(Object.getPrototypeOf(raw), 'listTaskAttachments').mockImplementation(async () => attached);
+    vi.spyOn(Object.getPrototypeOf(raw), 'renameTaskAttachment').mockImplementation(async (_task, name, nextName) => { attached.find((file) => file.name === name).name = nextName; return attached; });
+    await renderApp();
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    const headings = [...document.querySelectorAll('.drawer-section-stack h3')].map((el) => el.textContent);
+    expect(headings.indexOf('Documents')).toBeGreaterThan(headings.indexOf('Upcoming work'));
+    await act(async () => document.querySelector('[aria-label="Edit Plan.pdf"]').click());
+    expect([...document.querySelectorAll('.reference-action-menu button')].map((el) => el.textContent)).toEqual(['Download', 'Rename', 'Delete']);
+    await act(async () => [...document.querySelectorAll('.reference-action-menu button')].find((button) => button.textContent === 'Rename').click());
+    await act(async () => changeValue(document.querySelector('.document-rename input'), 'Updated Plan.pdf'));
+    await act(async () => [...document.querySelectorAll('.document-rename button')].find((button) => button.textContent === 'Save').click());
+    await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((button) => button.textContent.includes('Work breakdown')).click());
+    const indicator = document.querySelector('.phase-document-indicator');
+    expect(indicator.title).toContain('Review plan: Updated Plan.pdf');
+    expect(indicator.title).toContain('Review plan: Evidence.docx');
+    expect(indicator.nextElementSibling.classList.contains('badge')).toBe(true);
   });
 
   it('shows a persistent activation error when the directory write fails', async () => {
