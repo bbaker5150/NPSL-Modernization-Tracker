@@ -1,6 +1,6 @@
 import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
-import { validateAttachment } from './taskAttachments';
-import { normalizePhaseKey } from '../data/workflow';
+import { validateAttachment, validateAttachmentName } from './taskAttachments';
+import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 
@@ -13,7 +13,7 @@ export const CONTAINERS = [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['MeasurementArea', 'Measurement Area', FIELD.TEXT], ['Description', 'Description', FIELD.NOTE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true],
-      ['ManagerName', 'Manager', FIELD.TEXT], ['ManagerEmail', 'Manager Email', FIELD.TEXT],
+      ['Organization', 'Organization', FIELD.TEXT], ['OwnerCanEdit', 'Project Owner Can Edit', FIELD.BOOLEAN],
       ['Priority', 'Priority', FIELD.TEXT], ['Health', 'Health', FIELD.TEXT], ['ProjectStatus', 'Status', FIELD.TEXT],
       ['CurrentStageKey', 'Current Stage', FIELD.TEXT], ['PercentComplete', 'Percent Complete', FIELD.NUMBER], ['ProgressMode', 'Progress Mode', FIELD.TEXT],
       ['TargetFinish', 'Target Finish', FIELD.DATE], ['NextMilestone', 'Next Milestone', FIELD.TEXT],
@@ -94,8 +94,9 @@ const safeJson = (value, fallback) => {
 
 const projectFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
-  Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', ManagerName: row.managerName,
-  ManagerEmail: row.managerEmail || '', Priority: row.priority, Health: row.health, ProjectStatus: row.status,
+  Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '',
+  Priority: row.priority, Health: row.health, ProjectStatus: row.status,
+  Organization: normalizeOrganization(row.organization), OwnerCanEdit: !!row.ownerCanEdit,
   CurrentStageKey: row.currentStageKey, PercentComplete: row.percentComplete, ProgressMode: row.progressMode || 'phases', TargetFinish: sharePointDate(row.targetFinish),
   NextMilestone: row.nextMilestone, NextMilestoneDate: sharePointDate(row.nextMilestoneDate), SourceNotes: row.sourceNotes,
   ImportedBaseline: !!row.importedBaseline, TagsJson: JSON.stringify(row.tags || []),
@@ -129,7 +130,8 @@ function fromProject(item) {
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.Title,
     measurementArea: item.MeasurementArea || item.Title, description: item.Description || '', ownerName: item.OwnerName || 'Unassigned',
-    ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', managerName: item.ManagerName || 'Unassigned', managerEmail: item.ManagerEmail || '',
+    ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '',
+    organization: normalizeOrganization(item.Organization), ownerCanEdit: !!item.OwnerCanEdit,
     priority: item.Priority || 'Medium', health: item.Health || 'Needs Review', status: item.ProjectStatus || 'Planned',
     currentStageKey: phaseKey(item.CurrentStageKey), percentComplete: Number(item.PercentComplete || 0), progressMode: item.ProgressMode === 'tasks' ? 'tasks' : 'phases',
     targetFinish: dateOnly(item.TargetFinish), nextMilestone: item.NextMilestone || '', nextMilestoneDate: dateOnly(item.NextMilestoneDate),
@@ -138,7 +140,7 @@ function fromProject(item) {
 }
 
 function fromTask(item) {
-  const status = item.TaskStatus || 'Not Started';
+  const status = normalizeTaskStatus(item.TaskStatus);
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.TaskTitle,
     phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
@@ -148,7 +150,7 @@ function fromTask(item) {
   };
 }
 
-const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: ['Manager', 'SME'].includes(item.AppRole) ? item.AppRole : 'User' });
+const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole === 'Manager' ? 'Manager' : 'User' });
 
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
@@ -324,6 +326,17 @@ export class SharePointStore {
     return this.listTaskAttachments(task);
   }
 
+  async renameTaskAttachment(task, name, nextName) {
+    const cleanName = validateAttachmentName(nextName);
+    const current = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
+    if (!current) throw new Error('This document no longer exists. Refresh the documents list.');
+    if (current.name.toLowerCase() === cleanName.toLowerCase()) return this.listTaskAttachments(task);
+    const blob = await this.downloadTaskAttachment(task, name);
+    await this.addTaskAttachment(task, new File([blob], cleanName, { type: blob.type, lastModified: Date.now() }));
+    await this.deleteTaskAttachment(task, name);
+    return this.listTaskAttachments(task);
+  }
+
   async listReferenceEntries() {
     return this.listItems('references', ['RecordId', 'ReferenceParentId', 'EntryKind', 'FileName', 'FileSize', 'Archived'], (item) => ({
       id: item.RecordId, spId: item.Id, name: item.Title, parentId: item.ReferenceParentId || '',
@@ -367,7 +380,7 @@ export class SharePointStore {
   }
 
   async shareSiteAccess(person, role, appUrl) {
-    if (!['User', 'SME', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
+    if (!['User', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
     const link = new URL(trackerPageUrl(appUrl, this.webUrl));
     const fileApi = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(link.pathname))}')`;
     let page;

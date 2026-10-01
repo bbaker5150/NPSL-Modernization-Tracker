@@ -1,8 +1,13 @@
-export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+export function validateAttachmentName(name) {
+  if (typeof name !== 'string' || !name.trim()) throw new Error('Enter a document name.');
+  if (name.length > 128 || /[\\/\x00-\x1f<>:"|?*]/.test(name) || /[. ]$/.test(name)) throw new Error('Use a file name of 128 characters or fewer without reserved characters or trailing dots/spaces.');
+  return name.trim();
+}
 export function validateAttachment(file) {
   if (!file || typeof file.name !== 'string' || !file.name.trim()) throw new Error('Choose a file to attach.');
-  if (file.name.length > 128 || /[\\/\x00-\x1f<>:"|?*]/.test(file.name) || /[. ]$/.test(file.name)) throw new Error('Use a file name of 128 characters or fewer without reserved characters or trailing dots/spaces.');
-  if (!Number.isFinite(file.size) || file.size <= 0 || file.size > MAX_ATTACHMENT_BYTES) throw new Error('Attachments must be nonempty and no larger than 20 MB each.');
+  validateAttachmentName(file.name);
+  if (!Number.isFinite(file.size) || file.size <= 0 || file.size > MAX_ATTACHMENT_BYTES) throw new Error('Attachments must be nonempty and no larger than 50 MB each.');
 }
 
 // Local preview keeps file blobs separate from the JSON portfolio.

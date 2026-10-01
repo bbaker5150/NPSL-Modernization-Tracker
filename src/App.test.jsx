@@ -105,8 +105,11 @@ describe('application shell', () => {
     await act(async () => newProject.click());
     const nameInput = document.querySelector('.modal .field input');
     const assignMe = [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Assign me');
+    const ownerEditing = document.querySelector('.modal input[type="checkbox"]');
     await act(async () => {
       changeValue(nameInput, 'Owned modernization project');
+      changeValue([...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Organization')).querySelector('select'), 'ISE');
+      ownerEditing.click();
       assignMe.click();
     });
     const saveProject = [...document.querySelectorAll('.modal button')].find((button) => button.textContent.includes('Save project'));
@@ -120,6 +123,7 @@ describe('application shell', () => {
     await act(async () => myWork.click());
     expect(document.body.textContent).toContain('Owned modernization project');
     expect(document.body.textContent).toContain('Work breakdown (4)');
+    expect((await createRepository().store.load()).projects[0]).toMatchObject({ organization: 'ISE', ownerCanEdit: true });
   });
 
   it('lets managers edit tasks and delete projects without sample data', async () => {
@@ -190,7 +194,7 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.project-table-row:not(.table-header)')).toHaveLength(8);
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
     expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
     await act(async () => document.querySelector('.attention-collapse').click());
     expect(document.body.textContent).toContain('Overdue');
@@ -277,6 +281,21 @@ describe('application shell', () => {
     expect(document.querySelector('.topbar input')).toBeNull();
   });
 
+  it('filters by organization and sorts each portfolio column', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'zulu', projectKey: 'zulu', title: 'Zulu project', organization: 'NPSL', ownerName: 'Zulu Owner', currentStageKey: 'procurement', health: 'At Risk' });
+    await raw.saveProject({ id: 'alpha', projectKey: 'alpha', title: 'Alpha project', organization: 'ISE', ownerName: 'Alpha Owner', currentStageKey: 'requirement', health: 'On Track' });
+    await renderApp();
+    const rows = () => [...document.querySelectorAll('.project-table-row:not(.table-header)')].map((row) => row.textContent);
+    expect(rows()[0]).toContain('Alpha project');
+    await act(async () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.includes('Project')).click());
+    expect(rows()[0]).toContain('Zulu project');
+    await act(async () => changeValue(document.querySelector('[aria-label="Filter by organization"]'), 'ISE'));
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain('Alpha project');
+    expect(rows()[0]).toContain('ISE');
+  });
+
   it('shows a persistent activation error when the directory write fails', async () => {
     await renderApp(false);
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
@@ -292,7 +311,7 @@ describe('application shell', () => {
 
   it('lets a standard project owner add tasks and persist task-based progress', async () => {
     const raw = createRepository().store;
-    await raw.saveProject({ id: 'owner-project', projectKey: 'owner-project', title: 'Owner project', ownerKey: 'local', ownerName: 'Local Engineer', status: 'In Progress' });
+    await raw.saveProject({ id: 'owner-project', projectKey: 'owner-project', title: 'Owner project', ownerKey: 'local', ownerName: 'Local Engineer', ownerCanEdit: true, status: 'In Progress' });
     await raw.saveTask({ id: 'done', projectKey: 'owner-project', title: 'Done task', phaseKey: 'requirement', status: 'Complete' });
     await renderApp(false);
     await act(async () => document.querySelector('.project-card').click());
@@ -301,7 +320,7 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((row) => row.textContent.includes('Work breakdown')).click());
     await act(async () => [...document.querySelectorAll('.task-stage button')].find((row) => row.getAttribute('aria-label')?.startsWith('Add task to ')).click());
     expect(document.querySelector('[aria-label="Task name"]').disabled).toBe(false);
-    expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
+    expect(document.querySelector('.modal input[type="date"]').disabled).toBe(false);
     await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Owner entered task'));
     await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Save task').click());
     expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 2 tasks completed');
@@ -309,7 +328,7 @@ describe('application shell', () => {
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).projects[0].progressMode).toBe('tasks');
   });
 
-  it('groups program office work, preserves project health, and switches task markers and portfolio progress', async () => {
+  it('normalizes legacy program-office work, preserves project health, and switches task markers and portfolio progress', async () => {
     const raw = createRepository().store;
     await raw.saveProject({ id: 'p', projectKey: 'p', title: 'Office handoff', ownerName: 'Engineer', health: 'On Track', status: 'In Progress' });
     for (const [id, status] of [['done', 'Complete'], ['office', 'In Progress – At Program Office'], ['skip', 'Not Required']]) await raw.saveTask({ id, projectKey: 'p', title: `${id} task`, phaseKey: 'requirement', order: id === 'done' ? 1 : 2, status });
@@ -327,9 +346,9 @@ describe('application shell', () => {
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     expect(document.querySelector('.drawer-header-actions .project-menu-popover').textContent).toBe('Edit projectDelete project');
     await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('Needs attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
     expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
-    expect(document.querySelector('.attention-group header').textContent).toContain('In Progress – At Program Office');
+    expect(document.querySelector('.attention-group header').textContent).toContain('In Progress');
     expect(document.querySelector('.attention-group').textContent).not.toContain('skip task');
     await act(async () => document.querySelector('.attention-collapse').click());
     expect(document.querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('true');
@@ -356,8 +375,8 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Modernization at a glance');
   });
 
-  it.each(['SME', 'Manager', 'User'])('saves %s through Edit for a user without email and preserves SharePoint identity', async (role) => {
-    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: '', loginName: 'i:0#.w|domain\\engineer', role: role === 'User' ? 'SME' : 'User' });
+  it.each(['Manager', 'User'])('saves %s through Edit for a user without email and preserves SharePoint identity', async (role) => {
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: '', loginName: 'i:0#.w|domain\\engineer', role: role === 'User' ? 'Manager' : 'User' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     expect(document.body.textContent).not.toContain('Make manager');
@@ -387,11 +406,11 @@ describe('application shell', () => {
     await act(async () => card.querySelector('button').click());
     expect(document.querySelector('.directory-form')).toBeNull();
     await act(async () => [...card.querySelectorAll('button')].find((button) => button.textContent === 'Update User').click());
-    await act(async () => changeValue(document.querySelector('.directory-form select'), 'SME'));
+    await act(async () => changeValue(document.querySelector('.directory-form select'), 'Manager'));
     vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
     await act(async () => document.querySelector('.directory-form button').click());
     expect(document.querySelector('.page-stack > [role="alert"]').textContent).toContain('403');
-    expect(document.querySelector('.directory-form select').value).toBe('SME');
+    expect(document.querySelector('.directory-form select').value).toBe('Manager');
     expect(card.textContent).toContain('User');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
@@ -403,7 +422,7 @@ describe('application shell', () => {
       await raw.saveTask({ id: `${id}-task`, projectKey: id, title: `${id} work`, phaseKey: 'requirement', status: 'In Progress' });
     }
     await renderApp();
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('Needs attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Needs Attention')).click());
     expect(document.querySelector('.attention-group').tagName).toBe('SECTION');
     const groups = document.querySelectorAll('.attention-project-group');
     expect(groups).toHaveLength(2);
@@ -420,26 +439,19 @@ describe('application shell', () => {
     expect((await createRepository().store.load()).tasks.find((row) => row.id === 'alpha-task').assignedDate).toBe('2026-09-15');
   });
 
-  it('gives SMEs full portfolio visibility with read-only task details', async () => {
+  it('converts legacy SME roles to scoped standard users', async () => {
     const raw = createRepository().store;
     await raw.saveUser({ id: 'sme', title: 'Local Engineer', loginName: 'local', role: 'SME' });
     await raw.saveProject({ id: 'outside', projectKey: 'outside', title: 'Other project', ownerKey: 'other', ownerName: 'Other Engineer' });
     await raw.saveTask({ id: 'outside-task', projectKey: 'outside', title: 'Other task', status: 'Not Started', phaseKey: 'requirement', estimatedHours: 4.5 });
     await renderApp(false);
-    expect(document.body.textContent).toContain('Modernization at a glance');
-    expect(document.body.textContent).toContain('Other project');
+    expect(document.body.textContent).toContain('My work');
+    expect(document.body.textContent).not.toContain('Other project');
     expect(document.body.textContent).not.toContain('New project');
-    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
-    expect(document.querySelector('[aria-label="Project settings"]')).toBeNull();
-    await act(async () => document.querySelector('.upcoming-list button').click());
-    expect(document.querySelector('.modal h2').textContent).toBe('Task details');
-    expect(document.querySelector('.task-fields').disabled).toBe(true);
-    expect(document.querySelector('[aria-label="Est. Hours"]').value).toBe('4.5');
-    expect(document.querySelector('[aria-label="Attach documents"]')).toBeNull();
-    expect([...document.querySelectorAll('.modal button')].some((row) => row.textContent === 'Save task')).toBe(false);
+    expect((await raw.load()).users[0].role).toBe('User');
   });
 
-  it('selects a directory person, saves the verified SME identity, and prepares an invitation', async () => {
+  it('selects a directory person, saves the verified user identity, and prepares an invitation', async () => {
     const prototype = Object.getPrototypeOf(createRepository().store);
     const candidate = { title: 'New Engineer', email: 'new@example.test', loginName: 'i:0#.f|membership|new@example.test' };
     vi.spyOn(prototype, 'searchPeople').mockResolvedValue([candidate]);
@@ -450,11 +462,11 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('.people-invite input[type="search"]'), 'New Engineer'));
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
-    await act(async () => changeValue(document.querySelector('.people-invite select'), 'SME'));
+    await act(async () => changeValue(document.querySelector('.people-invite select'), 'User'));
     await act(async () => [...document.querySelectorAll('.people-invite button')].find((button) => button.textContent === 'Add to tracker').click());
     expect(resolve).toHaveBeenCalledWith(candidate.loginName);
     const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
-    expect(saved).toMatchObject({ ...candidate, role: 'SME' });
+    expect(saved).toMatchObject({ ...candidate, role: 'User' });
     expect(document.querySelector('.people-invite input[type="url"]')).toBeNull();
     expect(document.querySelector('.invitation-result')).toBeNull();
   });
@@ -467,7 +479,7 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('input[type="search"]'), 'Invite'));
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
-    await act(async () => changeValue(document.querySelector('select'), 'SME'));
+    await act(async () => changeValue(document.querySelector('select'), 'User'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
@@ -476,11 +488,11 @@ describe('application shell', () => {
     expect(document.querySelector('.invitation-result')).toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
     expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').disabled).toBe(true);
-    expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'SME', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
+    expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'User', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 
   it('creates nested references and moves a folder with persistence', async () => {
-    await renderApp(false);
+    await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Reference Documents').click());
     const click = async (text) => act(async () => [...document.querySelectorAll('.reference-library button')].find((row) => row.textContent === text).click());
     await click('New folder');
@@ -505,7 +517,7 @@ describe('application shell', () => {
 
   it('deletes a user only from Edit, preserves assignments, and hides self-deletion', async () => {
     const raw = createRepository().store;
-    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'SME' });
+    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'User' });
     await raw.saveTask({ id: 'assigned', projectKey: 'project', title: 'Assigned task', ownerKey: 'other' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Users and managers').click());
