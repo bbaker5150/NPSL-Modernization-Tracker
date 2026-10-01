@@ -29,7 +29,7 @@ describe('role and task authorization', () => {
     const raw = { currentUser: async () => user, load: async () => structuredClone(data), saveTask: vi.fn(async (row) => row), saveProject: vi.fn(), recycle: vi.fn(), saveUser: vi.fn() };
     const store = authorizedStore(raw);
     const saved = await store.saveTask({ ...task, title: 'Tampered', assignedDate: '2099-01-01', dueDate: '2099-01-01', ownerEmail: 'attacker', status: 'In Progress – At Program Office', deferredDate: '2026-10-01', deferredJustification: 'Vendor delay' });
-    expect(saved).toMatchObject({ title: 'Review', dueDate: '2026-09-01', ownerEmail: user.email, status: 'In Progress', deferredDate: '2026-10-01' });
+    expect(saved).toMatchObject({ title: 'Review', dueDate: '2026-09-01', ownerEmail: user.email, status: 'Not Started', deferredDate: '2026-10-01' });
     await expect(store.saveTask({ ...data.tasks[1], status: 'Complete' })).rejects.toThrow('assigned');
     await expect(store.saveTask({ ...task, id: 'new', projectKey: 'other' })).rejects.toThrow('authorized project owners');
     await expect(store.saveTask({ ...task, id: 'new', spId: 99, ownerKey: 'other', dueDate: '2099-01-01', status: 'Complete' })).rejects.toThrow('authorized project owners');
@@ -95,7 +95,7 @@ describe('standard user task documents', () => {
     expect((await store.load()).projects).toHaveLength(1);
     await expect(store.listTaskAttachments('t2')).rejects.toThrow('cannot access');
     await store.saveTask({ ...task, status: 'Complete' });
-    expect(raw.saveTask).toHaveBeenCalledWith(expect.objectContaining({ status: 'Complete' }));
+    expect(raw.saveTask).toHaveBeenCalledWith(expect.objectContaining({ status: 'Not Started' }));
     await expect(store.saveProgressMode('p1', 'tasks')).rejects.toThrow('authorized project owners');
     await expect(store.addTaskAttachment('t1', new File(['x'], 'a.txt'))).resolves.toBeUndefined();
     await expect(store.saveUser({ role: 'Manager' })).rejects.toThrow('Only managers');
@@ -120,6 +120,30 @@ describe('standard user task documents', () => {
 
 
 describe('project document access', () => {
+  it('does not expose other task documents to a task-only assignee', async () => {
+    const state = structuredClone(data);
+    state.projects[0].ownerEmail = 'other@example.test';
+    state.tasks.push({ ...task, id: 'private-task', ownerEmail: 'other@example.test' });
+    const raw = { currentUser: async () => user, load: async () => state, listTaskAttachments: vi.fn(async () => [{ name: 'report.pdf' }]) };
+    const store = authorizedStore(raw);
+    expect(await store.listProjectAttachments('own')).toEqual([{ name: 'report.pdf', taskId: 't1', taskTitle: 'Review' }]);
+    expect(raw.listTaskAttachments).toHaveBeenCalledTimes(1);
+  });
+  it('allows checked owners to manage tasking and immediately honors revocation', async () => {
+    const state = structuredClone(data);
+    state.projects[0].ownerCanEdit = true;
+    const raw = { currentUser: async () => user, load: async () => state, saveTask: vi.fn(async (row) => row), saveProject: vi.fn(async (row) => row), recycle: vi.fn() };
+    const store = authorizedStore(raw);
+    expect(await store.saveTask({ ...task, title: 'Owner edit', status: 'Complete' })).toMatchObject({ title: 'Owner edit', status: 'Complete' });
+    expect(await store.saveTask({ ...task, id: 'new' })).toMatchObject({ id: 'new' });
+    await store.recycle('tasks', undefined, 't1');
+    expect(await store.saveProject({ ...state.projects[0], title: 'Updated', ownerEmail: 'other@example.test', ownerCanEdit: false })).toMatchObject({ title: 'Updated', ownerEmail: user.email, ownerCanEdit: true });
+    state.projects[0].ownerCanEdit = false;
+    expect(await store.saveTask({ ...task, title: 'Forbidden', status: 'Complete' })).toMatchObject({ title: 'Review', status: 'Not Started' });
+    await expect(store.saveTask({ ...task, id: 'new' })).rejects.toThrow('authorized project owners');
+    await expect(store.recycle('tasks', undefined, 't1')).rejects.toThrow('authorized project owners');
+    await expect(store.saveProject({ ...state.projects[0], ownerCanEdit: true })).rejects.toThrow('authorized project owners');
+  });
   it('aggregates project tasks and permits only authorized owners or managers to change documents', async () => {
     const state = structuredClone(data);
     state.projects[0].ownerCanEdit = true;
