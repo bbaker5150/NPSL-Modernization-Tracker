@@ -77,10 +77,10 @@ try {
   await smeRow.getByRole('button', { name: 'Edit', exact: true }).click();
   if (await frame.locator('.directory-form').count()) errors.push('Edit opened form instead of menu');
   await smeRow.getByRole('button', { name: 'Update User', exact: true }).click();
-  await frame.getByLabel('Role', { exact: true }).selectOption('SME');
+  await frame.getByLabel('Role', { exact: true }).selectOption('Manager');
   await frame.getByRole('button', { name: 'Save user', exact: true }).click();
-  await frame.getByRole('status').filter({ hasText: 'SME Test User saved as SME.' }).waitFor();
-  await smeRow.getByText('SME', { exact: true }).waitFor();
+  await frame.getByRole('status').filter({ hasText: 'SME Test User saved as Manager.' }).waitFor();
+  await smeRow.getByText('Manager', { exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await frame.getByRole('heading', { name: 'Modernization at a glance' }).waitFor();
   await frame.getByText('0 total measurement areas').waitFor();
