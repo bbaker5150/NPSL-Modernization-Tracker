@@ -359,8 +359,13 @@ p { color: var(--muted); line-height: 1.65; }
 .field-wide { grid-column: 1 / -1; }
 .field > span { color: var(--muted); font-size: 9px; font-weight: 700; }
 .field input, .field select, .field textarea { width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); transition: .15s ease; }
-.project-owner-heading { min-height: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.project-owner-heading > span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.project-owner-field { min-width: 0; align-content: start; }
+.project-owner-label { color: var(--muted); font-size: 9px; font-weight: 700; }
+.owner-autocomplete { position: relative; min-width: 0; }
+.owner-suggestions { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10; max-height: 210px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); }
+.owner-suggestions button { display: grid; gap: 3px; width: 100%; padding: 9px; border: 0; border-radius: 5px; text-align: left; color: var(--ink); background: transparent; cursor: pointer; overflow-wrap: anywhere; }
+.owner-suggestions button:hover, .owner-suggestions button[aria-selected='true'] { background: var(--blue-soft); }
+.owner-suggestions small { color: var(--muted); font-size: 9px; }
 .owner-edit-option { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 8px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer; }
 .owner-edit-option input[type='checkbox'] { appearance: auto; width: 13px; height: 13px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 2px; box-shadow: none; accent-color: var(--blue); cursor: pointer; }
 .field textarea { resize: vertical; line-height: 1.5; }

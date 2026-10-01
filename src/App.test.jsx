@@ -129,6 +129,31 @@ describe('application shell', () => {
     expect((await createRepository().store.load()).projects[0]).toMatchObject({ organization: 'ISE', ownerCanEdit: true });
   });
 
+  it('assigns a saved owner from inline autocomplete and persists identity and editing permission', async () => {
+    const raw = createRepository().store;
+    await raw.saveUser({ id: 'hank', title: 'Chi, Hank CIV', email: 'hank@example.test', loginName: 'claims|hank@example.test', role: 'User' });
+    await raw.saveProject({ id: 'owner-edit', projectKey: 'owner-edit', title: 'Owner selection', ownerName: 'Old Owner', ownerEmail: 'old@example.test', ownerKey: 'old' });
+    await renderApp();
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    await act(async () => document.querySelector('[aria-label="Project settings"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Edit project').click());
+    expect(document.querySelector('.modal').textContent).not.toContain('Assign project owner');
+    const owner = document.querySelector('#project-owner-input');
+    const save = () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Save project');
+    await act(async () => changeValue(owner, 'Hank'));
+    expect(save().disabled).toBe(true);
+    expect(document.querySelector('.owner-suggestions').textContent).toContain('hank@example.test');
+    await act(async () => document.querySelector('.owner-suggestions button').click());
+    expect(owner.value).toBe('Chi, Hank CIV');
+    expect(document.querySelector('.modal input[type="email"]').value).toBe('hank@example.test');
+    expect(save().disabled).toBe(false);
+    const checkbox = document.querySelector('.owner-edit-option input');
+    expect(checkbox.closest('.project-owner-field').lastElementChild).toBe(checkbox.parentElement);
+    await act(async () => checkbox.click());
+    await act(async () => save().click());
+    expect((await createRepository().store.load()).projects[0]).toMatchObject({ ownerKey: 'claims|hank@example.test', ownerEmail: 'hank@example.test', ownerName: 'Chi, Hank CIV', ownerCanEdit: true });
+  });
+
   it('lets managers edit tasks and delete projects without sample data', async () => {
     await renderApp();
     const newProject = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('New project'));

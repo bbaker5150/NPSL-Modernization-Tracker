@@ -121,7 +121,27 @@ try {
   if (await frame.getByRole('button', { name: 'Claim project', exact: true }).count()) errors.push('Claim project remained visible');
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
-  await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
+  await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).fill('SME Test');
+  await frame.getByRole('option', { name: /SME Test User/ }).waitFor();
+  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).press('ArrowDown');
+  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).press('Enter');
+  if (await frame.getByLabel('Owner email', { exact: true }).inputValue() !== 'sme@example.test') errors.push('Owner selection did not populate email');
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const theme of ['light', 'dark']) {
+      await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
+      const layout = await frame.locator('.project-owner-field').evaluate((el) => {
+        const owner = el.querySelector('[role="combobox"]').getBoundingClientRect();
+        const option = el.querySelector('.owner-edit-option').getBoundingClientRect();
+        const check = el.querySelector('[type="checkbox"]').getBoundingClientRect();
+        return option.top >= owner.bottom && check.width <= 14 && check.height <= 14 && el.scrollWidth <= el.clientWidth + 1;
+      });
+      if (!layout) errors.push('Owner checkbox must be compact and below the owner input');
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await frame.getByRole('button', { name: 'Save project', exact: true }).click();
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.locator('.drawer-progress').click();
   if (await frame.locator('.drawer-header-actions .project-menu-popover').count()) errors.push('Settings menu did not dismiss on outside click');

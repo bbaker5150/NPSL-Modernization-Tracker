@@ -239,19 +239,40 @@ function Modal({ title, subtitle, onClose, children, actions, wide = false }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true"><header><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></header><div className="modal-body">{children}</div>{actions && <footer>{actions}</footer>}</section></div>;
 }
 
+function ProjectOwnerPicker({ users, manager, draft, onSelect, onQuery, onAllowEditing }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const query = draft.ownerName === 'Unassigned' ? '' : draft.ownerName || '';
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const matches = terms.length ? users.filter((entry) => {
+    const text = [entry.title, displayName(entry.title), entry.email, entry.loginName].join(' ').toLowerCase();
+    return terms.every((term) => text.includes(term));
+  }).slice(0, 8) : [];
+  const choose = (entry) => { onSelect(entry); setOpen(false); setActive(-1); };
+  return <div className="field project-owner-field" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+    <label htmlFor="project-owner-input" className="project-owner-label">Project owner</label>
+    <div className="owner-autocomplete">
+      <input id="project-owner-input" role="combobox" aria-autocomplete="list" aria-expanded={open && !!query.trim()} aria-controls="project-owner-options" aria-activedescendant={open && matches[active] ? `project-owner-option-${active}` : undefined} autoComplete="off" disabled={!manager} value={query} placeholder="Type a saved user's name…" onFocus={() => setOpen(true)} onChange={(event) => { onQuery(event.target.value); setOpen(true); setActive(-1); }} onKeyDown={(event) => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); setActive((value) => matches.length ? (value + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length : -1); }
+        if (event.key === 'Enter' && open && matches[active]) { event.preventDefault(); choose(matches[active]); }
+      }} />
+      {manager && open && !!query.trim() && <div id="project-owner-options" role="listbox" aria-label="Saved project owners" className="owner-suggestions">
+        {matches.map((entry, index) => <button key={entry.id || userIdentityKey(entry)} id={`project-owner-option-${index}`} type="button" role="option" aria-selected={active === index} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(entry)}><strong>{displayName(entry.title)}</strong><small>{entry.email || entry.loginName}</small></button>)}
+        {!matches.length && <span className="field-hint">No saved users match. Add the user in Users and managers first.</span>}
+      </div>}
+    </div>
+    {manager && <label className="owner-edit-option" title="Allow the assigned standard user to edit this project"><input type="checkbox" aria-label="Allow project owner to edit project" checked={!!draft.ownerCanEdit} onChange={(event) => onAllowEditing(event.target.checked)} /><span>Allow editing</span></label>}
+  </div>;
+}
+
 function ProjectEditor({ project, user, users, manager, onClose, onSave }) {
+  const [ownerUnresolved, setOwnerUnresolved] = useState(false);
   const [draft, setDraft] = useState({ title: '', measurementArea: '', description: '', ownerName: 'Unassigned', ownerEmail: '', ownerKey: '', organization: 'NPSL', ownerCanEdit: false, priority: 'Medium', health: 'Needs Review', status: 'Planned', currentStageKey: 'requirement', targetFinish: '', ...project });
   const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
-  function claim() { setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
-  function setOwnerIdentity(event) {
-    const entered = event.target.value.trim();
-    const isLoginKey = !!entered && (entered.includes('|') || !entered.includes('@'));
-    const ownerKey = isLoginKey ? entered : '';
-    const ownerEmail = entered.includes('@') ? entered.split('|').pop() : '';
-    setDraft((row) => ({ ...row, ownerKey, ownerEmail }));
-  }
-  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim()} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || uid('project-key'), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
-    {manager && <UserPicker users={users} label="Assign project owner" onSelect={(entry) => setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email, ownerKey: userIdentityKey(entry) }))} />}<div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Organization"><select disabled={!manager} value={draft.organization} onChange={set('organization')}>{ORGANIZATIONS.map((item) => <option key={item}>{item}</option>)}</select></Field><div className="field project-owner-field"><div className="project-owner-heading"><span>Project owner</span>{manager && <label className="owner-edit-option" title="Allow the assigned standard user to edit this project"><input type="checkbox" aria-label="Allow project owner to edit project" checked={!!draft.ownerCanEdit} onChange={(event) => setDraft((row) => ({ ...row, ownerCanEdit: event.target.checked }))} /><span>Allow editing</span></label>}</div><input disabled={!manager} value={draft.ownerName || ''} placeholder="Unassigned" onChange={set('ownerName')} /></div><Field label="Owner email"><div className="input-action"><input disabled={!manager} type="email" value={draft.ownerEmail || ''} placeholder="Unassigned" onChange={setOwnerIdentity} />{manager && <button type="button" onClick={claim}>Assign me</button>}</div></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target completion"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
+  function claim() { setOwnerUnresolved(false); setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
+  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim() || ownerUnresolved} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || uid('project-key'), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
+    <div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><Field label="Organization"><select disabled={!manager} value={draft.organization} onChange={set('organization')}>{ORGANIZATIONS.map((item) => <option key={item}>{item}</option>)}</select></Field><ProjectOwnerPicker users={users} manager={manager} draft={draft} onSelect={(entry) => { setOwnerUnresolved(false); setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email || '', ownerKey: userIdentityKey(entry) })); }} onQuery={(name) => { setOwnerUnresolved(!!name.trim()); setDraft((row) => ({ ...row, ownerName: name, ownerKey: '', ownerEmail: '' })); }} onAllowEditing={(checked) => setDraft((row) => ({ ...row, ownerCanEdit: checked }))} /><Field label="Owner email"><div className="input-action"><input disabled={!manager} type="email" readOnly value={draft.ownerEmail || ''} placeholder="Unassigned" />{manager && <button type="button" onClick={claim}>Assign me</button>}</div></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target completion"><input type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
   </Modal>;
 }
 
