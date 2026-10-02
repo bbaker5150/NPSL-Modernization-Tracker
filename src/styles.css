@@ -553,6 +553,18 @@ button { border: 0 !important; }
 .drawer-content, .drawer-tabs, .task-markers { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .project-drawer ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .attention-groups { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 18px; padding-bottom: 12px; }
+.attention-groups-status { min-width: 0; max-width: 100%; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(min(100%, 300px), 1fr); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.attention-groups-status:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.attention-groups-status > .attention-section { min-width: 0; }
+.attention-groups-status > .attention-section > summary { padding: 18px 16px; }
+.attention-groups-status > .attention-section > summary strong { min-width: 0; overflow-wrap: anywhere; }
+.attention-groups-status .attention-count { white-space: nowrap; }
+.attention-groups-status .attention-task-list { grid-template-columns: minmax(0, 1fr); padding: 12px; gap: 12px; }
+.attention-groups-status .attention-task-card { padding: 16px; }
+.attention-groups-status .attention-task-heading { flex-wrap: wrap; }
+.attention-groups-status .attention-task-heading > div { flex: 1 1 100%; }
+.attention-groups-status .attention-task-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 18px; }
+.attention-groups-status .attention-task-meta > span { min-width: 0; overflow-wrap: anywhere; }
 .attention-group > header { display: flex; align-items: center; gap: 10px; padding: 18px 20px; cursor: pointer; list-style: none; }
 .attention-group > header::-webkit-details-marker { display: none; }
 .attention-group > header > .badge:first-of-type { white-space: normal; }
