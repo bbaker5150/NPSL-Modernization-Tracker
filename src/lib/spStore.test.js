@@ -78,7 +78,7 @@ describe('SharePoint store', () => {
     store.post = vi.fn(async () => ({ value: [] }));
     await store.saveProject({ spId: 4, id: 'p4', projectKey: 'p4', title: 'Modernize', organization: 'ISE', ownerCanEdit: true });
     const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
-    expect(values).toMatchObject({ Organization: 'ISE', OwnerCanEdit: '1' });
+    expect(values).toMatchObject({ Organization: 'NPSL Metrology Engineering', OwnerCanEdit: '1' });
   });
 
   it('creates acronyms in the shared SharePoint glossary list', async () => {
@@ -131,7 +131,7 @@ describe('tasking schema round trip', () => {
 
 describe('SharePoint user role verification', () => {
   const row = { spId: 7, id: 'u7', title: 'Engineer', loginName: 'i:0#.f|membership|engineer@example.test', email: 'engineer@example.test', role: 'Manager' };
-  it.each(['Manager', 'User'])('reads the saved SharePoint role back before confirming %s', async (role) => {
+  it.each(['Manager', 'Viewer'])('reads the saved SharePoint role back before confirming %s', async (role) => {
     const requested = { ...row, role };
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ value: [{ FieldName: 'AppRole', HasException: false, ErrorMessage: null }] }));
@@ -143,8 +143,8 @@ describe('SharePoint user role verification', () => {
   it('rejects a successful HTTP response when the stored role is still User', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.post = vi.fn(async () => ({ value: [] }));
-    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, LoginKey: row.loginName, AppRole: 'User' }));
-    await expect(store.saveUser(row)).rejects.toThrow('Current stored role: User');
+    store.get = vi.fn(async () => ({ Id: 7, RecordId: row.id, LoginKey: row.loginName, AppRole: 'Viewer' }));
+    await expect(store.saveUser(row)).rejects.toThrow('Current stored role: Viewer');
   });
   it('surfaces SharePoint field validation errors instead of claiming success', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
@@ -260,7 +260,7 @@ describe('page-targeted invitations', () => {
     });
     return store;
   }
-  it.each(['User', 'Manager'])('adds %s to Members, verifies access, then makes exactly one invitation request', async (role) => {
+  it.each(['Viewer', 'Project Engineer', 'Manager'])('adds %s to Members, verifies access, then makes exactly one invitation request', async (role) => {
     const store = setup();
     expect(await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, role, pageUrl)).toMatchObject({ access: 'ISEA METENG Members' });
     expect(store.post.mock.calls[0]).toEqual(['/_api/web/sitegroups(9)/users', { body: { LoginName: 'claims|person' } }]);
@@ -280,28 +280,28 @@ describe('page-targeted invitations', () => {
   });
   it('does not add existing members again on retry', async () => {
     const store = setup();
-    await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'User', pageUrl);
-    await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'User', pageUrl);
+    await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'Viewer', pageUrl);
+    await store.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'Viewer', pageUrl);
     expect(store.post.mock.calls.filter(([path]) => path.includes('sitegroups'))).toHaveLength(1);
   });
   it('blocks email when membership is missing or cannot be confirmed', async () => {
     const store = setup();
     store.post.mockResolvedValue({ StatusCode: 0 });
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('did not confirm group membership');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('did not confirm group membership');
     expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
     const get = store.get;
     store.get = vi.fn((path) => path.includes('associatedmembergroup') ? {} : get(path));
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('Members group is unavailable');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('Members group is unavailable');
   });
   it('does not share or email an unpublished page or invalid library link', async () => {
     const store = setup(7, 1, 2);
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('Publish or republish');
-    await expect(store.shareSiteAccess({ loginName: 'person' }, 'User', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('Publish or republish');
+    await expect(store.shareSiteAccess({ loginName: 'person' }, 'Viewer', `${site}/SitePages/Forms/ByAuthor.aspx`)).rejects.toThrow('direct published tracker page');
     expect(store.post).not.toHaveBeenCalled();
   });
   it('never sends an invitation when page access verification fails and reports invitation failures', async () => {
     const store = setup(7, 0);
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'User', pageUrl)).rejects.toThrow('tracker page access could not be verified');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('tracker page access could not be verified');
     expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
     const emailFailure = setup();
     const post = emailFailure.post.getMockImplementation();
@@ -309,6 +309,6 @@ describe('page-targeted invitations', () => {
       if (!path.includes('ShareObject')) return post(path);
       throw new Error('Email denied');
     });
-    await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'User', pageUrl)).rejects.toThrow('Email denied');
+    await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'Viewer', pageUrl)).rejects.toThrow('Email denied');
   });
 });

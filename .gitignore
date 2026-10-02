@@ -3,3 +3,4 @@ dist/
 build-singlefile/
 .DS_Store
 *.log
+test-artifacts/

@@ -1,3 +1,4 @@
+import { ROLES } from '../data/workflow';
 import React, { useEffect, useRef, useState } from 'react';
 import { invitationUrl, trackerPageUrl } from '../lib/peoplePicker';
 
@@ -5,7 +6,7 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [role, setRole] = useState('User');
+  const [role, setRole] = useState('Viewer');
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
@@ -46,9 +47,9 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
     <label className="field"><span>Find a person</span><input type="search" autoComplete="off" value={query} disabled={busy} placeholder="Name or email (at least 2 characters)" onChange={(event) => { setQuery(event.target.value); setSelected(null); setAdded(null); setAccess(null); setError(''); }} /></label>
     {searching && <p role="status">Searching people…</p>}
     {!selected && query.trim().length >= 2 && !searching && !error && !results.length && <p>No people found. Try a full name or email address.</p>}
-    {!!results.length && <ul className="people-results" aria-label="Matching people">{results.map((person) => <li key={person.loginName}><button type="button" onClick={() => { setSelected(person); setRole('User'); setResults([]); setQuery(person.title); setAdded(null); setAccess(null); }}><strong>{person.title}</strong><span>{person.email || person.loginName}</span>{person.detail && <small>{person.detail}</small>}</button></li>)}</ul>}
+    {!!results.length && <ul className="people-results" aria-label="Matching people">{results.map((person) => <li key={person.loginName}><button type="button" onClick={() => { setSelected(person); setRole('Viewer'); setResults([]); setQuery(person.title); setAdded(null); setAccess(null); }}><strong>{person.title}</strong><span>{person.email || person.loginName}</span>{person.detail && <small>{person.detail}</small>}</button></li>)}</ul>}
     {selected && <div className="selected-person"><strong>{selected.title}</strong><span>{selected.email || selected.loginName}</span></div>}
-    <div className="invite-actions"><label className="field"><span>Invitation role</span><select aria-label="Invitation role" value={role} disabled={busy || !!added} onChange={(event) => setRole(event.target.value)}><option>User</option><option>Manager</option></select></label><button type="button" className="button primary" disabled={!selected || busy || !!access || (localPreview && !!added)} onClick={add}>{busy ? 'Saving and granting access…' : localPreview ? 'Add to tracker' : added ? 'Retry site invitation' : 'Invite and grant access'}</button></div>
+    <div className="invite-actions"><label className="field"><span>Invitation role</span><select aria-label="Invitation role" value={role} disabled={busy || !!added} onChange={(event) => setRole(event.target.value)}>{ROLES.map((role) => <option key={role}>{role}</option>)}</select></label><button type="button" className="button primary" disabled={!selected || busy || !!access || (localPreview && !!added)} onClick={add}>{busy ? 'Saving and granting access…' : localPreview ? 'Add to tracker' : added ? 'Retry site invitation' : 'Invite and grant access'}</button></div>
     {error && <p className="inline-error" role="alert">{error}</p>}
   </section>;
 }

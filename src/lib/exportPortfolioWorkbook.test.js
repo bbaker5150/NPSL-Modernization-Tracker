@@ -27,7 +27,7 @@ describe('portfolio Excel export', () => {
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);
     expect(reopened.worksheets.map((sheet) => sheet.name)).toEqual([
-      'Portfolio Summary', 'Projects', 'Needs Attention', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
+      'Portfolio Summary', 'Organization Workload', 'Projects', 'Needs Attention', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
     ]);
     expect(reopened.getWorksheet('Projects').rowCount).toBe(projects.length + 1);
     expect(reopened.getWorksheet('Tasks').rowCount).toBe(tasks.length + 1);

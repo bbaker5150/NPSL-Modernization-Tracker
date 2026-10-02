@@ -1,5 +1,5 @@
 import { localAttachments, validateAttachment, validateAttachmentName } from './taskAttachments';
-import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus } from '../data/workflow';
+import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeRole, normalizeTaskOrganizations } from '../data/workflow';
 import { DEFAULT_ACRONYM_VERSION, defaultAcronyms } from '../data/defaultAcronyms';
 import { resolveWebUrl } from './spContext';
 import { SharePointStore } from './spStore';
@@ -31,7 +31,7 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.users = data.users.map((row) => ({ ...row, role: row.role === 'Manager' ? 'Manager' : 'User' })); return data; }
+  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.users = data.users.map((row) => ({ ...row, role: normalizeRole(row.role) })); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }

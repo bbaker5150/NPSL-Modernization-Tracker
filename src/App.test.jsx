@@ -105,16 +105,8 @@ describe('application shell', () => {
     await act(async () => newProject.click());
     const nameInput = document.querySelector('.modal .field input');
     const assignMe = [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Assign me');
-    const ownerEditing = document.querySelector('.modal input[type="checkbox"]');
-    expect(ownerEditing.getAttribute('aria-label')).toBe('Allow project owner to edit project');
-    expect(ownerEditing.closest('.project-owner-field')).not.toBeNull();
-    expect(document.querySelector('.modal .checkbox-field')).toBeNull();
-    await act(async () => {
-      changeValue(nameInput, 'Owned modernization project');
-      changeValue([...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Organization')).querySelector('select'), 'ISE');
-      ownerEditing.click();
-      assignMe.click();
-    });
+    expect(document.querySelector('.modal input[type="checkbox"]')).toBeNull();
+    await act(async () => { changeValue(nameInput, 'Owned modernization project'); assignMe.click(); });
     const saveProject = [...document.querySelectorAll('.modal button')].find((button) => button.textContent.includes('Save project'));
     await act(async () => {
       saveProject.click();
@@ -126,19 +118,19 @@ describe('application shell', () => {
     await act(async () => myWork.click());
     expect(document.body.textContent).toContain('Owned modernization project');
     expect(document.body.textContent).toContain('Work breakdown (4)');
-    expect((await createRepository().store.load()).projects[0]).toMatchObject({ organization: 'ISE', ownerCanEdit: true });
+    expect((await createRepository().store.load()).projects[0]).toMatchObject({ ownerKey: 'local' });
   });
 
   it('assigns a saved owner from inline autocomplete and persists identity and editing permission', async () => {
     const raw = createRepository().store;
-    await raw.saveUser({ id: 'hank', title: 'Chi, Hank CIV', email: 'hank@example.test', loginName: 'claims|hank@example.test', role: 'User' });
+    await raw.saveUser({ id: 'hank', title: 'Chi, Hank CIV', email: 'hank@example.test', loginName: 'claims|hank@example.test', role: 'Project Engineer' });
     await raw.saveProject({ id: 'owner-edit', projectKey: 'owner-edit', title: 'Owner selection', ownerName: 'Old Owner', ownerEmail: 'old@example.test', ownerKey: 'old' });
     await renderApp();
     await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Edit project').click());
     expect(document.querySelector('.modal').textContent).not.toContain('Assign project owner');
-    const owner = document.querySelector('#project-owner-input');
+    const owner = document.querySelector('.saved-user-field input');
     const save = () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Save project');
     await act(async () => changeValue(owner, 'Hank'));
     expect(save().disabled).toBe(true);
@@ -147,11 +139,9 @@ describe('application shell', () => {
     expect(owner.value).toBe('Chi, Hank CIV');
     expect(document.querySelector('.modal input[type="email"]').value).toBe('hank@example.test');
     expect(save().disabled).toBe(false);
-    const checkbox = document.querySelector('.owner-edit-option input');
-    expect(checkbox.closest('.project-owner-field').lastElementChild).toBe(checkbox.parentElement);
-    await act(async () => checkbox.click());
+    expect(document.querySelector('.owner-edit-option')).toBeNull();
     await act(async () => save().click());
-    expect((await createRepository().store.load()).projects[0]).toMatchObject({ ownerKey: 'claims|hank@example.test', ownerEmail: 'hank@example.test', ownerName: 'Chi, Hank CIV', ownerCanEdit: true });
+    expect((await createRepository().store.load()).projects[0]).toMatchObject({ ownerKey: 'claims|hank@example.test', ownerEmail: 'hank@example.test', ownerName: 'Chi, Hank CIV' });
   });
 
   it('lets managers edit tasks and delete projects without sample data', async () => {
@@ -223,8 +213,7 @@ describe('application shell', () => {
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
-    expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
-    await act(async () => document.querySelector('.attention-collapse').click());
+    expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
     expect(document.body.textContent).not.toContain('Scope approved');
@@ -238,15 +227,15 @@ describe('application shell', () => {
     await raw.saveProject({ id: 'other', projectKey: 'other', title: 'Private other project', ownerKey: 'other', ownerName: 'Other' });
     await raw.saveTask({ id: 'task', projectKey: 'mine', title: 'Assigned task', phaseKey: 'requirement', status: 'Not Started', dueDate: '2026-09-01', ownerKey: 'engineer' });
     await renderApp();
-    expect(document.body.textContent).not.toContain('Private other project');
+    expect(document.body.textContent).toContain('Private other project');
     expect(document.body.textContent).not.toContain('New project');
     expect(document.body.textContent).toContain('Users and managers');
-    await act(async () => document.querySelector('.project-card').click());
-    expect(document.body.textContent).not.toContain('Edit project');
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    expect(document.querySelector('[aria-label="Project settings"]')).toBeNull();
     await act(async () => document.querySelector('.upcoming-list button').click());
     expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
-    expect(document.querySelector('.modal input[aria-label="Task name"]').disabled).toBe(true);
-    expect([...document.querySelectorAll('.modal select')].find((select) => [...select.options].some((option) => option.value === 'Complete')).disabled).toBe(true);
+    expect(document.querySelector('.modal input[aria-label="Task name"]').matches(':disabled')).toBe(true);
+    expect([...document.querySelectorAll('.modal select')].find((select) => [...select.options].some((option) => option.value === 'Complete')).matches(':disabled')).toBe(true);
     expect([...document.querySelectorAll('.modal button')].some((button) => button.textContent.includes('Delete task'))).toBe(false);
   });
 
@@ -270,8 +259,8 @@ describe('application shell', () => {
 
   it('registers standard users and grants testing manager access only after the right password', async () => {
     await renderApp(false);
-    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['My work0', 'Reference Documents', 'Acronym glossary', 'Users and managers']);
-    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0]).toMatchObject({ title: 'Local Engineer', role: 'User' });
+    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['Portfolio', 'Pipeline board', 'My work0', 'Reference Documents', 'Acronym glossary', 'Users and managers']);
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0]).toMatchObject({ title: 'Local Engineer', role: 'Viewer' });
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
     expect(document.querySelector('.directory-row button')).toBeNull();
@@ -314,15 +303,17 @@ describe('application shell', () => {
     const raw = createRepository().store;
     await raw.saveProject({ id: 'zulu', projectKey: 'zulu', title: 'Zulu project', organization: 'NPSL', ownerName: 'Zulu Owner', currentStageKey: 'procurement', health: 'At Risk' });
     await raw.saveProject({ id: 'alpha', projectKey: 'alpha', title: 'Alpha project', organization: 'ISE', ownerName: 'Alpha Owner', currentStageKey: 'requirement', health: 'On Track' });
+    await raw.saveTask({ id: 'z-task', projectKey: 'zulu', title: 'Z task', organization: 'NPSL', status: 'Not Started' });
+    await raw.saveTask({ id: 'a-task', projectKey: 'alpha', title: 'A task', organization: 'ISE', status: 'Not Started' });
     await renderApp();
     const rows = () => [...document.querySelectorAll('.project-table-row:not(.table-header)')].map((row) => row.textContent);
     expect(rows()[0]).toContain('Alpha project');
     await act(async () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.includes('Project')).click());
     expect(rows()[0]).toContain('Zulu project');
-    await act(async () => changeValue(document.querySelector('[aria-label="Filter by organization"]'), 'ISE'));
+    await act(async () => changeValue(document.querySelector('[aria-label="Filter by organization"]'), 'NPSL Metrology Engineering'));
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toContain('Alpha project');
-    expect(rows()[0]).toContain('ISE');
+    expect(rows()[0]).toContain('NPSL Metrology Engineering');
   });
 
   it('sorts all portfolio data columns in both directions', async () => {
@@ -334,7 +325,7 @@ describe('application shell', () => {
     await raw.saveTask({ id: 'zn', projectKey: 'z', title: 'Zulu milestone', phaseKey: 'requirement', status: 'Not Started' });
     await renderApp();
     const first = () => document.querySelector('.project-table-row:not(.table-header) > span > strong').textContent;
-    for (const [label, ascending] of [['Owner', 'Zulu'], ['Organization', 'Zulu'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
+    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Alpha'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
       const heading = () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.startsWith(label));
       await act(async () => heading().click());
       expect(first(), `${label} ascending`).toBe(ascending);
@@ -345,22 +336,22 @@ describe('application shell', () => {
 
   it('scopes each attention card to its organization and sorts board cards', async () => {
     const raw = createRepository().store;
-    for (const [id, organization] of [['p', 'Program Office'], ['n', 'NPSL'], ['i', 'ISE']]) {
+    for (const [id, organization] of [['p', 'CHENG Team'], ['n', 'NPSL'], ['i', 'NPSL Metrology Engineering']]) {
       await raw.saveProject({ id, projectKey: id, title: `${organization} project`, organization, currentStageKey: 'requirement' });
       await raw.saveTask({ id: `${id}-t`, projectKey: id, title: `${organization} task`, phaseKey: 'requirement', status: 'Not Started' });
     }
     await renderApp();
     expect(document.querySelector('.kpi-grid').textContent).not.toContain('Portfolio Progress');
-    for (const organization of ['Program Office', 'NPSL', 'ISE']) {
+    for (const organization of ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering']) {
       await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(`${organization} Needs Attention`)).click());
       expect(document.querySelector('h1').textContent).toBe(`${organization} Needs Attention`);
       expect(document.querySelector('.attention-groups').textContent).toContain(`${organization} project`);
-      for (const other of ['Program Office', 'NPSL', 'ISE'].filter((value) => value !== organization)) expect(document.querySelector('.attention-groups').textContent).not.toContain(`${other} project`);
+      for (const other of ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering'].filter((value) => value !== organization)) expect(document.querySelector('.attention-groups').textContent).not.toContain(`${other} project`);
       await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Portfolio').click());
     }
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Pipeline board').click());
     await act(async () => changeValue(document.querySelector('[aria-label="Sort pipeline projects"]'), 'organization'));
-    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['ISE project', 'NPSL project', 'Program Office project']);
+    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['CHENG Team project', 'NPSL project', 'NPSL Metrology Engineering project']);
   });
 
   it('places project documents after upcoming work and names files in the phase indicator', async () => {
@@ -395,22 +386,23 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('.directory-form button')].find((row) => row.textContent === 'Enable manager access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('403');
     expect(document.body.textContent).not.toContain('New project');
-    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('User');
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('Viewer');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
 
-  it('lets a standard project owner add tasks and persist task-based progress', async () => {
+  it('lets an assigned project engineer add tasks and persist task-based progress', async () => {
     const raw = createRepository().store;
+    await raw.saveUser({ id: 'engineer', loginName: 'local', title: 'Engineer', role: 'Project Engineer' });
     await raw.saveProject({ id: 'owner-project', projectKey: 'owner-project', title: 'Owner project', ownerKey: 'local', ownerName: 'Local Engineer', ownerCanEdit: true, status: 'In Progress' });
     await raw.saveTask({ id: 'done', projectKey: 'owner-project', title: 'Done task', phaseKey: 'requirement', status: 'Complete' });
     await renderApp(false);
-    await act(async () => document.querySelector('.project-card').click());
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
     await act(async () => changeValue(document.querySelector('[aria-label="Progress calculation"]'), 'tasks'));
     expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 1 tasks completed');
     await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find((row) => row.textContent.includes('Work breakdown')).click());
     await act(async () => [...document.querySelectorAll('.task-stage button')].find((row) => row.getAttribute('aria-label')?.startsWith('Add task to ')).click());
     expect(document.querySelector('[aria-label="Task name"]').disabled).toBe(false);
-    expect(document.querySelector('.modal input[type="date"]').disabled).toBe(false);
+    expect(document.querySelector('.modal input[type="date"]').disabled).toBe(true);
     await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Owner entered task'));
     await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Save task').click());
     expect(document.querySelector('.drawer-progress').textContent).toContain('1 of 2 tasks completed');
@@ -437,11 +429,10 @@ describe('application shell', () => {
     expect(document.querySelector('.drawer-header-actions .project-menu-popover').textContent).toBe('Edit projectDelete project');
     await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
-    expect(document.querySelectorAll('.attention-group')).toHaveLength(1);
-    expect(document.querySelector('.attention-group header').textContent).toContain('In Progress');
-    expect(document.querySelector('.attention-group').textContent).not.toContain('skip task');
-    await act(async () => document.querySelector('.attention-collapse').click());
-    expect(document.querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
+    expect(document.querySelector('.attention-section summary').textContent).toContain('In Progress');
+    expect(document.querySelector('.attention-section').textContent).not.toContain('skip task');
+    expect(document.querySelector('.attention-section').open).toBe(true);
   });
 
   it('navigates from the active card and brand, and dismisses both project menus', async () => {
@@ -465,8 +456,8 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Modernization at a glance');
   });
 
-  it.each(['Manager', 'User'])('saves %s through Edit for a user without email and preserves SharePoint identity', async (role) => {
-    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: '', loginName: 'i:0#.w|domain\\engineer', role: role === 'User' ? 'Manager' : 'User' });
+  it.each(['Manager', 'Project Engineer', 'Viewer'])('saves %s through Edit for a user without email and preserves SharePoint identity', async (role) => {
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: '', loginName: 'i:0#.w|domain\\engineer', role: role === 'Viewer' ? 'Manager' : 'Viewer' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     expect(document.body.textContent).not.toContain('Make manager');
@@ -489,7 +480,7 @@ describe('application shell', () => {
   });
 
   it('keeps role edit errors visible and preserves the draft for retry', async () => {
-    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'User' });
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'Viewer' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     const card = [...document.querySelectorAll('.directory-row')].find((row) => row.textContent.includes('Other Engineer'));
@@ -501,7 +492,7 @@ describe('application shell', () => {
     await act(async () => document.querySelector('.directory-form button').click());
     expect(document.querySelector('.page-stack > [role="alert"]').textContent).toContain('403');
     expect(document.querySelector('.directory-form select').value).toBe('Manager');
-    expect(card.textContent).toContain('User');
+    expect(card.textContent).toContain('Viewer');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
 
@@ -513,20 +504,17 @@ describe('application shell', () => {
     }
     await renderApp();
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Needs Attention')).click());
-    expect(document.querySelector('.attention-group').tagName).toBe('SECTION');
-    const groups = document.querySelectorAll('.attention-project-group');
+    await act(async () => [...document.querySelectorAll('.attention-group-toggle button')].find((button) => button.textContent === 'By project').click());
+    const groups = document.querySelectorAll('.attention-section');
     expect(groups).toHaveLength(2);
-    expect([...groups].every((group) => group.querySelector('.attention-collapse').getAttribute('aria-expanded') === 'false')).toBe(true);
-    await act(async () => groups[0].querySelector('.attention-collapse').click());
-    expect(groups[0].querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('true');
-    expect(groups[1].querySelector('.attention-collapse').getAttribute('aria-expanded')).toBe('false');
-    await act(async () => groups[0].click());
-    await act(async () => document.querySelector('.upcoming-list button').click());
+    groups[0].open = false;
+    expect(groups[1].open).toBe(true);
+    await act(async () => groups[1].querySelector('.attention-task-title').click());
     const field = [...document.querySelectorAll('.modal .field')].find((field) => field.textContent.includes('Assigned / creation date')).querySelector('input');
     expect(field.value).toBe('');
     await act(async () => changeValue(field, '2026-09-15'));
     await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Save task').click());
-    expect((await createRepository().store.load()).tasks.find((row) => row.id === 'alpha-task').assignedDate).toBe('2026-09-15');
+    expect((await createRepository().store.load()).tasks.find((row) => row.id === 'beta-task').assignedDate).toBe('2026-09-15');
   });
 
   it('converts legacy SME roles to scoped standard users', async () => {
@@ -536,9 +524,9 @@ describe('application shell', () => {
     await raw.saveTask({ id: 'outside-task', projectKey: 'outside', title: 'Other task', status: 'Not Started', phaseKey: 'requirement', estimatedHours: 4.5 });
     await renderApp(false);
     expect(document.body.textContent).toContain('My work');
-    expect(document.body.textContent).not.toContain('Other project');
+    expect(document.body.textContent).toContain('Other project');
     expect(document.body.textContent).not.toContain('New project');
-    expect((await raw.load()).users[0].role).toBe('User');
+    expect((await raw.load()).users[0].role).toBe('Viewer');
   });
 
   it('selects a directory person, saves the verified user identity, and prepares an invitation', async () => {
@@ -552,11 +540,11 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('.people-invite input[type="search"]'), 'New Engineer'));
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
-    await act(async () => changeValue(document.querySelector('.people-invite select'), 'User'));
+    await act(async () => changeValue(document.querySelector('.people-invite select'), 'Viewer'));
     await act(async () => [...document.querySelectorAll('.people-invite button')].find((button) => button.textContent === 'Add to tracker').click());
     expect(resolve).toHaveBeenCalledWith(candidate.loginName);
     const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
-    expect(saved).toMatchObject({ ...candidate, role: 'User' });
+    expect(saved).toMatchObject({ ...candidate, role: 'Viewer' });
     expect(document.querySelector('.people-invite input[type="url"]')).toBeNull();
     expect(document.querySelector('.invitation-result')).toBeNull();
   });
@@ -569,7 +557,7 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('input[type="search"]'), 'Invite'));
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
-    await act(async () => changeValue(document.querySelector('select'), 'User'));
+    await act(async () => changeValue(document.querySelector('select'), 'Viewer'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
@@ -578,7 +566,7 @@ describe('application shell', () => {
     expect(document.querySelector('.invitation-result')).toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
     expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').disabled).toBe(true);
-    expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'User', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
+    expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'Viewer', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 
   it('creates nested references and moves a folder with persistence', async () => {
@@ -607,7 +595,7 @@ describe('application shell', () => {
 
   it('deletes a user only from Edit, preserves assignments, and hides self-deletion', async () => {
     const raw = createRepository().store;
-    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'User' });
+    await raw.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'Viewer' });
     await raw.saveTask({ id: 'assigned', projectKey: 'project', title: 'Assigned task', ownerKey: 'other' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Users and managers').click());
