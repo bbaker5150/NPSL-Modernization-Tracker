@@ -19,7 +19,7 @@ function DocumentActions({ file, busy, canEdit, onDownload, onRename, onDelete }
   </div>;
 }
 
-export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete = false, refreshKey, onChange }) {
+export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete = false, refreshKey, onChange, compact = false }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -31,6 +31,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     let active = true;
     const urls = [];
     setLoading(true);
+    setError('');
     setFiles([]);
     (projectKey ? store.listProjectAttachments(projectKey) : store.listTaskAttachments(taskId)).then((rows) => {
       if (!active) return;
@@ -85,11 +86,12 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     } catch (err) { setError(err.message); }
     finally { setBusy(false); setRefresh((value) => value + 1); }
   }
-  return <section className="task-documents"><h3>Documents</h3>
+  if (compact && !loading && !files.length && !error) return null;
+  return <section className={`task-documents${compact ? ' task-documents-compact' : ''}`}><h3>Documents</h3>
     {renaming && <div className="reference-editor document-rename"><h4>Rename document</h4><label className="field"><span>Document name</span><input autoFocus value={renaming.name} disabled={busy} onChange={(event) => setRenaming({ ...renaming, name: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); rename(); } }} /></label><div className="invite-actions"><button type="button" className="button primary" disabled={busy || !renaming.name.trim()} onClick={rename}>Save</button><button type="button" className="button secondary" disabled={busy} onClick={() => setRenaming(null)}>Cancel</button></div></div>}
     {loading && <p role="status">Loading documents…</p>}
     {!loading && !files.length && <p>No documents attached.</p>}
-    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div><DocumentActions file={file} busy={busy || loading} canEdit={canDelete} onDownload={download} onRename={(row) => setRenaming({ file: row, name: row.name })} onDelete={remove} /></li>)}</ul>
+    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div>{!compact && <DocumentActions file={file} busy={busy || loading} canEdit={canDelete} onDownload={download} onRename={(row) => setRenaming({ file: row, name: row.name })} onDelete={remove} />}</li>)}</ul>
     {!readOnly && <label className="field"><span>{busy ? 'Uploading documents…' : 'Attach documents (up to 50 MB each)'}</span><input aria-label="Attach documents" className="document-upload" type="file" multiple disabled={busy || loading} onChange={upload} /></label>}
     {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
   </section>;

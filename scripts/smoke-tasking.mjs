@@ -25,7 +25,7 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(() => {
     const projects = ['Electrical standards', 'Pressure modernization'].map((title, i) => ({ id: `p${i}`, projectKey: `p${i}`, title, measurementArea: i ? 'Pressure' : 'AC Voltage', ownerName: i ? 'Other Engineer' : 'Local Engineer', ownerKey: i ? 'other' : 'local', ownerEmail: i ? 'other@example.test' : 'local.engineer@example.invalid', currentStageKey: 'requirement', health: 'On Track', priority: 'Medium', targetFinish: '2027-09-30' }));
-    const tasks = Array.from({ length: 6 }, (_, i) => ({ id: `t${i}`, projectKey: `p${i % 2}`, phaseKey: 'requirement', title: ['Review requirements and confirm technical approach', 'Resolve procurement funding dependency', 'Prepare calibration standard specification', 'Coordinate stakeholder review', 'Completed work', 'Excluded work'][i], status: ['In Progress', 'Blocked', 'Not Started', 'In Progress', 'Complete', 'Not Required'][i], ownerName: i % 2 ? 'Jordan Engineer' : 'Local Engineer', ownerKey: 'local', organization: 'NPSL', dueDate: '2026-09-15', deferredDate: i === 1 ? '2027-01-15' : '', deferredJustification: i === 1 ? 'Awaiting funding release at the next program review.' : '', estimatedHours: 8 + i * 4, notes: 'Confirm the technical requirements with the project team before proceeding.', assignedDate: '2026-08-01' }));
+    const tasks = Array.from({ length: 6 }, (_, i) => ({ id: `t${i}`, projectKey: `p${i % 2}`, phaseKey: 'requirement', title: ['Review requirements and confirm technical approach', 'Resolve procurement funding dependency', 'Prepare calibration standard specification', 'Coordinate stakeholder review', 'Completed work', 'Excluded work'][i], status: ['In Progress', 'Blocked', 'Not Started', 'In Progress', 'Complete', 'Not Required'][i], ownerName: i % 2 ? 'Jordan Engineer' : 'Local Engineer', ownerKey: 'local', organization: 'NPSL', dueDate: '2026-09-15', deferredDate: i === 1 ? '2027-01-15' : '', deferredJustification: i === 1 ? 'Awaiting funding release at the next program review.' : '', estimatedHours: i === 2 ? '' : i === 3 ? 0 : 8 + i * 4, notes: 'Confirm the technical requirements with the project team before proceeding.', assignedDate: '2026-08-01' }));
     localStorage.setItem('modernization-project-tracker:v2', JSON.stringify({ projects, tasks, updates: [], risks: [], users: [{ id: 'local', title: 'Local Engineer', loginName: 'local', email: 'local.engineer@example.invalid', role: 'Manager' }, { id: 'other', title: 'Other Engineer', loginName: 'other', email: 'other@example.test', role: 'Project Engineer' }], glossary: [], references: [], recycleBin: [] }));
   });
   await boot();
@@ -33,6 +33,11 @@ try {
   assert.equal(await frame.locator('.attention-task-card').count(), 4);
   assert.equal(await frame.locator('.attention-summary strong').first().innerText(), '4');
   assert.equal(await frame.locator('.attention-task-details[open]').count(), 0);
+  const emptyEstimate = frame.locator('.attention-task-card').filter({ hasText: 'Prepare calibration standard specification' });
+  assert.equal(await emptyEstimate.getByText('Est. hours', { exact: true }).count(), 0);
+  assert.equal(await emptyEstimate.getByText('Deferred to', { exact: true }).count(), 0);
+  const zeroEstimate = frame.locator('.attention-task-card').filter({ hasText: 'Coordinate stakeholder review' });
+  assert.equal(await zeroEstimate.locator('.attention-task-facts > div').filter({ hasText: 'Est. hours' }).locator('dd').innerText(), '0');
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 1050 });
     for (const theme of ['light', 'dark']) {
@@ -71,6 +76,7 @@ try {
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.getByRole('button', { name: /Add task to/ }).first().click();
   await frame.getByLabel('Task name', { exact: true }).fill('New task with documents');
+  await frame.getByLabel('Notes', { exact: true }).fill('Review the attached requirements before proceeding.');
   assert.ok(await frame.getByLabel('Original due date').isDisabled());
   assert.equal(await frame.getByLabel('Pipeline stage', { exact: true }).count(), 0);
   await frame.getByRole('combobox', { name: 'Task owner', exact: true }).fill('Other');
@@ -85,6 +91,34 @@ try {
   assert.equal(saved.dueDate, '');
   await frame.getByText('New task with documents', { exact: true }).click();
   await frame.getByText('requirements.txt', { exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
+  await frame.locator('.kpi-card').filter({ hasText: 'NPSL Needs Attention' }).click();
+  const documentCard = frame.locator('.attention-task-card').filter({ hasText: 'New task with documents' });
+  assert.equal(await documentCard.getByText('Original due', { exact: true }).count(), 0);
+  assert.equal(await documentCard.getByText('Est. hours', { exact: true }).count(), 0);
+  await documentCard.locator('.attention-task-details > summary').click();
+  await documentCard.getByRole('button', { name: 'requirements.txt', exact: true }).waitFor();
+  const layout = await documentCard.evaluate(card => {
+    const summary = card.querySelector('.attention-task-details > summary').getBoundingClientRect();
+    const content = card.querySelector('.attention-details-content').getBoundingClientRect();
+    const notes = [...card.querySelectorAll('p')].find(el => el.textContent.includes('Review the attached requirements')).getBoundingClientRect();
+    const documents = card.querySelector('.task-documents').getBoundingClientRect();
+    return { gap: content.top + parseFloat(getComputedStyle(card.querySelector('.attention-details-content')).paddingTop) - summary.bottom, belowNotes: documents.top > notes.bottom };
+  });
+  assert.ok(layout.gap >= 14 && layout.belowNotes, 'Expanded details need spacing and documents below notes');
+  const download = page.waitForEvent('download');
+  await documentCard.getByRole('button', { name: 'requirements.txt', exact: true }).click();
+  assert.equal(await fs.readFile(await (await download).path(), 'utf8'), 'Task requirements');
+  for (const [width, theme] of [[1440, 'light'], [390, 'dark']]) {
+    await page.setViewportSize({ width, height: 1050 });
+    await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
+    await page.waitForTimeout(250);
+    await documentCard.scrollIntoViewIfNeeded();
+    assert.ok(await documentCard.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+    await documentCard.screenshot({ path: `test-artifacts/task-documents-${width}-${theme}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 1050 });
   await role('Viewer');
   assert.equal(await frame.locator('.project-table-row:not(.table-header)').count(), 2);
   await frame.locator('.project-table-row:not(.table-header)').first().click();
