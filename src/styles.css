@@ -28,6 +28,66 @@
   --radius-sm: 11px;
 }
 
+.saved-user-field > label { font-size: 11px; font-weight: 650; color: var(--muted); }
+.task-fields .saved-user-field { min-width: 0; }
+.attention-page > .page-heading { display: block; }
+.attention-page > .page-heading h1 { margin: 8px 0 12px; }
+.attention-toolbar .search-box input::placeholder { color: var(--muted); }
+.attention-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); border-radius: var(--radius); overflow: hidden; }
+.attention-summary > div { background: var(--surface); padding: 20px 24px; display: flex; flex-direction: column; gap: 5px; }
+.attention-summary strong { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.attention-summary span { font-size: 12px; color: var(--muted); }
+.attention-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.attention-toolbar .search-box { flex: 1; min-width: 200px; }
+.attention-group-toggle { display: flex; padding: 4px; background: var(--surface-3); border-radius: 10px; }
+.attention-group-toggle button { padding: 9px 16px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.attention-group-toggle button[aria-pressed='true'] { color: var(--ink); background: var(--surface); box-shadow: 0 1px 5px #0001; font-weight: 650; }
+.attention-section { padding: 0; overflow: hidden; }
+.attention-section > summary { display: flex; align-items: center; gap: 10px; padding: 19px 22px; cursor: pointer; list-style: none; border-bottom: 1px solid var(--line); }
+.attention-section > summary::-webkit-details-marker { display: none; }
+.attention-section > summary::after { content: '⌄'; margin-left: auto; transition: transform .15s; }
+.attention-section:not([open]) > summary::after { transform: rotate(-90deg); }
+.attention-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+.attention-dot.status-blocked { background: var(--rose); }
+.attention-dot.status-in-progress { background: var(--blue); }
+.attention-count { color: var(--muted); font-size: 12px; }
+.attention-task-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 18px; background: var(--surface-2); }
+.attention-task-card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.attention-task-heading { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+.attention-task-heading > div { min-width: 0; }
+.attention-project-link, .attention-task-title { display: block; padding: 0; border: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.attention-project-link { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+.attention-task-title { color: var(--ink); font-size: 15px; font-weight: 650; line-height: 1.5; }
+.attention-task-title:hover, .attention-project-link:hover { color: var(--blue); }
+.attention-status { flex-shrink: 0; color: var(--muted); background: var(--surface-3); border-radius: 6px; padding: 5px 8px; font-size: 10px; font-weight: 650; }
+.attention-status.status-blocked { color: var(--rose); background: var(--rose-soft); }
+.attention-status.status-in-progress { color: var(--blue); background: var(--blue-soft); }
+.attention-task-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; color: var(--muted); font-size: 10px; }
+.attention-task-facts { display: grid; grid-template-columns: 1.25fr 1fr 1fr .6fr; gap: 12px; margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.attention-task-facts div { min-width: 0; }
+.attention-task-facts dt { font-size: 10px; color: var(--muted); margin-bottom: 7px; }
+.attention-task-facts dd { margin: 0; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.attention-overdue { color: var(--rose); }
+.attention-task-details { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 13px; }
+.attention-task-details > summary { color: var(--blue); cursor: pointer; font-size: 11px; }
+.attention-task-details p { color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attention-task-details p strong { display: block; color: var(--ink); font-size: 11px; margin-bottom: 5px; }
+.attention-empty { text-align: center; padding: 48px 24px; }
+.attention-empty p { color: var(--muted); }
+.queued-documents .document-name strong { overflow-wrap: anywhere; }
+.attention-page button:focus-visible, .attention-page summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+@media (max-width: 1100px) { .attention-task-list { grid-template-columns: 1fr; } }
+@media (max-width: 650px) {
+  .project-engineer-spacer { display: none; }
+  .attention-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attention-summary > div { padding: 16px; }
+  .attention-toolbar > .search-box { flex-basis: 100%; }
+  .attention-task-list { padding: 10px; gap: 10px; }
+  .attention-task-card { padding: 16px; }
+  .attention-task-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 18px; }
+  .attention-task-heading { flex-wrap: wrap; }
+}
+
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #07111c;
@@ -492,7 +552,7 @@ button { border: 0 !important; }
 .add-task-button:hover { color: var(--blue); background: var(--blue-soft); }
 .drawer-content, .drawer-tabs, .task-markers { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .project-drawer ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.attention-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(300px, 1fr); align-items: start; gap: 16px; overflow-x: auto; padding-bottom: 12px; }
+.attention-groups { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 18px; padding-bottom: 12px; }
 .attention-group > header { display: flex; align-items: center; gap: 10px; padding: 18px 20px; cursor: pointer; list-style: none; }
 .attention-group > header::-webkit-details-marker { display: none; }
 .attention-group > header > .badge:first-of-type { white-space: normal; }

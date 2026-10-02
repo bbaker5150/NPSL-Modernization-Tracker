@@ -1,6 +1,7 @@
+import { normalizeDirectory } from './identity';
 import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment, validateAttachmentName } from './taskAttachments';
-import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus } from '../data/workflow';
+import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations, ROLES } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 
@@ -25,7 +26,7 @@ export const CONTAINERS = [
     key: 'tasks', suffix: 'Tasks', description: 'Pipeline tasks for every modernization project.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['ArchivedDocuments', 'Archived Documents', FIELD.NOTE], ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
-      ['EstimatedHours', 'Est. Hours', FIELD.NUMBER], ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
+      ['Organization', 'Organization', FIELD.TEXT], ['EstimatedHours', 'Est. Hours', FIELD.NUMBER], ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
       ['AssignedDate', 'Assigned / Creation Date', FIELD.DATE], ['StartDate', 'Start Date', FIELD.DATE], ['FinishDate', 'Finish Date', FIELD.DATE], ['DueDate', 'Due Date', FIELD.DATE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['Notes', 'Notes', FIELD.NOTE],
       ['BlockedReason', 'Blocked Reason', FIELD.NOTE], ['SourceStartLabel', 'Source Start Label', FIELD.TEXT],
@@ -104,7 +105,7 @@ const projectFields = (row) => ({
 
 const taskFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey,
-  TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
+  Organization: normalizeOrganization(row.organization), TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
   EstimatedHours: row.estimatedHours === '' || row.estimatedHours == null ? null : Number(row.estimatedHours), AssignedDate: sharePointDate(row.assignedDate), StartDate: sharePointDate(row.startDate), FinishDate: sharePointDate(row.finishDate), DueDate: sharePointDate(row.dueDate),
   OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', Notes: row.notes, BlockedReason: row.blockedReason,
   SourceStartLabel: row.sourceStartLabel, DataIssue: row.dataIssue,
@@ -143,14 +144,14 @@ function fromTask(item) {
   const status = normalizeTaskStatus(item.TaskStatus);
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.TaskTitle,
-    phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
+    organization: item.Organization || '', phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
     estimatedHours: item.EstimatedHours == null ? null : Number(item.EstimatedHours), assignedDate: dateOnly(item.AssignedDate), startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate), deferredDate: dateOnly(item.DeferredDate), deferredJustification: item.DeferredJustification || '', notRequiredJustification: item.NotRequiredJustification || '',
     ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
   };
 }
 
-const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole === 'Manager' ? 'Manager' : 'User' });
+const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole || 'User' });
 
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
@@ -250,7 +251,7 @@ export class SharePointStore {
       this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
       this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
-    return { projects, tasks, updates, risks, acronyms, users };
+    return { projects, tasks: normalizeTaskOrganizations(tasks, projects), updates, risks, acronyms, users: normalizeDirectory(users, projects) };
   }
 
   async create(key, fields) {
@@ -380,7 +381,7 @@ export class SharePointStore {
   }
 
   async shareSiteAccess(person, role, appUrl) {
-    if (!['User', 'Manager'].includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
+    if (!ROLES.includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
     const link = new URL(trackerPageUrl(appUrl, this.webUrl));
     const fileApi = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(link.pathname))}')`;
     let page;

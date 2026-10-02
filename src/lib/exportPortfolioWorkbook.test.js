@@ -4,6 +4,30 @@ import { workflowData } from '../data/workflow';
 import { createPortfolioWorkbook } from './exportPortfolioWorkbook';
 
 describe('portfolio Excel export', () => {
+  it('counts outstanding tasks by organization and exports only attention matches with typed dates and hours', () => {
+    const projects = [{ projectKey: 'p', title: 'Shared project', ownerName: 'Project Engineer' }];
+    const tasks = [
+      { id: 'a', projectKey: 'p', title: 'Matching task', status: 'Blocked', organization: 'CHENG Team', dueDate: '2026-09-01', deferredDate: '2026-10-01', assignedDate: '2026-08-01', estimatedHours: 2.5, deferredJustification: 'Parts delayed', notes: 'Review next week' },
+      { id: 'b', projectKey: 'p', title: 'Other organization', status: 'In Progress', organization: 'NPSL', estimatedHours: 5 },
+      { id: 'c', projectKey: 'p', title: 'Complete task', status: 'Complete', organization: 'CHENG Team', estimatedHours: 7 },
+      { id: 'd', projectKey: 'p', title: 'Not required task', status: 'Not Required', organization: 'CHENG Team', estimatedHours: 9 },
+    ];
+    const args = { projects, tasks, risks: [], updates: [], phases: workflowData.phases };
+    const all = createPortfolioWorkbook(args);
+    expect(all.getWorksheet('Organization Workload').getCell('B2').value).toBe(1);
+    expect(all.getWorksheet('Organization Workload').getCell('B3').value).toBe(1);
+    const filtered = createPortfolioWorkbook({ ...args, attentionTaskIds: new Set(['a']) });
+    const attention = filtered.getWorksheet('Needs Attention');
+    expect(attention.rowCount).toBe(2);
+    expect(attention.getCell('D2').value).toBe('CHENG Team');
+    expect(attention.getCell('H2').value).toBeInstanceOf(Date);
+    expect(attention.getCell('I2').value).toBeInstanceOf(Date);
+    expect(attention.getCell('J2').value).toBe(2.5);
+    expect(attention.getCell('K2').value).toBeInstanceOf(Date);
+    expect(attention.getCell('L2').value).toBe('Parts delayed');
+    expect(filtered.getWorksheet('Organization Workload').getCell('B3').value).toBe(0);
+    expect(filtered.getWorksheet('Tasks').rowCount).toBe(5);
+  });
   it('creates a styled, typed, multi-sheet workbook containing the complete portfolio', async () => {
     const projects = [{ id: 'project-1', projectKey: 'project-1', title: 'Calibration modernization', measurementArea: 'Electrical', description: 'Replace an aging standard.', ownerName: 'Test Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: 'engineer', health: 'On Track', priority: 'High', status: 'In Progress', currentStageKey: 'requirement', percentComplete: 20, targetFinish: '2027-01-15', nextMilestone: 'Approve requirements', nextMilestoneDate: '2026-10-01', blockedCount: 0, overdueCount: 0 }];
     const tasks = workflowData.taskTemplates.map((task, index) => ({ ...task, id: `task-${index + 1}`, projectKey: 'project-1', status: index === 0 ? 'Complete' : 'Not Started', ownerName: 'Test Engineer', ownerEmail: 'engineer@example.invalid', ownerKey: 'engineer', startDate: '', dueDate: '', finishDate: '', blockedReason: '', notes: '', dataIssue: '' }));
@@ -27,7 +51,7 @@ describe('portfolio Excel export', () => {
     const reopened = new ExcelJS.Workbook();
     await reopened.xlsx.load(bytes);
     expect(reopened.worksheets.map((sheet) => sheet.name)).toEqual([
-      'Portfolio Summary', 'Projects', 'Needs Attention', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
+      'Portfolio Summary', 'Organization Workload', 'Projects', 'Needs Attention', 'Tasks', 'Risks', 'Updates', 'Pipeline Reference', 'Acronym Glossary',
     ]);
     expect(reopened.getWorksheet('Projects').rowCount).toBe(projects.length + 1);
     expect(reopened.getWorksheet('Tasks').rowCount).toBe(tasks.length + 1);

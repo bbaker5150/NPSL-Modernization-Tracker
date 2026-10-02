@@ -6,8 +6,14 @@ export const normalizePhaseKey = (key) => ({
   'production-procurement': 'procurement', 'operation-sustainment': 'deployment',
 }[key] || key || 'requirement');
 
-export const ORGANIZATIONS = ['Program Office', 'NPSL', 'ISE'];
-export const normalizeOrganization = (value) => ORGANIZATIONS.includes(value) ? value : 'NPSL';
+export const ORGANIZATIONS = ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering'];
+export const normalizeOrganization = (value) => ({ 'Program Office': 'CHENG Team', ISE: 'NPSL Metrology Engineering' }[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL'));
+export const ROLES = ['Viewer', 'Project Engineer', 'Manager'];
+export const normalizeRole = (value) => ROLES.includes(value) ? value : 'Viewer';
+export function normalizeTaskOrganizations(tasks, projects) {
+  const byKey = new Map(projects.map((project) => [project.projectKey, project]));
+  return tasks.map((task) => ({ ...task, organization: normalizeOrganization(task.organization || byKey.get(task.projectKey)?.organization) }));
+}
 export const normalizeTaskStatus = (value) => value === 'In Progress – At Program Office' ? 'In Progress' : (value || 'Not Started');
 
 export const workflowData = {

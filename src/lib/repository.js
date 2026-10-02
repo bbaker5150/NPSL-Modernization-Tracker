@@ -1,5 +1,7 @@
+import { normalizeDirectory } from './identity';
+export { isOwnedByUser, userIdentityKey } from './identity';
 import { localAttachments, validateAttachment, validateAttachmentName } from './taskAttachments';
-import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus } from '../data/workflow';
+import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations } from '../data/workflow';
 import { DEFAULT_ACRONYM_VERSION, defaultAcronyms } from '../data/defaultAcronyms';
 import { resolveWebUrl } from './spContext';
 import { SharePointStore } from './spStore';
@@ -31,7 +33,7 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.users = data.users.map((row) => ({ ...row, role: row.role === 'Manager' ? 'Manager' : 'User' })); return data; }
+  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
@@ -95,34 +97,6 @@ export function createRepository() {
     return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', hideLists: config.hideLists !== false }), config };
   }
   return { mode: 'local', store: new LocalStore(), config };
-}
-
-export function userIdentityKey(user) {
-  if (!user) return '';
-  const raw = user.loginName || user.email || (user.id ? `sharepoint-user:${user.id}` : '');
-  return String(raw).trim().toLowerCase();
-}
-
-function identityAliases(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return [];
-  const aliases = new Set([normalized]);
-  const claimsValue = normalized.split('|').pop();
-  if (claimsValue) aliases.add(claimsValue);
-  return [...aliases];
-}
-
-export function isOwnedByUser(record, user) {
-  const userAliases = new Set([
-    ...identityAliases(userIdentityKey(user)),
-    ...identityAliases(user?.loginName),
-    ...identityAliases(user?.email),
-  ]);
-  const recordAliases = [
-    ...identityAliases(record?.ownerKey),
-    ...identityAliases(record?.ownerEmail),
-  ];
-  return recordAliases.some((alias) => userAliases.has(alias));
 }
 
 export function createStarterTasks(projectKey, owner = {}) {

@@ -11,7 +11,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run",
     "verify:singlefile": "node scripts/verifySingleFile.mjs",
-    "smoke:singlefile": "node scripts/smoke-forge-srcdoc.mjs"
+    "smoke:singlefile": "node scripts/smoke-forge-srcdoc.mjs && node scripts/smoke-tasking.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",

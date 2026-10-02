@@ -35,7 +35,7 @@ try {
   await page.locator('#app').evaluate((frame, html) => { frame.srcdoc = html; }, artifact);
   const frame = page.frameLocator('#app');
 
-  await frame.getByRole('heading', { name: 'My work', exact: true }).waitFor({ timeout: 20_000 });
+  await frame.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor({ timeout: 20_000 });
   const loadingLogoStyle = await frame.locator('body').evaluate((body) => {
     const logo = document.createElement('img');
     logo.className = 'brand-logo loading-logo';
@@ -61,7 +61,7 @@ try {
   await page.evaluate(() => {
     const key = 'modernization-project-tracker:v2';
     const data = JSON.parse(localStorage.getItem(key));
-    data.users.push({ id: 'smoke-user', title: 'SME Test User', email: 'sme@example.test', loginName: 'sme@example.test', role: 'User' });
+    data.users.push({ id: 'smoke-user', title: 'SME Test User', email: 'sme@example.test', loginName: 'sme@example.test', role: 'Viewer' });
     localStorage.setItem(key, JSON.stringify(data));
   });
   await page.reload();
@@ -122,22 +122,17 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
-  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).fill('SME Test');
+  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).fill('SME Test');
   await frame.getByRole('option', { name: /SME Test User/ }).waitFor();
-  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).press('ArrowDown');
-  await frame.getByRole('combobox', { name: 'Project owner', exact: true }).press('Enter');
-  if (await frame.getByLabel('Owner email', { exact: true }).inputValue() !== 'sme@example.test') errors.push('Owner selection did not populate email');
+  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).press('ArrowDown');
+  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).press('Enter');
+  if (await frame.getByLabel('Engineer email', { exact: true }).inputValue() !== 'sme@example.test') errors.push('Owner selection did not populate email');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
-      const layout = await frame.locator('.project-owner-field').evaluate((el) => {
-        const owner = el.querySelector('[role="combobox"]').getBoundingClientRect();
-        const option = el.querySelector('.owner-edit-option').getBoundingClientRect();
-        const check = el.querySelector('[type="checkbox"]').getBoundingClientRect();
-        return option.top >= owner.bottom && check.width <= 14 && check.height <= 14 && el.scrollWidth <= el.clientWidth + 1;
-      });
-      if (!layout) errors.push('Owner checkbox must be compact and below the owner input');
+      const layout = await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
+      if (!layout || await frame.locator('.modal input[type="checkbox"]').count()) errors.push('Project engineer field is cramped or retired checkbox remains');
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });

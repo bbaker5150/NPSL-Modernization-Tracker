@@ -22,3 +22,9 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
       - run: npm run smoke:singlefile
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: tracker-ui-review
+          path: test-artifacts
+          if-no-files-found: ignore
