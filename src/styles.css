@@ -70,6 +70,16 @@
 .attention-overdue { color: var(--rose); }
 .attention-task-details { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 13px; }
 .attention-task-details > summary { color: var(--blue); cursor: pointer; font-size: 11px; }
+.attention-details-content { padding-top: 16px; }
+.attention-details-content > p { margin: 0 0 16px; }
+.attention-details-content > p:last-child { margin-bottom: 0; }
+.attention-details-content .task-documents-compact { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.attention-details-content .task-documents-compact:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.task-documents-compact h3 { margin: 0 0 10px; font-size: 11px; color: var(--ink); }
+.task-documents-compact .document-list { margin: 0; }
+.task-documents-compact .document-list li { padding: 10px 12px; min-width: 0; }
+.task-documents-compact .document-name { min-width: 0; width: 100%; }
+.task-documents-compact .document-file-name { max-width: 100%; font-size: 12px; overflow-wrap: anywhere; white-space: normal; text-align: left; }
 .attention-task-details p { color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .attention-task-details p strong { display: block; color: var(--ink); font-size: 11px; margin-bottom: 5px; }
 .attention-empty { text-align: center; padding: 48px 24px; }

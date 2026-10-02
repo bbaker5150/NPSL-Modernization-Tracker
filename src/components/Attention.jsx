@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { TaskDocuments } from './TaskDocuments';
 import { displayName } from '../lib/displayName';
 import { workflowData } from '../data/workflow';
 
@@ -23,7 +24,33 @@ export function attentionRows(projects, organization = '', search = '', sort = '
     });
 }
 
-export function Attention({ projects, organization, onOpen, onTask, controls, onControls }) {
+const filled = (value) => value != null && String(value).trim() !== '';
+
+function TaskFacts({ task }) {
+  const owner = task.ownerName?.trim();
+  const facts = [
+    ['Assigned to', owner && owner !== 'Unassigned' ? displayName(owner) : task.ownerEmail || ''],
+    ['Original due', filled(task.dueDate) ? date(task.dueDate) : '', !task.deferredDate && overdue(task)],
+    ['Deferred to', filled(task.deferredDate) ? date(task.deferredDate) : '', task.deferredDate && overdue(task)],
+    ['Est. hours', filled(task.estimatedHours) ? Number(task.estimatedHours).toLocaleString() : ''],
+  ].filter(([, value]) => filled(value));
+  return facts.length ? <dl className="attention-task-facts">{facts.map(([label, value, late]) => <div key={label}><dt>{label}</dt><dd className={late ? 'attention-overdue' : ''}>{value}</dd></div>)}</dl> : null;
+}
+
+function TaskDetails({ task, store, refreshKey }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = [task.notes, task.deferredJustification, task.blockedReason, task.assignedDate].some(filled);
+  if (!hasDetails && !store) return null;
+  return <details className="attention-task-details" onToggle={(event) => setExpanded(event.currentTarget.open)}><summary>Details & justification</summary><div className="attention-details-content">
+    {filled(task.assignedDate) && <p><strong>Assigned / created</strong>{date(task.assignedDate)}</p>}
+    {filled(task.notes) && <p><strong>Notes</strong>{task.notes}</p>}
+    {filled(task.deferredJustification) && <p><strong>Deferral justification</strong>{task.deferredJustification}</p>}
+    {filled(task.blockedReason) && <p><strong>Blocked reason</strong>{task.blockedReason}</p>}
+    {expanded && store && <TaskDocuments taskId={task.id} store={store} readOnly compact refreshKey={refreshKey} />}
+  </div></details>;
+}
+
+export function Attention({ projects, organization, onOpen, onTask, controls, onControls, store, refreshKey }) {
   const { groupBy, search, sort } = controls;
   const rows = useMemo(() => attentionRows(projects, organization, search, sort), [projects, organization, search, sort]);
   const groups = new Map();
@@ -40,9 +67,9 @@ export function Attention({ projects, organization, onOpen, onTask, controls, on
     <section className="attention-toolbar"><label className="search-box"><input type="search" aria-label="Search attention tasks" placeholder="Search tasks, projects or people…" value={search} onChange={(event) => onControls({ ...controls, search: event.target.value })} /></label><div className="attention-group-toggle" aria-label="Group tasks">{['status', 'project'].map((group) => <button key={group} type="button" aria-pressed={groupBy === group} onClick={() => onControls({ ...controls, groupBy: group })}>By {group}</button>)}</div><label className="select-wrap"><select aria-label="Sort attention tasks" value={sort} onChange={(event) => onControls({ ...controls, sort: event.target.value })}><option value="due">Due soonest</option><option value="owner">Assignee A–Z</option><option value="measurement-area">Measurement Area A–Z</option><option value="hours">Hours high–low</option></select></label></section>
     <div className={`attention-groups attention-groups-${groupBy}`} role="region" aria-label={groupBy === 'status' ? 'Tasks by status' : 'Tasks by project'} tabIndex={groupBy === 'status' ? 0 : undefined}>{ordered.map(([key, items]) => <details className="panel attention-section" key={`${groupBy}-${key}`} open><summary><span className={`attention-dot status-${items[0].task.status.toLowerCase().replaceAll(' ', '-')}`} aria-hidden="true" /><strong>{groupBy === 'project' ? items[0].project.title : key}</strong><span className="attention-count">{items.length} {items.length === 1 ? 'task' : 'tasks'}</span></summary><div className="attention-task-list">{items.map(({ project, task }) => <article className="attention-task-card" key={task.id}>
       <div className="attention-task-heading"><div><button className="attention-project-link" onClick={() => onOpen(project)}>{project.title}</button><button className="attention-task-title" onClick={() => onTask(task)}>{task.title}</button></div><span className={`attention-status status-${task.status.toLowerCase().replaceAll(' ', '-')}`}>{task.status}</span></div>
-      <div className="attention-task-meta"><span>{task.organization}</span>{project.measurementArea && <span>{project.measurementArea}</span>}<span>{workflowData.phases.find((phase) => phase.key === task.phaseKey)?.name}</span></div>
-      <dl className="attention-task-facts"><div><dt>Assigned to</dt><dd>{displayName(task.ownerName || 'Unassigned')}</dd></div><div><dt>Original due</dt><dd className={!task.deferredDate && overdue(task) ? 'attention-overdue' : ''}>{date(task.dueDate)}</dd></div><div><dt>Deferred to</dt><dd className={task.deferredDate && overdue(task) ? 'attention-overdue' : ''}>{task.deferredDate ? date(task.deferredDate) : '—'}</dd></div><div><dt>Est. hours</dt><dd>{task.estimatedHours == null || task.estimatedHours === '' ? '—' : Number(task.estimatedHours).toLocaleString()}</dd></div></dl>
-      {(task.notes || task.deferredJustification || task.blockedReason || task.assignedDate) && <details className="attention-task-details"><summary>Details & justification</summary><div>{task.assignedDate && <p><strong>Assigned / created</strong>{date(task.assignedDate)}</p>}{task.notes && <p><strong>Notes</strong>{task.notes}</p>}{task.deferredJustification && <p><strong>Deferral justification</strong>{task.deferredJustification}</p>}{task.blockedReason && <p><strong>Blocked reason</strong>{task.blockedReason}</p>}</div></details>}
+      <div className="attention-task-meta">{filled(task.organization) && <span>{task.organization}</span>}{filled(project.measurementArea) && <span>{project.measurementArea}</span>}{workflowData.phases.some((phase) => phase.key === task.phaseKey) && <span>{workflowData.phases.find((phase) => phase.key === task.phaseKey).name}</span>}</div>
+      <TaskFacts task={task} />
+      <TaskDetails task={task} store={store} refreshKey={refreshKey} />
     </article>)}</div></details>)}</div>
     {!rows.length && <section className="panel attention-empty"><h2>{search ? 'No matching tasks' : 'Nothing needs attention'}</h2><p>{search ? 'Try a different task, project or assignee.' : 'There are no outstanding tasks for this organization.'}</p></section>}
   </div>;
