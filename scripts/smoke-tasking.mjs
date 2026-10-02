@@ -33,17 +33,26 @@ try {
   assert.equal(await frame.locator('.attention-task-card').count(), 4);
   assert.equal(await frame.locator('.attention-summary strong').first().innerText(), '4');
   assert.equal(await frame.locator('.attention-task-details[open]').count(), 0);
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 1050 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, theme) => { el.dataset.theme = theme; }, theme);
       await page.waitForTimeout(250); // Let theme transitions settle before visual review.
       assert.ok(await frame.locator('.attention-page').evaluate(el => el.scrollWidth <= el.clientWidth + 1), `Attention overflow at ${width}px/${theme}`);
+      const columns = await frame.locator('.attention-groups-status > .attention-section').evaluateAll(elements => elements.map(el => { const r = el.getBoundingClientRect(); return { top: r.top, left: r.left, right: r.right, width: r.width }; }));
+      assert.equal(columns.length, 3);
+      assert.ok(columns.every(column => Math.abs(column.top - columns[0].top) < 2), 'Statuses must share a horizontal row');
+      assert.ok(columns.every((column, i) => column.width >= 290 && (!i || column.left > columns[i - 1].right)), 'Columns must remain readable without overlapping');
+      assert.ok(await frame.locator('.attention-task-card').evaluateAll(cards => cards.every(card => card.scrollWidth <= card.clientWidth + 1)), 'Task card content must fit');
       assert.notEqual(await frame.getByLabel('Search attention tasks').evaluate(el => getComputedStyle(el, '::placeholder').color), 'rgba(0, 0, 0, 0)');
       await page.screenshot({ path: `test-artifacts/attention-${width}-${theme}.png`, fullPage: true });
     }
   }
   await page.setViewportSize({ width: 1440, height: 1050 });
+  await frame.locator('.attention-groups-status > .attention-section > summary').first().click();
+  assert.equal(await frame.locator('.attention-groups-status > .attention-section[open]').count(), 2);
+  await frame.locator('.attention-groups-status > .attention-section > summary').first().click();
+  assert.equal(await frame.locator('.attention-groups-status > .attention-section[open]').count(), 3);
   await frame.getByRole('button', { name: 'By project', exact: true }).click();
   assert.equal(await frame.locator('.attention-section').count(), 2);
   await frame.locator('.attention-section > summary').first().click();
