@@ -612,20 +612,22 @@ export function App() {
   async function exportWorkbook() {
     setExporting(true);
     try {
+      const fresh = await repo.store.load();
+      const exportProjects = fresh.projects.map((project) => enrichProject(project, fresh.tasks));
       const query = register.search.trim().toLowerCase();
-      let scope = enriched;
+      let scope = exportProjects;
       if (view === 'overview') scope = scope.filter((project) => (!phaseFilter.length || phaseFilter.includes(project.currentStageKey)) && (!register.health || project.health === register.health) && (!register.organization || project.tasks.some((task) => !isClosedTask(task) && task.organization === register.organization)) && (!query || [project.title, project.measurementArea, project.ownerName, displayName(project.ownerName), project.organization, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)))).map((project) => ({ ...project, progressMode: register.progressMode, ...projectProgress(project.tasks, register.progressMode) }));
       if (view === 'my-work') scope = scope.filter((project) => isOwnedByUser(project, user) || project.tasks.some((task) => isOwnedByUser(task, user) && !isClosedTask(task)));
-      const attentionTaskIds = view === 'attention' ? new Set(attentionRows(enriched, attentionOrganization, attentionControls.search, attentionControls.sort).map(({ task }) => task.id)) : null;
+      const attentionTaskIds = view === 'attention' ? new Set(attentionRows(exportProjects, attentionOrganization, attentionControls.search, attentionControls.sort).map(({ task }) => task.id)) : null;
       if (attentionTaskIds) scope = scope.filter((project) => project.tasks.some((task) => attentionTaskIds.has(task.id)));
       await downloadPortfolioWorkbook({
         projects: scope,
-        tasks: data.tasks,
+        tasks: fresh.tasks,
         attentionTaskIds,
-        updates: data.updates,
-        risks: data.risks,
+        updates: fresh.updates,
+        risks: fresh.risks,
         phases: workflowData.phases,
-        glossary: data.acronyms,
+        glossary: fresh.acronyms,
         user,
         sourceLabel: `${view === 'overview' ? 'Filtered portfolio' : view} · ${repo.mode === 'sharepoint' ? 'SharePoint' : 'Local'} · ${scope.length} projects`,
       });

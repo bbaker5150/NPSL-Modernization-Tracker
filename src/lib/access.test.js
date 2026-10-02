@@ -67,12 +67,34 @@ describe('three-role access model', () => {
     await expect(store.saveProgressMode('p1', 'phases')).rejects.toThrow();
     await expect(store.addTaskAttachment('t1', new File(['a'], 'a.txt'))).rejects.toThrow();
   });
-  it('does not treat legacy SME/User roles or the retired checkbox as engineer permission', async () => {
-    for (const role of ['SME', 'User', 'Viewer']) {
+  it('does not let the retired checkbox override an explicit Viewer role', async () => {
+    for (const role of ['Viewer']) {
       const { store, state } = fixture(role); state.projects[0].ownerCanEdit = true;
       expect((await store.load()).projects).toHaveLength(2);
       await expect(store.saveTask(task)).rejects.toThrow();
     }
+  });
+  it('migrates existing project owners by identity and persists roles when a manager opens the app', async () => {
+    localStorage.clear(); window.MOD_TRACKER_CONFIG = { forceLocal: true };
+    const raw = createRepository().store;
+    await raw.saveUser({ id: 'manager', title: 'Local Engineer', loginName: 'local', role: 'Manager' });
+    await raw.saveUser({ id: 'owner', loginName: 'i:0#.f|membership|owner@example.test', role: 'User' });
+    await raw.saveUser({ id: 'outsider', loginName: 'other', role: 'SME' });
+    await raw.saveUser({ id: 'viewer', loginName: 'viewer', role: 'Viewer' });
+    await raw.saveProject({ id: 'old', projectKey: 'old', ownerEmail: 'OWNER@EXAMPLE.TEST', ownerCanEdit: false });
+    await raw.saveProject({ id: 'view', projectKey: 'view', ownerKey: 'viewer', ownerCanEdit: true });
+    await authorizedStore(raw).registerCurrentUser();
+    expect(raw.data.users.map(({ id, role }) => [id, role])).toEqual([['manager', 'Manager'], ['owner', 'Project Engineer'], ['outsider', 'Viewer'], ['viewer', 'Viewer']]);
+    await raw.saveProject({ id: 'old', projectKey: 'old', ownerKey: 'new' });
+    expect((await raw.load()).users.find(row => row.id === 'owner').role).toBe('Project Engineer');
+    expect(visibleData(await raw.load(), { email: 'owner@example.test' }).projects).toHaveLength(0);
+  });
+  it('registers an existing project owner missing from the directory as an engineer', async () => {
+    localStorage.clear(); window.MOD_TRACKER_CONFIG = { forceLocal: true };
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'old', projectKey: 'old', ownerKey: 'local' });
+    await authorizedStore(raw).registerCurrentUser();
+    expect(raw.data.users[0].role).toBe('Project Engineer');
   });
   it('requires valid dates and justification', () => {
     expect(() => validateTask({ ...task, deferredDate: '2026-10-01' })).toThrow('justification');

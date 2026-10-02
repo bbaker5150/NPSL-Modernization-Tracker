@@ -85,8 +85,17 @@ export function authorizedStore(raw, config = {}) {
           const expected = config.testingManagerPassword ?? DEFAULT_TEST_MANAGER_PASSWORD;
           if (!expected || password !== expected) throw new Error('Testing password is incorrect or testing access is disabled.');
         }
-        const row = { ...existing, id: existing?.id || `user-${encodeURIComponent(key)}`, title: user.title || user.email || key, loginName: key, email: user.email || '', role: property === 'activateTestingManager' ? 'Manager' : normalizeRole(existing?.role) };
-        if (existing && Object.keys(row).every((field) => row[field] === existing[field])) return existing;
+        const row = { ...existing, id: existing?.id || `user-${encodeURIComponent(key)}`, title: user.title || user.email || key, loginName: key, email: user.email || '', role: property === 'activateTestingManager' ? 'Manager' : (existing ? normalizeRole(existing.role) : data.projects.some((project) => isOwnedByUser(project, user)) ? 'Project Engineer' : 'Viewer') };
+        delete row.roleMigrationPending;
+        if (row.role === 'Manager') {
+          // Persist the one-time migration while an authorized manager is present.
+          // Explicit Viewer assignments are never promoted on subsequent loads.
+          for (const entry of data.users.filter((entry) => entry.roleMigrationPending && entry.id !== row.id)) {
+            const migrated = { ...entry }; delete migrated.roleMigrationPending;
+            await raw.saveUser(migrated);
+          }
+        }
+        if (existing && !existing.roleMigrationPending && Object.keys(row).every((field) => row[field] === existing[field])) return existing;
         return raw.saveUser(row);
       };
       if (property === 'load') return async () => { const { data, user } = await context(); return visibleData(data, user); };

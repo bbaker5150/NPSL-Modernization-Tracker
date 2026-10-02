@@ -37,7 +37,9 @@ try {
     await page.setViewportSize({ width, height: 1050 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, theme) => { el.dataset.theme = theme; }, theme);
+      await page.waitForTimeout(250); // Let theme transitions settle before visual review.
       assert.ok(await frame.locator('.attention-page').evaluate(el => el.scrollWidth <= el.clientWidth + 1), `Attention overflow at ${width}px/${theme}`);
+      assert.notEqual(await frame.getByLabel('Search attention tasks').evaluate(el => getComputedStyle(el, '::placeholder').color), 'rgba(0, 0, 0, 0)');
       await page.screenshot({ path: `test-artifacts/attention-${width}-${theme}.png`, fullPage: true });
     }
   }

@@ -1,5 +1,7 @@
 # Modernization tracker tasking review
 
+Historical review of the October 1 tasking. The October 2 role, organization, attention, and task-editor requirements supersede the corresponding behavior below; see README.md for the current implementation.
+
 Reviewed against the seven requirements in Mod Tasking(10).docx, with the subsequent instruction to replace the separate project-owner selector with inline saved-user autocomplete. This review covers repository behavior and automated tests; it does not certify the deployed Flank Speed tenant.
 
 | Requirement | Implementation and verification |

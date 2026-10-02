@@ -220,9 +220,10 @@ describe('application shell', () => {
     expect(document.body.textContent).not.toContain('Omitted task');
   });
 
-  it('limits standard users to assigned work and keeps deadline controls read-only', async () => {
+  it('lets an explicitly assigned Viewer read all projects without editing', async () => {
     const raw = createRepository().store;
     vi.spyOn(Object.getPrototypeOf(raw), 'currentUser').mockResolvedValue({ loginName: 'engineer', title: 'Engineer' });
+    await raw.saveUser({ id: 'viewer', loginName: 'engineer', title: 'Engineer', role: 'Viewer' });
     await raw.saveProject({ id: 'mine', projectKey: 'mine', title: 'Assigned project', ownerKey: 'engineer', ownerName: 'Engineer', health: 'On Track', status: 'In Progress' });
     await raw.saveProject({ id: 'other', projectKey: 'other', title: 'Private other project', ownerKey: 'other', ownerName: 'Other' });
     await raw.saveTask({ id: 'task', projectKey: 'mine', title: 'Assigned task', phaseKey: 'requirement', status: 'Not Started', dueDate: '2026-09-01', ownerKey: 'engineer' });
@@ -254,6 +255,34 @@ describe('application shell', () => {
     await act(async () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Delete task').click());
     expect(document.querySelectorAll('.phase-task')).toHaveLength(1);
     expect(document.querySelector('.phase-task').textContent).toContain('Keep this task');
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks).toHaveLength(1);
+  });
+
+  it('queues documents before task creation and retries only failed files without creating a duplicate task', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'p', projectKey: 'p', title: 'Upload project' });
+    const prototype = Object.getPrototypeOf(raw);
+    vi.spyOn(prototype, 'listTaskAttachments').mockResolvedValue([]);
+    const upload = vi.spyOn(prototype, 'addTaskAttachment').mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('Connection interrupted')).mockResolvedValue([]);
+    await renderApp();
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find(button => button.textContent.includes('Work breakdown')).click());
+    await act(async () => document.querySelector('.add-task-button').click());
+    await act(async () => changeValue(document.querySelector('[aria-label="Task name"]'), 'Queued task'));
+    const input = document.querySelector('[aria-label="Attach documents"]');
+    Object.defineProperty(input, 'files', { value: [new File(['one'], 'one.txt'), new File(['two'], 'two.txt')] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(upload).not.toHaveBeenCalled();
+    const save = () => [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save task').click();
+    await act(async () => save());
+    expect(document.querySelector('.modal [role="alert"]').textContent).toContain('Connection interrupted');
+    expect(document.querySelector('.queued-documents').textContent).toContain('two.txt');
+    expect(document.querySelector('.queued-documents').textContent).not.toContain('one.txt');
+    expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks).toHaveLength(1);
+    await act(async () => save());
+    expect(document.querySelector('.modal')).toBeNull();
+    expect(upload.mock.calls.map(([, file]) => file.name)).toEqual(['one.txt', 'two.txt', 'two.txt']);
+    expect(new Set(upload.mock.calls.map(([task]) => task.id)).size).toBe(1);
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks).toHaveLength(1);
   });
 

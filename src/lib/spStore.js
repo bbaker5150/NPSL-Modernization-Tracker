@@ -1,6 +1,7 @@
+import { normalizeDirectory } from './identity';
 import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment, validateAttachmentName } from './taskAttachments';
-import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeRole, normalizeTaskOrganizations, ROLES } from '../data/workflow';
+import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations, ROLES } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 
@@ -150,7 +151,7 @@ function fromTask(item) {
   };
 }
 
-const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: normalizeRole(item.AppRole) });
+const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole || 'User' });
 
 const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
@@ -250,7 +251,7 @@ export class SharePointStore {
       this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
       this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
-    return { projects, tasks: normalizeTaskOrganizations(tasks, projects), updates, risks, acronyms, users };
+    return { projects, tasks: normalizeTaskOrganizations(tasks, projects), updates, risks, acronyms, users: normalizeDirectory(users, projects) };
   }
 
   async create(key, fields) {

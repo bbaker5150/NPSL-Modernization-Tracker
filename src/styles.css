@@ -30,6 +30,9 @@
 
 .saved-user-field > label { font-size: 11px; font-weight: 650; color: var(--muted); }
 .task-fields .saved-user-field { min-width: 0; }
+.attention-page > .page-heading { display: block; }
+.attention-page > .page-heading h1 { margin: 8px 0 12px; }
+.attention-toolbar .search-box input::placeholder { color: var(--muted); }
 .attention-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); border-radius: var(--radius); overflow: hidden; }
 .attention-summary > div { background: var(--surface); padding: 20px 24px; display: flex; flex-direction: column; gap: 5px; }
 .attention-summary strong { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
