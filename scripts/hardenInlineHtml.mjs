@@ -6,7 +6,7 @@ import { parseAst } from 'vite';
 // Forge ships an app by injecting its HTML into an `<iframe srcdoc>`, filtering
 // it on the way in. A browser's own parser is not the problem: inside a
 // `<script>` element only the exact sequence `</script` ends the element, and
-// vite-plugin-singlefile already escapes that. The problem is everything that
+// inlineSingleFile already escapes that. The problem is everything that
 // reads the document *before* the browser does.
 //
 // The first Forge ship died with `Uncaught SyntaxError: Unexpected identifier
@@ -320,7 +320,7 @@ export function hardenHtml(html) {
 }
 
 /**
- * Vite plugin wrapper. Must run after vite-plugin-singlefile has inlined the
+ * Vite plugin wrapper. Must run after inlineSingleFile has inlined the
  * bundle, which means being listed after it — both are `enforce: 'post'`, and
  * `generateBundle` runs in plugin order.
  */

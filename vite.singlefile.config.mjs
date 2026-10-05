@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { viteSingleFile } from 'vite-plugin-singlefile';
+import { inlineSingleFile } from './scripts/inlineSingleFile.mjs';
 import { hardenInlineHtml } from './scripts/hardenInlineHtml.mjs';
 import { forgeRuntime } from './scripts/forgeRuntime.mjs';
 
@@ -20,7 +20,7 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
-    viteSingleFile({ removeViteModuleLoader: true }),
+    inlineSingleFile(),
     hardenInlineHtml(),
     {
       name: 'name-single-file-output',
@@ -39,7 +39,9 @@ export default defineConfig({
   build: {
     outDir: 'build-singlefile',
     emptyOutDir: true,
-    assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+    assetsInlineLimit: () => true,
+    assetsDir: '',
+    modulePreload: false,
     cssCodeSplit: false,
     rollupOptions: {
       input: path.resolve(process.cwd(), 'index.html'),
