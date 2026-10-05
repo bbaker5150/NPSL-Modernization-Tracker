@@ -17,7 +17,7 @@ The migration runs in the deployed tracker using the signed-in owner's SharePoin
 
 - Copies the current application fields in Projects, Tasks, Updates, Risks, Acronyms, Users, and ReferenceDocuments, including archived records and archived task attachment metadata.
 - Copies task and reference item attachments as binary data, including archived attachments. Reference folder relationships, RecordId, and ProjectKey remain intact; numeric SharePoint item IDs are newly assigned.
-- Matches users by login/email identity as well as RecordId to avoid duplicating the account registered on first destination launch. Ambiguous identities or invalid relationships stop the preview.
+- Matches active users by login/email identity as well as RecordId to avoid duplicating the account registered on first destination launch. Archived users match only by RecordId, preserving deleted/recreated account history without blocking an active account. Multiple active records for one account stop the preview with the site, item IDs and roles to review; no role is chosen automatically. Invalid relationships also stop the preview.
 - Reads all pagination pages. Verifies copied field values and SHA-256 file hashes, then checks that the source snapshot and document contents still match before reporting success.
 - Never writes to the source or deletes destination data. Destination-only records/files are retained. Existing different record values require explicit approval. Existing updates use the retrieved ETag; different same-name attachments stop without overwrite.
 - A failure can leave a partial copy. Correct the reported problem, preview again, and resume. Matching records/files are reused. Do not repeatedly use an old preview.
