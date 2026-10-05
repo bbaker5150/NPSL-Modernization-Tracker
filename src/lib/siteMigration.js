@@ -1,5 +1,7 @@
 import { CONTAINERS, SharePointStore } from './spStore';
-import { retryMigrationRead, reconcileMigrationWrite } from './migrationRecovery';
+import { retryMigrationRead, reconcileMigrationWrite, migrationRequest } from './migrationRecovery';
+import { getFormDigest } from './spContext';
+import { makeMigrationBatch, checkMigrationBatch } from './migrationBatch';
 
 export const MIGRATION_SOURCE = 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG';
 export const MIGRATION_TARGET = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
@@ -9,25 +11,27 @@ export const isMigrationTarget = value => normalizeUrl(value) === normalizeUrl(M
 const quote = value => encodeURIComponent(String(value).replace(/'/g, "''"));
 const items = body => body.value || body.d?.results || [];
 const unwrap = body => body.d || body;
-const fieldsFor = container => ['Title', ...container.fields.map(field => field.name)];
+export const fieldsFor = container => ['Title', ...container.fields.map(field => field.name)];
 const fieldTypes = new Map(CONTAINERS.flatMap(container => container.fields.map(field => [field.name, field.type])));
 const clean = (value, field) => fieldTypes.get(field) === 'Boolean' ? Number(Boolean(value)) : value == null ? '' : fieldTypes.get(field) === 'DateTime' && value ? new Date(value).toISOString() : value;
-const same = (a, b, fields) => fields.every(field => clean(a[field], field) === clean(b[field], field));
+export const same = (a, b, fields) => fields.every(field => clean(a[field], field) === clean(b[field], field));
 // Archived users are historical records, not competing active accounts. Keep
 // their RecordIds and match them only by RecordId, never by login/email.
 const identity = (key, row) => key === 'users' ? row.Archived ? '' : String(row.LoginKey || row.Email || '').trim().toLowerCase().split('|').pop() : key === 'projects' ? row.ProjectKey : key === 'acronyms' ? String(row.Acronym || '').toLowerCase() : '';
-const writable = (row, fields) => Object.fromEntries(fields.map(field => [field, fieldTypes.get(field) === 'Boolean' ? Boolean(row[field]) : row[field] ?? null]));
-const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
+export const writable = (row, fields) => Object.fromEntries(fields.map(field => [field, fieldTypes.get(field) === 'Boolean' ? Boolean(row[field]) : row[field] ?? null]));
+export const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
 
 // This adapter uses the current SharePoint session and existing request plumbing.
 // It neither changes site permissions nor bypasses host confirmation policies.
-export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch, { wait } = {}) {
+export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch, { wait, timeoutMs, onActivity = () => {} } = {}) {
   webUrl = webUrl.replace(/\/+$/, '');
   prefix = String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization';
   const transport = fetchImpl;
   fetchImpl = (url, options = {}) => {
+    let attempt = 0;
     const request = async () => {
-      const response = await transport(url, options);
+      onActivity(`${options.method || 'GET'} ${new URL(url).pathname} · attempt ${++attempt}`);
+      const response = await migrationRequest(transport, url, options, timeoutMs);
       if ([408, 429, 502, 503, 504].includes(response.status)) {
         const retryAfter = response.headers?.get('Retry-After');
         const retryAfterMs = retryAfter ? /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) : 0;
@@ -39,13 +43,15 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
   };
   const store = new SharePointStore({ webUrl, prefix, fetchImpl });
   const root = key => `/_api/web/lists/getbytitle('${quote(`${prefix}${CONTAINERS.find(c => c.key === key).suffix}`)}')`;
-  async function readRows(key, fields) {
-    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields].join(',')}&$top=500`;
+  async function readRows(key, fields, withAttachments = false) {
+    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
     const rows = [], visited = new Set();
     while (path) {
       if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
       visited.add(path);
-      const body = await store.get(path); rows.push(...items(body));
+      const response = await fetchImpl(`${webUrl}${path}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
+      if (!response.ok) throw new Error(`Cannot read ${key} (${response.status}).`);
+      const body = await response.json(); rows.push(...items(body));
       const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
       if (!next) break;
       const url = new URL(next, `${webUrl}/`);
@@ -68,6 +74,14 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       return new Set(items(body).map(field => field.InternalName));
     },
     readRows,
+    async writeBatch(key, operations) {
+      if (!operations.length) return;
+      const batch = makeMigrationBatch(webUrl, root(key), operations);
+      const digest = await getFormDigest(webUrl, fetchImpl);
+      const response = await fetchImpl(`${webUrl}/_api/$batch`, { method: 'POST', credentials: 'include', headers: { 'X-RequestDigest': digest, 'Content-Type': batch.contentType, Accept: 'multipart/mixed' }, body: batch.body });
+      if (!response.ok) throw new Error(`SharePoint batch failed (${response.status}). Preview again before resuming.`);
+      checkMigrationBatch(await response.text(), operations.length);
+    },
     async readItem(key, id, fields) {
       const response = await fetchImpl(`${webUrl}${root(key)}/items(${Number(id)})?$select=${['Id', 'Modified', ...fields].join(',')}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
       if (!response.ok) throw new Error(`Cannot read ${key}/${id} (${response.status}).`);
@@ -157,6 +171,7 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
   if (!replaceConflicts && plan.lists.some(list => list.entries.some(entry => entry.conflict))) throw new Error('Review and explicitly approve conflicting destination records first.');
   // Refresh both sides before any write. The reviewed snapshot must still match.
   for (const list of plan.lists) {
+    onProgress(`Checking ${list.title} source and destination before copying…`);
     const [sourceRows, targetRows] = await Promise.all([source.readRows(list.key, list.fields), target.readRows(list.key, list.fields)]);
     const original = list.entries.map(entry => entry.source);
     if (sourceRows.length !== original.length || original.some(row => !sourceRows.some(now => now.RecordId === row.RecordId && now.Modified === row.Modified && same(now, row, list.fields)))) throw new Error('Source changed after preview. Pause edits and refresh the preview.');
@@ -219,9 +234,11 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
   }
   onProgress('Verifying records and source consistency…');
   for (const list of plan.lists) {
+    onProgress(`Verifying ${list.title} source snapshot…`);
     const rows = await source.readRows(list.key, list.fields);
     if (rows.length !== list.entries.length) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
     for (const entry of list.entries) {
+      onProgress(`Verifying ${list.title}: ${entry.source.Title || entry.source.RecordId}…`);
       const now = rows.find(row => row.RecordId === entry.source.RecordId);
       if (!now || now.Modified !== entry.source.Modified || !same(now, entry.source, list.fields)) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
       if (!same(await target.readItem(list.key, entry.targetId, list.fields), entry.source, list.fields)) throw new Error('Destination changed during verification. Refresh preview and review.');

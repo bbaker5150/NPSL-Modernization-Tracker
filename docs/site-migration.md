@@ -1,33 +1,45 @@
-# ISEA METENG → metsoft migration
+# ISEA METENG → metsoft backup/import
 
 Destination page: https://flankspeed.sharepoint-mil.us/sites/metsoft/SitePages/Modernization-Tracker.aspx
 
-The migration runs in the deployed tracker using the signed-in owner's SharePoint session. A GitHub build does **not** move tenant data.
+Use a downloaded backup package to separate reading the old site from writing the new one. The import never contacts the old site. A GitHub build does **not** move tenant data.
 
 ## Run
 
-1. Merge this change and deploy the newly built single-file HTML to the new site's app location. Keep the old tracker available and unchanged.
-2. Confirm the deployed app's storage configuration points at `https://flankspeed.sharepoint-mil.us/sites/metsoft`, with the same list prefix used on ISEA METENG (normally `Modernization`). Check the wrapper/configuration too; copied configuration must not point at the old site. Open the destination as a SharePoint owner and complete its normal storage setup if prompted.
-3. Open **Users and managers → Site owner tools · Migrate from ISEA METENG → Preview migration**. The tools appear only on metsoft for an account with both Manage Lists and Manage Permissions. The account also needs read access to every source tracker list and its attachments.
-4. Review the counts and conflicts. Pause edits in both apps. A fresh site's seeded glossary and automatically registered user can appear as conflicts. Explicitly approve source values for conflicting destination records only after reviewing them.
-5. Select **Copy and verify**, and keep the page open on this view until completion. Do not change data from other tabs while it runs.
-6. Download the verification report, then reload. Compare project/task counts and open several task/reference documents. Test the new site with an intended standard user before distributing the new link. Keep the original site as the recovery source until acceptance is complete.
+1. Close the old live migration tab before starting. Do not run two migration jobs at once, and do not delete the partial destination copy.
+2. Merge this change and deploy the **same newly built single-file HTML on both sites**. Keep each site's own storage configuration: ISEA METENG on the source and metsoft on the destination, with the same tracker list prefix (normally `Modernization`). Open each app as a SharePoint owner. Complete normal storage setup on metsoft if prompted.
+3. Pause edits in the old tracker. On ISEA METENG, open **Users and managers → Site owner tools · Export tracker backup**. Check the paused-edits box and select **Download backup**. Keep the downloaded `.npsl-backup.json` file. Export only reads the source; it does not modify it.
+4. Pause edits in metsoft. On metsoft, open **Users and managers → Site owner tools · Import tracker backup → Choose backup file**. Select the downloaded package and choose **Preview import**.
+5. Review new, already matching, and conflicting records. Previously migrated records are reused. The fresh site's seeded glossary and registered account may conflict; review the listed roles and explicitly approve backup values if appropriate. Check the paused-edits box, then select **Import and verify**.
+6. Keep the page open on this view until completion. Download the verification report and reload. Compare project/task counts, open task/reference documents, and test with an intended standard user before distributing the new link. Keep the original site and backup until acceptance is complete.
 
-## Scope and behavior
+The tools appear only on these two sites for an account with both **Manage Lists** and **Manage Permissions**. An app Manager role alone does not grant these SharePoint permissions.
 
-- Copies the current application fields in Projects, Tasks, Updates, Risks, Acronyms, Users, and ReferenceDocuments, including archived records and archived task attachment metadata.
-- Copies task and reference item attachments as binary data, including archived attachments. Reference folder relationships, RecordId, and ProjectKey remain intact; numeric SharePoint item IDs are newly assigned.
-- Matches active users by login/email identity as well as RecordId to avoid duplicating the account registered on first destination launch. Archived users match only by RecordId, preserving deleted/recreated account history without blocking an active account. Multiple active records for one account stop the preview with the site, item IDs and roles to review; no role is chosen automatically. Invalid relationships also stop the preview.
-- Reads all pagination pages. Verifies copied field values and SHA-256 file hashes, then checks that the source snapshot and document contents still match before reporting success.
-- Never writes to the source or deletes destination data. Destination-only records/files are retained. Existing different record values require explicit approval. Existing updates use the retrieved ETag; different same-name attachments stop without overwrite.
-- A failure can leave a partial copy. Correct the reported problem, preview again, and resume. Matching records/files are reused. Do not repeatedly use an old preview.
-- Transient GET failures retry up to three times with backoff; short Retry-After cooldowns are honored and longer cooldowns stop without an early retry. List reads use pages of 500 records. After a timed-out write, the migration checks destination values/file hashes up to three times and continues if the write is confirmed. It never blindly repeats an uncertain write. If confirmation fails, refresh the preview before resuming. The error screen retains the last operation to help diagnose persistent host timeouts.
-- The verification report contains record counts, source/destination addresses, attachment names, IDs, sizes, and hashes—not full record contents or file bodies. Store it appropriately.
+## What the package contains
 
-## Separate from migration
+- Current app fields from Projects, Tasks, Updates, Risks, Acronyms, Users, and ReferenceDocuments, including archived records, app roles, assignments, application dates and archived-task attachment metadata.
+- Binary task and reference attachments, including archived attachments, encoded in the same JSON file. Reference folder relationships, RecordId and ProjectKey are preserved; destination numeric SharePoint item IDs are newly assigned.
+- A package checksum and SHA-256 hashes for individual files. Validation checks list completeness, field types, identities and project/reference relationships before import writes anything.
 
-SharePoint group membership, site/list/item permissions, sharing links, recycle-bin items, version history, system Created/Modified/Author/Editor fields, custom columns outside the current tracker schema, and library files outside the tracker lists are not copied. Application dates, author identity fields, roles, and assignments **are** copied. Existing URLs typed into notes remain unchanged. This is not a site backup or full-fidelity SharePoint export.
+This package contains actual tracker data and documents in a readable, unencrypted format. Keep it in an approved location. The browser workflow supports up to **150 MiB of document contents** and a **256 MiB package**. Exceeding either limit stops export instead of downloading an incomplete package.
 
-Grant intended users appropriate permissions on the new site separately. An app Manager role does not grant SharePoint permissions. The HTML, ASPX wrapper, and any external app assets must already be deployed on the destination.
+## Progress, recovery and verification
 
-The embedded host must permit ordinary authenticated reads from the ISEA METENG source and writes to the metsoft destination. A host-policy or SharePoint denial stops the migration; the feature does not bypass host confirmations or tenant access controls. It has automated tests with simulated SharePoint responses, but requires verification in the actual Flank Speed tenant.
+- Export reads each list with its attachment names, downloads the documents, and checks the list for changes during export. Keep source edits paused through the final cutover; changes made after export are not in the package.
+- Import reads only the local package and metsoft. It writes records in batches of up to 25 and checks every operation's response; an HTTP 200 for the outer batch is not treated as proof that all records saved. SharePoint batches can partially succeed.
+- Field values are verified with list-level reads, avoiding per-record verification requests. Each destination document is downloaded once for comparison with its backup hash during a normal successful import.
+- Already matching records/files are reused. Destination-only records/files stay in place. Conflicting records require explicit approval; updates use ETags to detect concurrent changes. Different same-name documents stop the import and are never overwritten.
+- A failed import can leave a partial copy. Keep it, correct the reported problem, and **preview the same package again** before importing. Do not delete records or repeatedly submit an old preview.
+- Each network attempt has a 45-second deadline covering both headers and response body, even if the embedded host ignores cancellation. The UI shows the current request and elapsed time. Transient reads retry up to three times with backoff and short server-directed cooldowns. Longer cooldowns stop rather than retry early.
+- A timed-out write is never blindly resent: the importer checks destination values or file hashes up to three times. If confirmation fails or only part of a batch saved, it stops and requires a fresh preview. An expired browser request does not roll back server work; let the request settle before resuming.
+- Success is reported only after all package records and document hashes verify. The downloadable report contains counts, document names, sizes and hashes, not full record contents or file bodies.
+
+Active users match by normalized login/email or RecordId; archived users match only by RecordId. Multiple active records for one account still require review rather than silently choosing a role.
+
+## Separate from this transfer
+
+SharePoint memberships, site/list/item permissions, sharing links, recycle-bin items, version history, system Created/Modified/Author/Editor fields, custom columns outside the tracker schema, and library files outside the tracker lists are not included. Existing URLs typed into notes remain unchanged. This is an application backup, not a full SharePoint site backup.
+
+Deploy the HTML, ASPX wrapper and external app assets separately. Grant intended users appropriate permissions on metsoft. The embedded host must allow ordinary authenticated REST reads, batch writes and attachment uploads to the current site. The workflow does not bypass host confirmations or tenant access controls.
+
+Automated tests use simulated SharePoint responses. Actual Flank Speed access and copied data must still be checked in the tenant before cutover.

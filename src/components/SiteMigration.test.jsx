@@ -2,57 +2,88 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SiteMigration } from './SiteMigration';
-import { migrationSite, MIGRATION_TARGET, previewMigration, runMigration } from '../lib/siteMigration';
+import { migrationSite, MIGRATION_SOURCE, MIGRATION_TARGET } from '../lib/siteMigration';
+import { exportTrackerBackup, validateTrackerBackup, previewTrackerImport, importTrackerBackup } from '../lib/trackerBackup';
 
-vi.mock('../lib/siteMigration', async importOriginal => ({
-  ...await importOriginal(), migrationSite: vi.fn(), previewMigration: vi.fn(), runMigration: vi.fn(),
-}));
+vi.mock('../lib/siteMigration', async importOriginal => ({ ...await importOriginal(), migrationSite: vi.fn() }));
+vi.mock('../lib/trackerBackup', async importOriginal => ({ ...await importOriginal(), exportTrackerBackup: vi.fn(), validateTrackerBackup: vi.fn(), previewTrackerImport: vi.fn(), importTrackerBackup: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root;
-afterEach(async () => { if (root) await act(async () => root.unmount()); vi.resetAllMocks(); });
+afterEach(async () => { if (root) await act(async () => root.unmount()); vi.restoreAllMocks(); vi.resetAllMocks(); });
 async function render(webUrl = MIGRATION_TARGET) {
   document.body.innerHTML = '<div id="root"></div>';
   root = createRoot(document.getElementById('root'));
   await act(async () => root.render(<SiteMigration store={{ webUrl }} />));
 }
 const button = label => [...document.querySelectorAll('button')].find(node => node.textContent === label);
-it('does not expose migration on the source site or to a member', async () => {
-  await render('https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG');
+async function choose() {
+  const input = document.querySelector('input[type="file"]');
+  Object.defineProperty(input, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify({ payload: { lists: [], files: [] } }) }] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+}
+it('hides the tools on unrelated sites and from non-owners', async () => {
+  await render('https://example.invalid/sites/elsewhere');
   expect(migrationSite).not.toHaveBeenCalled();
   expect(document.querySelector('details')).toBeNull();
   migrationSite.mockReturnValue({ canMigrate: async () => false });
   await act(async () => root.render(<SiteMigration store={{ webUrl: MIGRATION_TARGET }} />));
   expect(document.querySelector('details')).toBeNull();
 });
-it('requires paused edits and explicit conflict approval, then exposes a verified report', async () => {
+it('offers only export on the source and requires paused edits', async () => {
   migrationSite.mockReturnValue({ canMigrate: async () => true });
-  const plan = { lists: [{ key: 'users', title: 'Users', fields: ['AppRole'], entries: [{ source: { RecordId: 'u', Title: 'Owner', AppRole: 'Manager' }, destination: { AppRole: 'Viewer' }, conflict: true, names: [] }] }] };
-  previewMigration.mockResolvedValue(plan);
-  runMigration.mockResolvedValue({ verified: true });
+  exportTrackerBackup.mockRejectedValue(new Error('Source changed during export'));
+  await render(MIGRATION_SOURCE);
+  expect(migrationSite.mock.calls.map(args => args[0])).toEqual([MIGRATION_SOURCE]);
+  expect(button('Choose backup file')).toBeUndefined();
+  expect(button('Download backup').disabled).toBe(true);
+  await act(async () => document.querySelector('input[type="checkbox"]').click());
+  await act(async () => button('Download backup').click());
+  expect(exportTrackerBackup).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[role="alert"]').textContent).toContain('Source changed');
+});
+it('requires a valid package, paused edits and conflict approval before import', async () => {
+  migrationSite.mockReturnValue({ canMigrate: async () => true });
+  previewTrackerImport.mockResolvedValue({ lists: [{ key: 'users', title: 'Users', fields: ['AppRole'], entries: [{ source: { RecordId: 'u', Title: 'Owner', AppRole: 'Manager' }, destination: { AppRole: 'Viewer' }, conflict: true, names: [] }] }] });
+  importTrackerBackup.mockResolvedValue({ verified: true });
   await render();
   expect(document.querySelector('details').open).toBe(false);
-  await act(async () => button('Preview migration').click());
-  expect(button('Copy and verify').disabled).toBe(true);
+  expect(button('Preview import')).toBeUndefined();
+  const picker = vi.spyOn(document.querySelector('input[type="file"]'), 'click');
+  await act(async () => button('Choose backup file').click());
+  expect(picker).toHaveBeenCalledOnce();
+  await choose();
+  expect(validateTrackerBackup).toHaveBeenCalledOnce();
+  await act(async () => button('Preview import').click());
+  expect(button('Import and verify').disabled).toBe(true);
   const checks = document.querySelectorAll('input[type="checkbox"]');
   await act(async () => checks[0].click());
-  expect(button('Copy and verify').disabled).toBe(true);
+  expect(button('Import and verify').disabled).toBe(true);
   await act(async () => checks[1].click());
-  expect(button('Copy and verify').disabled).toBe(false);
-  await act(async () => button('Copy and verify').click());
-  expect(runMigration.mock.calls[0][3].replaceConflicts).toBe(true);
+  await act(async () => button('Import and verify').click());
+  expect(importTrackerBackup.mock.calls[0][3].replaceConflicts).toBe(true);
   expect(button('Download verification report')).toBeTruthy();
   expect(button('Reload tracker')).toBeTruthy();
+  expect(migrationSite.mock.calls.map(args => args[0])).toEqual([MIGRATION_TARGET]);
 });
-it('invalidates the preview after failure so a retry checks partial destination state', async () => {
+it('invalidates failed imports while retaining the package and last operation for resuming', async () => {
   migrationSite.mockReturnValue({ canMigrate: async () => true });
-  previewMigration.mockResolvedValue({ lists: [] });
-  runMigration.mockImplementation(async (_source, _target, _plan, options) => { options.onProgress('Copying Tasks: 12/40…'); throw new Error('Network interrupted'); });
-  await render();
-  await act(async () => button('Preview migration').click());
-  await act(async () => document.querySelector('input').click());
-  await act(async () => button('Copy and verify').click());
-  expect(document.querySelector('[role="alert"]').textContent).toContain('preview again to resume');
-  expect(document.querySelector('[role="status"]').textContent).toContain('Copying Tasks: 12/40');
-  expect(button('Copy and verify')).toBeUndefined();
+  previewTrackerImport.mockResolvedValue({ lists: [] });
+  importTrackerBackup.mockImplementation(async (_backup, _target, _plan, options) => { options.onProgress('Importing Tasks: 25/40…'); throw new Error('Network interrupted'); });
+  await render(); await choose();
+  await act(async () => button('Preview import').click());
+  await act(async () => document.querySelector('input[type="checkbox"]').click());
+  await act(async () => button('Import and verify').click());
+  expect(document.querySelector('[role="alert"]').textContent).toContain('preview the same package again');
+  expect(document.querySelector('[role="status"]').textContent).toContain('Importing Tasks: 25/40');
+  expect(button('Import and verify')).toBeUndefined();
   expect(button('Download verification report')).toBeUndefined();
+  expect(button('Preview import')).toBeTruthy();
+});
+it('does not offer preview after package validation fails', async () => {
+  migrationSite.mockReturnValue({ canMigrate: async () => true });
+  validateTrackerBackup.mockRejectedValue(new Error('Backup checksum failed'));
+  await render(); await choose();
+  expect(document.querySelector('[role="alert"]').textContent).toContain('checksum');
+  expect(button('Preview import')).toBeUndefined();
+  expect(importTrackerBackup).not.toHaveBeenCalled();
 });
