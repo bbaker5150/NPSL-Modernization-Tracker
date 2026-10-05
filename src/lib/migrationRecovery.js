@@ -1,5 +1,27 @@
 export const migrationDelay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// Race the entire response (including its body), not just fetch headers.
+// Some embedded hosts ignore AbortSignal, so abort alone is insufficient.
+export async function migrationRequest(transport, url, options = {}, timeoutMs = 45000) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(new Error(`Migration request timed out after ${Math.round(timeoutMs / 1000)} seconds: ${options.method || 'GET'} ${new URL(url).pathname}`), { status: 408 }));
+      controller.abort();
+    }, timeoutMs);
+  });
+  const request = async () => {
+    const response = await transport(url, { ...options, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response([204, 205, 304].includes(response.status) ? null : body, {
+      status: response.status, statusText: response.statusText, headers: response.headers,
+    });
+  };
+  try { return await Promise.race([request(), timeout]); }
+  finally { clearTimeout(timer); }
+}
+
 export function isTransientMigrationError(error) {
   if (error?.status) return [408, 429, 502, 503, 504].includes(Number(error.status));
   return /timed?\s*out|timeout|failed to fetch|networkerror|network request failed/i.test(error?.message || '');
