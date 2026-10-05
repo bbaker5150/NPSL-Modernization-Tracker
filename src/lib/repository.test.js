@@ -27,6 +27,15 @@ describe('repository selection and SharePoint identity', () => {
     expect(data.acronyms.find((entry) => entry.acronym === 'CSS')?.term).toBe('Calibration Standard Specification');
   });
 
+  it('enables scoped access on metsoft and disables testing promotion without changing ISEA export behavior', () => {
+    window.MOD_TRACKER_CONFIG = { webUrl: 'https://flankspeed.sharepoint-mil.us/sites/metsoft', testingManagerPassword: 'admin123' };
+    const repo = createRepository();
+    expect(repo.store.scopedAccess).toBe(true);
+    expect(repo.config.testingManagerPassword).toBe(false);
+    window.MOD_TRACKER_CONFIG = { webUrl: 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG' };
+    expect(createRepository().store.scopedAccess).toBe(false);
+  });
+
   it('keys My Work to the signed-in SharePoint login with legacy email fallback', () => {
     const user = { id: 17, loginName: 'i:0#.f|membership|engineer@example.invalid', email: 'engineer@example.invalid' };
     expect(userIdentityKey(user)).toBe('i:0#.f|membership|engineer@example.invalid');

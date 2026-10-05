@@ -73,14 +73,17 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `listPrefix` | `Modernization` | Prefix for the six SharePoint List titles. |
+| `listPrefix` | `Modernization` | Prefix for the seven SharePoint List titles. |
 | `webUrl` | Auto-detected | Target SharePoint web URL. |
-| `testingManagerPassword` | `admin123` | Testing-only self-promotion password; use `false` to disable. |
+| `testingManagerPassword` | `admin123` | Testing-only self-promotion password; always disabled in scoped access mode. |
+| `scopedAccess` | `true` on `/sites/metsoft`, otherwise `false` | Use tracker SharePoint groups and project-scoped engineer permissions. |
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
-| `hideLists` | `true` | Hide the six backing lists from the normal Site Contents view without affecting API access. |
+| `hideLists` | `true` | Hide the seven backing lists from the normal Site Contents view without affecting API access. |
 
-On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. Newly created backing lists are hidden from the normal Site Contents view in their initial create request, so startup does not issue follow-up MERGE operations. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. The saved Users directory determines application roles; Every new identity, including site administrators, defaults to standard-user app access. The testing password flow can grant the signed-in user a persisted Manager role. SharePoint permissions remain the server-side access boundary; see the deployment guide before granting list access.
+On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. Newly created backing lists are hidden from the normal Site Contents view in their initial create request, so startup does not issue follow-up MERGE operations. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. In legacy mode the saved Users directory determines application roles and the testing password can grant Manager access. In scoped mode, current-user roles come from SharePoint tracker groups or site-owner permissions, and testing promotion is disabled. SharePoint permissions remain the server-side access boundary; see the deployment guide before granting list access.
+
+For the metsoft rollout, first follow [Tracker permissions](docs/tracker-permissions.md), including the one-time **Apply tracker permissions** action and non-owner acceptance tests.
 
 See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and deployment behavior.
 
@@ -112,4 +115,4 @@ Needs Attention offers collapsible status or project groups, searchable task car
 - **Documents:** Select files while creating a task; saving creates the task and uploads queued files without reopening. Failed files remain queued for retry against the same task, without re-uploading successful files. Existing tasks upload immediately and refresh automatically. The shared limit is 50 MB per nonempty file. Native SharePoint task-item attachments preserve duplicate-name protection. Managers and assigned project engineers can upload, rename, download, and delete; Viewers can read/download. Local preview stores bytes in IndexedDB.
 - **Task ownership and stage:** The inline saved-user picker stores name, email, and login identity together. Unresolved typed names cannot be saved. The stage comes from the phase where Add task was selected.
 - **Est. Hours:** An optional nonnegative decimal; blank differs from zero. Managers and assigned project engineers can edit it. Attention cards and the Organization Workload, Needs Attention, and Tasks workbook sheets include task estimates, organizations, and dates. Export rechecks access and applies the current attention search/organization to the attention and workload sheets; supporting detail sheets cover the included projects.
-- App roles govern tracker behavior. SharePoint ACLs remain the server-side security boundary; this change does not isolate site permissions or alter invitations.
+- App roles govern tracker behavior. SharePoint ACLs remain the server-side security boundary; scoped deployments synchronize tracker groups and assigned-engineer ACLs as described in [Tracker permissions](docs/tracker-permissions.md).

@@ -87,14 +87,16 @@ class LocalStore {
 }
 
 export function createRepository() {
-  const config = window.MOD_TRACKER_CONFIG || {};
+  const config = { ...(window.MOD_TRACKER_CONFIG || {}) };
   const webUrl = config.webUrl || resolveWebUrl();
   // Forge loads this file in an iframe srcdoc. In that frame location.hostname
   // is empty even though resolveWebUrl() correctly finds the SharePoint parent,
   // so the resolved web URL — not the child frame location — is authoritative.
   const inSharePoint = /^https:\/\/[^/]*\.(?:sharepoint\.com|sharepoint\.us|sharepoint-mil\.us|sharepoint\.de|sharepoint\.cn)(?::\d+)?(?:\/|$)/i.test(webUrl);
   if ((inSharePoint || config.forceSharePoint === true) && config.forceLocal !== true) {
-    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', hideLists: config.hideLists !== false }), config };
+    const scopedAccess = config.scopedAccess ?? /^\/sites\/metsoft\/?$/i.test(new URL(webUrl).pathname);
+    if (scopedAccess) config.testingManagerPassword = false;
+    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', hideLists: config.hideLists !== false, scopedAccess }), config };
   }
   return { mode: 'local', store: new LocalStore(), config };
 }
