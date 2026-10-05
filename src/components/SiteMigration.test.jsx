@@ -18,7 +18,7 @@ async function render(webUrl = MIGRATION_TARGET) {
 const button = label => [...document.querySelectorAll('button')].find(node => node.textContent === label);
 async function choose() {
   const input = document.querySelector('input[type="file"]');
-  Object.defineProperty(input, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify({ payload: { lists: [], files: [] } }) }] });
+  Object.defineProperty(input, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify({ version: 1, payload: { lists: [], files: [] } }) }] });
   await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
 }
 it('hides the tools on unrelated sites and from non-owners', async () => {
@@ -86,4 +86,33 @@ it('does not offer preview after package validation fails', async () => {
   expect(document.querySelector('[role="alert"]').textContent).toContain('checksum');
   expect(button('Preview import')).toBeUndefined();
   expect(importTrackerBackup).not.toHaveBeenCalled();
+});
+
+it('exports without references and lets the owner explicitly turn off task file downloads', async () => {
+  migrationSite.mockReturnValue({ canMigrate: async () => true });
+  exportTrackerBackup.mockRejectedValue(new Error('Stopped for test'));
+  await render(MIGRATION_SOURCE);
+  expect(document.body.textContent).toContain('Reference Documents and their folders are excluded');
+  const checks = document.querySelectorAll('input[type="checkbox"]');
+  expect(checks[1].checked).toBe(true);
+  await act(async () => checks[0].click());
+  await act(async () => button('Download backup').click());
+  expect(exportTrackerBackup.mock.calls[0][2]).toEqual({ includeReferences: false, includeTaskAttachments: true });
+  await act(async () => checks[1].click());
+  await act(async () => button('Download backup').click());
+  expect(exportTrackerBackup.mock.calls[1][2]).toEqual({ includeReferences: false, includeTaskAttachments: false });
+});
+it('shows excluded content in the import preview and completion message', async () => {
+  migrationSite.mockReturnValue({ canMigrate: async () => true });
+  previewTrackerImport.mockResolvedValue({ lists: [] });
+  importTrackerBackup.mockResolvedValue({ verified: true, manualTransfer: ['Reference Documents and folders', 'task attachments'] });
+  await render();
+  const input = document.querySelector('input[type="file"]');
+  Object.defineProperty(input, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify({ version: 2, payload: { scope: { includeReferences: false, includeTaskAttachments: false }, lists: [], files: [] } }) }] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(document.querySelector('[role="note"]').textContent).toContain('Reference Documents and folders; task attachments');
+  await act(async () => button('Preview import').click());
+  await act(async () => document.querySelector('input[type="checkbox"]').click());
+  await act(async () => button('Import and verify').click());
+  expect(document.querySelector('[role="status"]').textContent).toContain('Manual transfer still required');
 });
