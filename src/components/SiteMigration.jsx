@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isMigrationTarget, migrationSite, MIGRATION_SOURCE } from '../lib/siteMigration';
-import { MAX_BACKUP_BYTES, exportTrackerBackup, validateTrackerBackup, previewTrackerImport, importTrackerBackup } from '../lib/trackerBackup';
+import { MAX_BACKUP_BYTES, exportTrackerBackup, validateTrackerBackup, previewTrackerImport, importTrackerBackup, manualTransferItems } from '../lib/trackerBackup';
 
 function download(text, name) {
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
@@ -13,6 +13,7 @@ export function SiteMigration({ store }) {
   const [allowed, setAllowed] = useState(false), [busy, setBusy] = useState(false);
   const [backup, setBackup] = useState(null), [plan, setPlan] = useState(null), [report, setReport] = useState(null);
   const [paused, setPaused] = useState(false), [replace, setReplace] = useState(false);
+  const [includeTaskAttachments, setIncludeTaskAttachments] = useState(true);
   const [status, setStatus] = useState(''), [error, setError] = useState('');
   const [activity, setActivity] = useState({ text: '', started: 0 }), [clock, setClock] = useState(Date.now());
   const active = useRef(false), fileInput = useRef(null);
@@ -57,21 +58,26 @@ export function SiteMigration({ store }) {
     <summary>Site owner tools · {source ? 'Export tracker backup' : 'Import tracker backup'}</summary>
     <div className="migration-content">
       <p>{source ? 'Download the tracker records and attached documents in one backup package. Export reads this site only.' : 'Import a backup downloaded from the old tracker. Import uses the package and metsoft only; it does not connect to ISEA METENG.'}</p>
-      <p>Includes all seven tracker lists, archived records, app roles, task documents, and reference folders/documents. Site permissions, version history, and files outside the tracker lists are separate.</p>
+      <p>{source ? 'Exports Projects, Tasks, Updates, Risks, Acronyms, and Users, including archived records, app roles, and assignments. Reference Documents and their folders are excluded; transfer them manually.' : 'Only the lists and files included in the package are imported. Existing Reference Documents stay in place when excluded from the package.'} Site permissions and version history are separate.</p>
       <label className="migration-check"><input type="checkbox" checked={paused} disabled={busy} onChange={event => setPaused(event.target.checked)} /><span>{source ? 'Edits in the old tracker are paused for this export.' : 'Edits in metsoft are paused for this import.'}</span></label>
-      {source ? <button type="button" className="button primary" disabled={busy || !paused} onClick={() => perform(async progress => {
-        const text = await exportTrackerBackup(site, progress);
-        download(text, `npsl-tracker-${new Date().toISOString().slice(0, 10)}.npsl-backup.json`);
-        setStatus('Backup downloaded. Keep this file, open the new tracker, and choose Import tracker backup.');
-      })}>Download backup</button> : <>
+      {source ? <>
+        <label className="migration-check"><input type="checkbox" checked={includeTaskAttachments} disabled={busy} onChange={event => setIncludeTaskAttachments(event.target.checked)} /><span>Include files attached to tasks</span></label>
+        <p><small>Task attachments are separate from Reference Documents. If a task file causes a timeout, uncheck this option to export records without downloading any files, then transfer task attachments manually too.</small></p>
+        <button type="button" className="button primary" disabled={busy || !paused} onClick={() => perform(async progress => {
+          const text = await exportTrackerBackup(site, progress, { includeReferences: false, includeTaskAttachments });
+          download(text, `npsl-tracker-without-references-${new Date().toISOString().slice(0, 10)}.npsl-backup.json`);
+          setStatus(`Backup downloaded. Transfer Reference Documents and folders${includeTaskAttachments ? '' : ', plus task attachments,'} manually. Open the new tracker and choose Import tracker backup.`);
+        })}>Download backup</button>
+      </> : <>
         <button type="button" className="button secondary" disabled={busy} onClick={() => fileInput.current?.click()}>Choose backup file</button>
         <input ref={fileInput} aria-label="Choose tracker backup" type="file" accept=".json,application/json" disabled={busy} hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; choose(file); }} />
+        {backup && manualTransferItems(backup).length > 0 && <p role="note">Manual transfer required: {manualTransferItems(backup).join('; ')}. These are excluded from this package and its verification.</p>}
         {backup && <button type="button" className="button secondary" disabled={busy} onClick={() => perform(async progress => { setPlan(null); setReplace(false); setPlan(await previewTrackerImport(backup, site, progress)); setStatus('Preview ready. No records have been imported.'); })}>Preview import</button>}
         {plan && <>
           <div className="migration-table"><table><caption>Import preview</caption><thead><tr><th>List</th><th>New</th><th>Already matching</th><th>Conflicts</th><th>Documents</th></tr></thead><tbody>{plan.lists.map(list => <tr key={list.key}><th>{list.title}</th><td>{list.entries.filter(entry => !entry.destination).length}</td><td>{list.entries.filter(entry => entry.destination && !entry.conflict).length}</td><td>{list.entries.filter(entry => entry.conflict).length}</td><td>{list.entries.reduce((sum, entry) => sum + entry.names.length, 0)}</td></tr>)}</tbody></table></div>
           {!!conflicts && <><details><summary>Review {conflicts} conflicting records</summary><ul>{plan.lists.flatMap(list => list.entries.filter(entry => entry.conflict).map(entry => <li key={`${list.key}/${entry.source.RecordId}`}>{list.title}: {entry.source.Title || entry.source.RecordId}{list.key === 'users' ? ` — role: ${entry.destination.AppRole || 'unset'} → ${entry.source.AppRole || 'unset'}` : ''}</li>))}</ul></details><label className="migration-check"><input type="checkbox" checked={replace} disabled={busy} onChange={event => setReplace(event.target.checked)} /><span>Replace these {conflicts} conflicting records with backup values, including the app roles shown above.</span></label></>}
           <p>Already matching records are reused. Destination-only records/files stay in place. Different existing documents are never overwritten.</p>
-          <button type="button" className="button primary" disabled={busy || !paused || (!!conflicts && !replace)} onClick={() => perform(async progress => { const result = await importTrackerBackup(backup, site, plan, { replaceConflicts: replace, onProgress: progress }); setReport(result); setPlan(null); setStatus('Import verified. Download the report, then reload the tracker.'); }, true)}>Import and verify</button>
+          <button type="button" className="button primary" disabled={busy || !paused || (!!conflicts && !replace)} onClick={() => perform(async progress => { const result = await importTrackerBackup(backup, site, plan, { replaceConflicts: replace, onProgress: progress }); setReport(result); setPlan(null); setStatus(`Included data verified. ${result.manualTransfer?.length ? `Manual transfer still required: ${result.manualTransfer.join('; ')}. ` : ''}Download the report, then reload the tracker.`); }, true)}>Import and verify</button>
         </>}
       </>}
       {status && <p role="status" aria-live="polite">{status}</p>}

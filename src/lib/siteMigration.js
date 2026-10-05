@@ -154,11 +154,11 @@ function indexRows(key, rows, site) {
   return index;
 }
 
-export async function previewMigration(source, target, onProgress = () => {}) {
+export async function previewMigration(source, target, onProgress = () => {}, { includeReferences = true } = {}) {
   assertSites(source, target);
   if (!(await target.canMigrate())) throw new Error('Migration requires SharePoint Manage Lists and Manage Permissions on metsoft, normally site Owner access. An app Manager role alone is insufficient.');
   const plan = { source: source.webUrl, target: target.webUrl, createdAt: new Date().toISOString(), lists: [] };
-  for (const container of CONTAINERS) {
+  for (const container of CONTAINERS.filter(container => includeReferences || container.key !== 'references')) {
     onProgress(`Reading ${container.suffix}…`);
     const [sourceSchema, targetSchema] = await Promise.all([source.schema(container), target.schema(container)]);
     for (const required of ['Title', 'RecordId']) if (!sourceSchema.has(required)) throw new Error(`${container.suffix}: source is missing ${required}.`);
@@ -183,7 +183,7 @@ export async function previewMigration(source, target, onProgress = () => {}) {
   for (const list of plan.lists.filter(list => ['tasks', 'updates', 'risks'].includes(list.key))) {
     for (const { source: row } of list.entries) if (!projects.has(row.ProjectKey)) throw new Error(`${list.title}: ${row.RecordId} references a project missing from the source.`);
   }
-  const refs = new Map(plan.lists.find(list => list.key === 'references').entries.map(entry => [entry.source.RecordId, entry.source]));
+  const refs = new Map((plan.lists.find(list => list.key === 'references')?.entries || []).map(entry => [entry.source.RecordId, entry.source]));
   for (const row of refs.values()) {
     const visited = new Set([row.RecordId]); let parent = row.ReferenceParentId;
     while (parent) {

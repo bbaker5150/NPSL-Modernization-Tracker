@@ -20,15 +20,26 @@ function base64(bytes) {
 function decode(value) { return Uint8Array.from(atob(value), char => char.charCodeAt(0)).buffer; }
 function fileKey(key, recordId, name) { return JSON.stringify([key, recordId, name.toLowerCase()]); }
 
-export async function exportTrackerBackup(site, onProgress = () => {}) {
+function backupScope(backup) {
+  if (backup.version === 1) return { includeReferences: true, includeTaskAttachments: true };
+  const scope = backup.payload?.scope;
+  if (!scope || typeof scope.includeReferences !== 'boolean' || typeof scope.includeTaskAttachments !== 'boolean') throw new Error('Backup scope is missing or invalid. Export a fresh package.');
+  return scope;
+}
+export function manualTransferItems(backup) {
+  const scope = backupScope(backup);
+  return [...(scope.includeReferences ? [] : ['Reference Documents and folders']), ...(scope.includeTaskAttachments ? [] : ['task attachments'])];
+}
+
+export async function exportTrackerBackup(site, onProgress = () => {}, { includeReferences = false, includeTaskAttachments = true } = {}) {
   if (!urlEquals(site.webUrl, MIGRATION_SOURCE) || !await site.canMigrate()) throw new Error('Export requires SharePoint owner permissions on ISEA METENG.');
-  const payload = { source: MIGRATION_SOURCE, createdAt: new Date().toISOString(), lists: [], files: [] };
+  const payload = { source: MIGRATION_SOURCE, createdAt: new Date().toISOString(), scope: { includeReferences, includeTaskAttachments }, lists: [], files: [] };
   let bytesUsed = 0;
-  for (const container of CONTAINERS) {
+  for (const container of CONTAINERS.filter(container => includeReferences || container.key !== 'references')) {
     onProgress(`Exporting ${container.suffix} records…`);
     const schema = await site.schema(container);
     const fields = fieldsFor(container).filter(field => schema.has(field));
-    const attached = ['tasks', 'references'].includes(container.key);
+    const attached = container.key === 'references' || (container.key === 'tasks' && includeTaskAttachments);
     const rows = await site.readRows(container.key, fields, attached);
     const records = rows.map(row => ({ Id: row.Id, Modified: row.Modified, ...writable(row, fields) }));
     payload.lists.push({ key: container.key, fields, records });
@@ -45,7 +56,7 @@ export async function exportTrackerBackup(site, onProgress = () => {}) {
     const after = await site.readRows(container.key, fields, attached);
     if (after.length !== rows.length || rows.some(row => !after.some(now => now.RecordId === row.RecordId && now.Modified === row.Modified && same(now, row, fields) && JSON.stringify(names(now).sort()) === JSON.stringify(names(row).sort())))) throw new Error(`${container.suffix} changed during export. Pause source edits and export again.`);
   }
-  const backup = { format, version: 1, payload, checksum: await fingerprint(payload) };
+  const backup = { format, version: 2, payload, checksum: await fingerprint(payload) };
   await validateTrackerBackup(backup);
   const text = JSON.stringify(backup);
   if (encoder.encode(text).byteLength > MAX_BACKUP_BYTES) throw new Error('Backup exceeds the 256 MB browser package limit.');
@@ -53,13 +64,15 @@ export async function exportTrackerBackup(site, onProgress = () => {}) {
 }
 
 export async function validateTrackerBackup(backup) {
-  if (backup?.format !== format || backup.version !== 1 || !urlEquals(backup.payload?.source, MIGRATION_SOURCE)) throw new Error('Choose a version 1 NPSL tracker backup exported from ISEA METENG.');
+  if (backup?.format !== format || ![1, 2].includes(backup.version) || !urlEquals(backup.payload?.source, MIGRATION_SOURCE)) throw new Error('Choose a supported NPSL tracker backup exported from ISEA METENG.');
   const { payload } = backup;
-  if (!Array.isArray(payload.lists) || payload.lists.length !== CONTAINERS.length || !Array.isArray(payload.files)) throw new Error('Backup is missing tracker lists or documents.');
+  const scope = backupScope(backup);
+  const expected = CONTAINERS.filter(container => scope.includeReferences || container.key !== 'references');
+  if (!Array.isArray(payload.lists) || payload.lists.length !== expected.length || !Array.isArray(payload.files)) throw new Error('Backup is missing tracker lists or documents.');
   if (backup.checksum !== await fingerprint(payload)) throw new Error('Backup checksum failed. Export a fresh package; no data was imported.');
   const recordMaps = new Map(), seen = new Set();
   for (const list of payload.lists) {
-    const container = CONTAINERS.find(c => c.key === list.key);
+    const container = expected.find(c => c.key === list.key);
     if (!container || seen.has(list.key) || !Array.isArray(list.fields) || !Array.isArray(list.records)) throw new Error('Invalid or duplicated backup list.');
     seen.add(list.key);
     const allowed = fieldsFor(container);
@@ -78,6 +91,7 @@ export async function validateTrackerBackup(backup) {
   }
   const files = new Set(); let totalBytes = 0;
   for (const file of payload.files) {
+    if (file.list === 'tasks' && !scope.includeTaskAttachments) throw new Error('Backup contains documents excluded by its scope.');
     if (!['tasks', 'references'].includes(file.list) || !recordMaps.get(file.list)?.has(file.recordId)) throw new Error('Document refers to a missing record.');
     validateAttachmentName(file.name);
     const key = fileKey(file.list, file.recordId, file.name);
@@ -87,10 +101,10 @@ export async function validateTrackerBackup(backup) {
     const bytes = decode(file.data); totalBytes += bytes.byteLength;
     if (totalBytes > 150 * 1024 * 1024 || file.size !== bytes.byteLength || file.sha256 !== await sha256(bytes)) throw new Error(`Document integrity check failed: ${file.name}.`);
   }
-  for (const row of recordMaps.get('references').values()) if (row.EntryKind === 'file' && !files.has(fileKey('references', row.RecordId, row.FileName || ''))) throw new Error(`Reference document is missing: ${row.Title}.`);
+  for (const row of recordMaps.get('references')?.values() || []) if (row.EntryKind === 'file' && !files.has(fileKey('references', row.RecordId, row.FileName || ''))) throw new Error(`Reference document is missing: ${row.Title}.`);
   // Run the existing relationship and identity checks entirely in memory.
   const source = backupSource(backup);
-  await previewMigration(source, { ...source, webUrl: MIGRATION_TARGET, canMigrate: async () => true, readRows: async () => [] });
+  await previewMigration(source, { ...source, webUrl: MIGRATION_TARGET, canMigrate: async () => true, readRows: async () => [] }, undefined, scope);
   return backup;
 }
 
@@ -109,7 +123,7 @@ function backupSource(backup) {
 
 export async function previewTrackerImport(backup, target, onProgress = () => {}) {
   await validateTrackerBackup(backup);
-  const plan = await previewMigration(backupSource(backup), target, onProgress);
+  const plan = await previewMigration(backupSource(backup), target, onProgress, backupScope(backup));
   return { ...plan, backupChecksum: backup.checksum };
 }
 
@@ -124,7 +138,8 @@ export async function importTrackerBackup(backup, target, plan, { replaceConflic
     })) throw new Error('Destination changed after preview. Preview again.');
   }
   if (!replaceConflicts && fresh.lists.some(list => list.entries.some(entry => entry.conflict))) throw new Error('Review and approve conflicting destination records before importing.');
-  const report = { source: backup.payload.source, target: target.webUrl, backupChecksum: backup.checksum, startedAt: new Date().toISOString(), verified: false, lists: [], files: [] };
+  const scope = backupScope(backup);
+  const report = { source: backup.payload.source, target: target.webUrl, backupChecksum: backup.checksum, scope, manualTransfer: manualTransferItems(backup), startedAt: new Date().toISOString(), verified: false, lists: [], files: [] };
   const targetIds = new Map();
   for (const list of fresh.lists) {
     const pending = list.entries.filter(entry => !entry.destination || entry.conflict);
@@ -139,7 +154,7 @@ export async function importTrackerBackup(backup, target, plan, { replaceConflic
     }
     // Verify list values once and obtain the new SharePoint IDs for documents.
     onProgress(`Verifying ${list.title} records…`);
-    const attached = ['tasks', 'references'].includes(list.key);
+    const attached = list.key === 'references' || (list.key === 'tasks' && scope.includeTaskAttachments);
     const saved = await target.readRows(list.key, list.fields, attached);
     for (const entry of list.entries) {
       const matches = saved.filter(row => row.RecordId === entry.source.RecordId);
