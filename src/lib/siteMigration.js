@@ -1,0 +1,199 @@
+import { CONTAINERS, SharePointStore } from './spStore';
+
+export const MIGRATION_SOURCE = 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG';
+export const MIGRATION_TARGET = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
+export const MIGRATION_PAGE = `${MIGRATION_TARGET}/SitePages/Modernization-Tracker.aspx`;
+const normalizeUrl = value => String(value || '').replace(/\/+$/, '').toLowerCase();
+export const isMigrationTarget = value => normalizeUrl(value) === normalizeUrl(MIGRATION_TARGET);
+const quote = value => encodeURIComponent(String(value).replace(/'/g, "''"));
+const items = body => body.value || body.d?.results || [];
+const unwrap = body => body.d || body;
+const fieldsFor = container => ['Title', ...container.fields.map(field => field.name)];
+const fieldTypes = new Map(CONTAINERS.flatMap(container => container.fields.map(field => [field.name, field.type])));
+const clean = (value, field) => fieldTypes.get(field) === 'Boolean' ? Number(Boolean(value)) : value == null ? '' : fieldTypes.get(field) === 'DateTime' && value ? new Date(value).toISOString() : value;
+const same = (a, b, fields) => fields.every(field => clean(a[field], field) === clean(b[field], field));
+const identity = (key, row) => key === 'users' ? String(row.LoginKey || row.Email || '').toLowerCase().split('|').pop() : key === 'projects' ? row.ProjectKey : key === 'acronyms' ? String(row.Acronym || '').toLowerCase() : '';
+const writable = (row, fields) => Object.fromEntries(fields.map(field => [field, fieldTypes.get(field) === 'Boolean' ? Boolean(row[field]) : row[field] ?? null]));
+const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
+
+// This adapter uses the current SharePoint session and existing request plumbing.
+// It neither changes site permissions nor bypasses host confirmation policies.
+export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch) {
+  webUrl = webUrl.replace(/\/+$/, '');
+  prefix = String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization';
+  const store = new SharePointStore({ webUrl, prefix, fetchImpl });
+  const root = key => `/_api/web/lists/getbytitle('${quote(`${prefix}${CONTAINERS.find(c => c.key === key).suffix}`)}')`;
+  async function readRows(key, fields) {
+    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields].join(',')}&$top=5000`;
+    const rows = [], visited = new Set();
+    while (path) {
+      if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
+      visited.add(path);
+      const body = await store.get(path); rows.push(...items(body));
+      const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
+      if (!next) break;
+      const url = new URL(next, `${webUrl}/`);
+      if (!normalizeUrl(url.href).startsWith(`${normalizeUrl(webUrl)}/_api/`)) throw new Error('Unexpected pagination destination.');
+      path = url.href.slice(webUrl.length);
+    }
+    return rows;
+  }
+  return {
+    webUrl,
+    async canMigrate() {
+      const body = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));
+      const permissions = body.EffectiveBasePermissions || body;
+      // Require Manage Lists AND Manage Permissions (normally site Owners).
+      const required = 2048n | 33554432n;
+      return (BigInt(permissions.Low || 0) & required) === required;
+    },
+    async schema(container) {
+      const body = await store.get(`${root(container.key)}/fields?$select=InternalName&$top=500`);
+      return new Set(items(body).map(field => field.InternalName));
+    },
+    readRows,
+    async readItem(key, id, fields) {
+      const response = await fetchImpl(`${webUrl}${root(key)}/items(${Number(id)})?$select=${['Id', 'Modified', ...fields].join(',')}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
+      if (!response.ok) throw new Error(`Cannot read ${key}/${id} (${response.status}).`);
+      const row = unwrap(await response.json());
+      return { ...row, etag: response.headers.get('ETag') || row['odata.etag'] || row['@odata.etag'] || row.__metadata?.etag };
+    },
+    async create(key, fields) { const id = await store.create(key, fields); if (!id) throw new Error(`No ID returned creating ${key}. Refresh the preview before retrying.`); return id; },
+    async update(key, id, fields, etag) {
+      if (!etag) throw new Error('SharePoint did not return a concurrency token. No existing record was overwritten.');
+      await store.post(`${root(key)}/items(${Number(id)})`, { body: fields, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
+    },
+    async attachments(key, id) { return items(await store.get(`${root(key)}/items(${Number(id)})/AttachmentFiles?$select=FileName`)).map(file => file.FileName); },
+    async bytes(key, id, name) {
+      const response = await fetchImpl(`${webUrl}${root(key)}/items(${Number(id)})/AttachmentFiles/getByFileName('${quote(name)}')/$value`, { credentials: 'include', cache: 'no-store' });
+      if (!response.ok) throw new Error(`Cannot read ${name} (${response.status}).`);
+      return response.arrayBuffer();
+    },
+    async attach(key, id, name, bytes) { await store.post(`${root(key)}/items(${Number(id)})/AttachmentFiles/add(FileName='${quote(name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: bytes }); },
+  };
+}
+
+function assertSites(source, target) {
+  if (normalizeUrl(source.webUrl) !== normalizeUrl(MIGRATION_SOURCE) || !isMigrationTarget(target.webUrl)) throw new Error('This migration only supports ISEA METENG → metsoft.');
+}
+
+function indexRows(key, rows) {
+  const index = new Map(), identities = new Set();
+  for (const row of rows) {
+    if (!row.RecordId || index.has(row.RecordId)) throw new Error(`${key}: missing or duplicate RecordId; resolve before migration.`);
+    index.set(row.RecordId, row);
+    const logical = identity(key, row);
+    if (logical && identities.has(logical)) throw new Error(`${key}: duplicate logical identity; resolve before migration.`);
+    if (key === 'projects' && !logical) throw new Error('Project is missing ProjectKey.');
+    if (logical) identities.add(logical);
+  }
+  return index;
+}
+
+export async function previewMigration(source, target, onProgress = () => {}) {
+  assertSites(source, target);
+  if (!(await target.canMigrate())) throw new Error('Migration requires SharePoint Manage Lists and Manage Permissions on metsoft, normally site Owner access. An app Manager role alone is insufficient.');
+  const plan = { source: source.webUrl, target: target.webUrl, createdAt: new Date().toISOString(), lists: [] };
+  for (const container of CONTAINERS) {
+    onProgress(`Reading ${container.suffix}…`);
+    const [sourceSchema, targetSchema] = await Promise.all([source.schema(container), target.schema(container)]);
+    for (const required of ['Title', 'RecordId']) if (!sourceSchema.has(required)) throw new Error(`${container.suffix}: source is missing ${required}.`);
+    const fields = fieldsFor(container).filter(field => sourceSchema.has(field));
+    const missing = fields.filter(field => !targetSchema.has(field));
+    if (missing.length) throw new Error(`${container.suffix}: destination needs fields ${missing.join(', ')}. Open the current tracker build on metsoft as a site owner to complete setup.`);
+    const [rows, existing] = await Promise.all([source.readRows(container.key, fields), target.readRows(container.key, fields)]);
+    indexRows(container.key, rows); const byId = indexRows(container.key, existing);
+    const matched = new Set(), entries = [];
+    for (const row of rows) {
+      const logical = identity(container.key, row);
+      const candidates = existing.filter(item => item.RecordId === row.RecordId || (logical && identity(container.key, item) === logical));
+      if (candidates.length > 1 || (candidates[0] && matched.has(candidates[0].Id))) throw new Error(`${container.suffix}: ambiguous matching records for ${row.Title || row.RecordId}.`);
+      const destination = byId.get(row.RecordId) || candidates[0];
+      if (destination) matched.add(destination.Id);
+      const names = ['tasks', 'references'].includes(container.key) ? await source.attachments(container.key, row.Id) : [];
+      entries.push({ source: row, destination, names, conflict: !!destination && !same(row, destination, fields) });
+    }
+    plan.lists.push({ key: container.key, title: container.suffix, fields, entries, extra: existing.filter(row => !matched.has(row.Id)).length });
+  }
+  const projects = new Set(plan.lists.find(list => list.key === 'projects').entries.map(entry => entry.source.ProjectKey));
+  for (const list of plan.lists.filter(list => ['tasks', 'updates', 'risks'].includes(list.key))) {
+    for (const { source: row } of list.entries) if (!projects.has(row.ProjectKey)) throw new Error(`${list.title}: ${row.RecordId} references a project missing from the source.`);
+  }
+  const refs = new Map(plan.lists.find(list => list.key === 'references').entries.map(entry => [entry.source.RecordId, entry.source]));
+  for (const row of refs.values()) {
+    const visited = new Set([row.RecordId]); let parent = row.ReferenceParentId;
+    while (parent) {
+      if (visited.has(parent) || !refs.has(parent) || refs.get(parent).EntryKind !== 'folder') throw new Error('Reference document folder relationships are invalid.');
+      visited.add(parent); parent = refs.get(parent).ReferenceParentId;
+    }
+  }
+  return plan;
+}
+
+export async function runMigration(source, target, plan, { replaceConflicts = false, onProgress = () => {} } = {}) {
+  assertSites(source, target);
+  if (plan.source !== source.webUrl || plan.target !== target.webUrl) throw new Error('The preview does not match these sites.');
+  if (!(await target.canMigrate())) throw new Error('SharePoint Manage Lists and Manage Permissions are required.');
+  if (!replaceConflicts && plan.lists.some(list => list.entries.some(entry => entry.conflict))) throw new Error('Review and explicitly approve conflicting destination records first.');
+  // Refresh both sides before any write. The reviewed snapshot must still match.
+  for (const list of plan.lists) {
+    const [sourceRows, targetRows] = await Promise.all([source.readRows(list.key, list.fields), target.readRows(list.key, list.fields)]);
+    const original = list.entries.map(entry => entry.source);
+    if (sourceRows.length !== original.length || original.some(row => !sourceRows.some(now => now.RecordId === row.RecordId && now.Modified === row.Modified && same(now, row, list.fields)))) throw new Error('Source changed after preview. Pause edits and refresh the preview.');
+    for (const entry of list.entries) {
+      const logical = identity(list.key, entry.source);
+      const matches = targetRows.filter(row => row.RecordId === entry.source.RecordId || (logical && identity(list.key, row) === logical));
+      if (entry.destination ? matches.length !== 1 || matches[0].Id !== entry.destination.Id || matches[0].Modified !== entry.destination.Modified || !same(matches[0], entry.destination, list.fields) : matches.length > 0) throw new Error('Destination changed after preview. Refresh the preview before copying.');
+    }
+  }
+  const report = { source: source.webUrl, target: target.webUrl, startedAt: new Date().toISOString(), verified: false, lists: [], files: [] };
+  for (const list of plan.lists) {
+    const result = { list: list.title, records: 0, attachments: 0, destinationExtrasRetained: list.extra };
+    for (const entry of list.entries) {
+      onProgress(`Copying ${list.title}: ${result.records + 1}/${list.entries.length}…`);
+      let id = entry.destination?.Id;
+      if (id) {
+        const current = await target.readItem(list.key, id, list.fields);
+        if (current.Modified !== entry.destination.Modified || !same(current, entry.destination, list.fields)) throw new Error('Destination record changed during migration. Refresh preview to resume.');
+        if (entry.conflict) await target.update(list.key, id, writable(entry.source, list.fields), current.etag);
+      } else id = await target.create(list.key, writable(entry.source, list.fields));
+      entry.targetId = id;
+      const existingNames = ['tasks', 'references'].includes(list.key) ? await target.attachments(list.key, id) : [];
+      for (const name of entry.names) {
+        onProgress(`Copying ${list.title} document: ${name}…`);
+        const bytes = await source.bytes(list.key, entry.source.Id, name), hash = await sha256(bytes);
+        const matchingName = existingNames.find(existing => existing.toLowerCase() === name.toLowerCase());
+        if (matchingName) {
+          if (await sha256(await target.bytes(list.key, id, matchingName)) !== hash) throw new Error(`Different destination file named ${name}. No file was overwritten. Resolve it in the destination, then preview again.`);
+        } else await target.attach(list.key, id, name, bytes);
+        if (await sha256(await target.bytes(list.key, id, matchingName || name)) !== hash) throw new Error(`Document verification failed: ${name}. Preview again to resume.`);
+        report.files.push({ list: list.key, recordId: entry.source.RecordId, sourceId: entry.source.Id, targetId: id, name, targetName: matchingName || name, bytes: bytes.byteLength, sha256: hash });
+        result.attachments++;
+      }
+      const saved = await target.readItem(list.key, id, list.fields);
+      if (!same(saved, entry.source, list.fields)) throw new Error(`Record verification failed: ${list.title}/${entry.source.RecordId}.`);
+      result.records++;
+    }
+    report.lists.push(result);
+  }
+  onProgress('Verifying records and source consistency…');
+  for (const list of plan.lists) {
+    const rows = await source.readRows(list.key, list.fields);
+    if (rows.length !== list.entries.length) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
+    for (const entry of list.entries) {
+      const now = rows.find(row => row.RecordId === entry.source.RecordId);
+      if (!now || now.Modified !== entry.source.Modified || !same(now, entry.source, list.fields)) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
+      if (!same(await target.readItem(list.key, entry.targetId, list.fields), entry.source, list.fields)) throw new Error('Destination changed during verification. Refresh preview and review.');
+      if (['tasks', 'references'].includes(list.key)) {
+        const names = await source.attachments(list.key, entry.source.Id);
+        if (JSON.stringify([...names].sort()) !== JSON.stringify([...entry.names].sort())) throw new Error('Source attachments changed during migration. Refresh preview and repeat.');
+      }
+    }
+  }
+  for (const file of report.files) {
+    onProgress(`Verifying document: ${file.name}…`);
+    if (await sha256(await source.bytes(file.list, file.sourceId, file.name)) !== file.sha256 || await sha256(await target.bytes(file.list, file.targetId, file.targetName)) !== file.sha256) throw new Error(`Document changed during verification: ${file.name}. Refresh preview and repeat.`);
+  }
+  report.verified = true; report.completedAt = new Date().toISOString();
+  return report;
+}
