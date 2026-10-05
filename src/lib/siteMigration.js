@@ -1,4 +1,5 @@
 import { CONTAINERS, SharePointStore } from './spStore';
+import { retryMigrationRead, reconcileMigrationWrite } from './migrationRecovery';
 
 export const MIGRATION_SOURCE = 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG';
 export const MIGRATION_TARGET = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
@@ -20,13 +21,26 @@ const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA
 
 // This adapter uses the current SharePoint session and existing request plumbing.
 // It neither changes site permissions nor bypasses host confirmation policies.
-export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch) {
+export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch, { wait } = {}) {
   webUrl = webUrl.replace(/\/+$/, '');
   prefix = String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization';
+  const transport = fetchImpl;
+  fetchImpl = (url, options = {}) => {
+    const request = async () => {
+      const response = await transport(url, options);
+      if ([408, 429, 502, 503, 504].includes(response.status)) {
+        const retryAfter = response.headers?.get('Retry-After');
+        const retryAfterMs = retryAfter ? /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) : 0;
+        throw Object.assign(new Error(`SharePoint returned HTTP ${response.status}.`), { status: response.status, retryAfterMs });
+      }
+      return response;
+    };
+    return (options.method || 'GET').toUpperCase() === 'GET' ? retryMigrationRead(request, wait) : request();
+  };
   const store = new SharePointStore({ webUrl, prefix, fetchImpl });
   const root = key => `/_api/web/lists/getbytitle('${quote(`${prefix}${CONTAINERS.find(c => c.key === key).suffix}`)}')`;
   async function readRows(key, fields) {
-    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields].join(',')}&$top=5000`;
+    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields].join(',')}&$top=500`;
     const rows = [], visited = new Set();
     while (path) {
       if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
@@ -136,7 +150,7 @@ export async function previewMigration(source, target, onProgress = () => {}) {
   return plan;
 }
 
-export async function runMigration(source, target, plan, { replaceConflicts = false, onProgress = () => {} } = {}) {
+export async function runMigration(source, target, plan, { replaceConflicts = false, onProgress = () => {}, wait } = {}) {
   assertSites(source, target);
   if (plan.source !== source.webUrl || plan.target !== target.webUrl) throw new Error('The preview does not match these sites.');
   if (!(await target.canMigrate())) throw new Error('SharePoint Manage Lists and Manage Permissions are required.');
@@ -161,8 +175,20 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
       if (id) {
         const current = await target.readItem(list.key, id, list.fields);
         if (current.Modified !== entry.destination.Modified || !same(current, entry.destination, list.fields)) throw new Error('Destination record changed during migration. Refresh preview to resume.');
-        if (entry.conflict) await target.update(list.key, id, writable(entry.source, list.fields), current.etag);
-      } else id = await target.create(list.key, writable(entry.source, list.fields));
+        if (entry.conflict) await reconcileMigrationWrite(
+          () => target.update(list.key, id, writable(entry.source, list.fields), current.etag),
+          async () => same(await target.readItem(list.key, id, list.fields), entry.source, list.fields) ? { value: undefined } : null,
+          { onProgress, wait, label: `${list.title}/${entry.source.RecordId}` },
+        );
+      } else id = await reconcileMigrationWrite(
+        () => target.create(list.key, writable(entry.source, list.fields)),
+        async () => {
+          const matches = (await target.readRows(list.key, list.fields)).filter(row => row.RecordId === entry.source.RecordId);
+          if (matches.length > 1) throw new Error(`Multiple destination records found for ${entry.source.RecordId}. Review before resuming.`);
+          return matches.length === 1 && same(matches[0], entry.source, list.fields) ? { value: matches[0].Id } : null;
+        },
+        { onProgress, wait, label: `${list.title}/${entry.source.RecordId}` },
+      );
       entry.targetId = id;
       const existingNames = ['tasks', 'references'].includes(list.key) ? await target.attachments(list.key, id) : [];
       for (const name of entry.names) {
@@ -171,7 +197,16 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
         const matchingName = existingNames.find(existing => existing.toLowerCase() === name.toLowerCase());
         if (matchingName) {
           if (await sha256(await target.bytes(list.key, id, matchingName)) !== hash) throw new Error(`Different destination file named ${name}. No file was overwritten. Resolve it in the destination, then preview again.`);
-        } else await target.attach(list.key, id, name, bytes);
+        } else await reconcileMigrationWrite(
+          () => target.attach(list.key, id, name, bytes),
+          async () => {
+            const found = (await target.attachments(list.key, id)).find(value => value.toLowerCase() === name.toLowerCase());
+            if (!found) return null;
+            if (await sha256(await target.bytes(list.key, id, found)) !== hash) throw new Error(`Different destination file named ${name}. No file was overwritten.`);
+            return { value: undefined };
+          },
+          { onProgress, wait, label: `${list.title} document ${name}` },
+        );
         if (await sha256(await target.bytes(list.key, id, matchingName || name)) !== hash) throw new Error(`Document verification failed: ${name}. Preview again to resume.`);
         report.files.push({ list: list.key, recordId: entry.source.RecordId, sourceId: entry.source.Id, targetId: id, name, targetName: matchingName || name, bytes: bytes.byteLength, sha256: hash });
         result.attachments++;

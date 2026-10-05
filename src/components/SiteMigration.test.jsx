@@ -46,12 +46,13 @@ it('requires paused edits and explicit conflict approval, then exposes a verifie
 it('invalidates the preview after failure so a retry checks partial destination state', async () => {
   migrationSite.mockReturnValue({ canMigrate: async () => true });
   previewMigration.mockResolvedValue({ lists: [] });
-  runMigration.mockRejectedValue(new Error('Network interrupted'));
+  runMigration.mockImplementation(async (_source, _target, _plan, options) => { options.onProgress('Copying Tasks: 12/40…'); throw new Error('Network interrupted'); });
   await render();
   await act(async () => button('Preview migration').click());
   await act(async () => document.querySelector('input').click());
   await act(async () => button('Copy and verify').click());
   expect(document.querySelector('[role="alert"]').textContent).toContain('preview again to resume');
+  expect(document.querySelector('[role="status"]').textContent).toContain('Copying Tasks: 12/40');
   expect(button('Copy and verify')).toBeUndefined();
   expect(button('Download verification report')).toBeUndefined();
 });
