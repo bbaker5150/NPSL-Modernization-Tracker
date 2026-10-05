@@ -21,6 +21,7 @@ The migration runs in the deployed tracker using the signed-in owner's SharePoin
 - Reads all pagination pages. Verifies copied field values and SHA-256 file hashes, then checks that the source snapshot and document contents still match before reporting success.
 - Never writes to the source or deletes destination data. Destination-only records/files are retained. Existing different record values require explicit approval. Existing updates use the retrieved ETag; different same-name attachments stop without overwrite.
 - A failure can leave a partial copy. Correct the reported problem, preview again, and resume. Matching records/files are reused. Do not repeatedly use an old preview.
+- Transient GET failures retry up to three times with backoff; short Retry-After cooldowns are honored and longer cooldowns stop without an early retry. List reads use pages of 500 records. After a timed-out write, the migration checks destination values/file hashes up to three times and continues if the write is confirmed. It never blindly repeats an uncertain write. If confirmation fails, refresh the preview before resuming. The error screen retains the last operation to help diagnose persistent host timeouts.
 - The verification report contains record counts, source/destination addresses, attachment names, IDs, sizes, and hashes—not full record contents or file bodies. Store it appropriately.
 
 ## Separate from migration

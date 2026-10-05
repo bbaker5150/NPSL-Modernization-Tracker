@@ -38,6 +38,21 @@ function fixture() {
 }
 
 describe('owner-run site migration', () => {
+  it('finishes when creates, updates and attachment writes commit but their replies time out', async () => {
+    const { source, target } = fixture();
+    target.rows.users.push(record('bootstrap', { Id: 9, LoginKey: 'owner@example.invalid', AppRole: 'Viewer' }));
+    for (const method of ['create', 'update', 'attach']) {
+      const original = target[method].getMockImplementation();
+      target[method].mockImplementationOnce(async (...args) => { await original(...args); throw new Error('SharePoint request timed out'); });
+    }
+    const report = await runMigration(source, target, await previewMigration(source, target), { replaceConflicts: true, wait: vi.fn() });
+    expect(report.verified).toBe(true);
+    expect(target.create).toHaveBeenCalledTimes(7);
+    expect(target.update).toHaveBeenCalledTimes(1);
+    expect(target.attach).toHaveBeenCalledTimes(2);
+    expect(target.rows.projects).toHaveLength(1);
+    expect(target.rows.users).toHaveLength(1);
+  });
   it('preserves archived user history while matching the recreated active account, including retries', async () => {
     const { source, target } = fixture();
     source.rows.users.unshift(record('old-person', { Id: 8, LoginKey: 'owner@example.invalid', AppRole: 'Viewer', Archived: true }));
@@ -168,6 +183,13 @@ describe('owner-run site migration', () => {
 });
 
 describe('SharePoint migration adapter', () => {
+  it('retries a host timeout on a GET and requests smaller list pages', async () => {
+    const fetcher = vi.fn().mockRejectedValueOnce(new Error('SharePoint request timed out')).mockResolvedValueOnce(new Response(JSON.stringify({ value: [] })));
+    const site = migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher, { wait: vi.fn() });
+    expect(await site.readRows('tasks', ['RecordId'])).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0][0]).toContain('$top=500');
+  });
   const response = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
   it('distinguishes site members from owners', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response({ Low: '2048' })).mockResolvedValueOnce(response({ Low: String(2048 + 33554432) }));

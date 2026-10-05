@@ -30,22 +30,24 @@ export function SiteMigration({ store }) {
   if (!enabled || !allowed) return null;
   const conflicts = plan?.lists.reduce((sum, list) => sum + list.entries.filter(entry => entry.conflict).length, 0) || 0;
   async function preview() {
+    let lastStep = 'Reading migration preview';
     setBusy(true); setError(''); setPlan(null); setReport(null); setPaused(false); setReplace(false);
     try {
-      setPlan(await previewMigration(sites.source, sites.target, setStatus));
+      setPlan(await previewMigration(sites.source, sites.target, message => { lastStep = message; setStatus(message); }));
       setStatus('Preview ready. No records have been copied.');
-    } catch (err) { setError(err.message); setStatus('Preview stopped.'); }
+    } catch (err) { setError(err.message); setStatus(`Preview stopped at: ${lastStep}`); }
     finally { setBusy(false); }
   }
   async function copy() {
     if (!plan || busy || !paused || (conflicts && !replace)) return;
     setBusy(true); setError('');
+    let lastStep = 'Checking source and destination';
     try {
-      setReport(await runMigration(sites.source, sites.target, plan, { replaceConflicts: replace, onProgress: setStatus }));
+      setReport(await runMigration(sites.source, sites.target, plan, { replaceConflicts: replace, onProgress: message => { lastStep = message; setStatus(message); } }));
       setStatus('Copy verified. Download the report, then reload the tracker.');
     } catch (err) {
       setError(`${err.message} The source is unchanged. Some destination records may already be copied; preview again to resume safely.`);
-      setStatus('Migration stopped before completion.');
+      setStatus(`Migration stopped at: ${lastStep}`);
     } finally { setPlan(null); setBusy(false); }
   }
   function downloadReport() {
