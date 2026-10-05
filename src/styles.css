@@ -694,3 +694,18 @@ button.brand { width: 100%; }
 .reference-action-menu { position: absolute; z-index: 5; right: 0; top: calc(100% + 4px); min-width: 140px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: 0 8px 24px #0002; }
 .reference-action-menu button { display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .reference-action-menu button:hover, .reference-action-menu button:focus-visible { background: var(--surface-2); outline: 2px solid var(--blue); outline-offset: -2px; }
+/* Owner-run site migration uses the same theme and controls as the directory. */
+.site-migration { padding: 18px 22px; }
+.site-migration summary { cursor: pointer; font-weight: 650; }
+.migration-content { display: grid; gap: 14px; margin-top: 16px; }
+.migration-content p { margin: 0; }
+.migration-content dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; }
+.migration-content dd { margin: 0; overflow-wrap: anywhere; }
+.migration-content > button { justify-self: start; }
+.migration-table { overflow-x: auto; }
+.migration-table table { width: 100%; border-collapse: collapse; }
+.migration-table caption { text-align: left; padding-bottom: 8px; font-weight: 600; }
+.migration-table th, .migration-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.migration-check { display: flex; align-items: flex-start; gap: 8px; }
+.migration-check input[type="checkbox"] { width: 16px; height: 16px; min-width: 16px; margin: 3px 0 0; padding: 0; }
+.migration-actions { display: flex; flex-wrap: wrap; gap: 10px; }
