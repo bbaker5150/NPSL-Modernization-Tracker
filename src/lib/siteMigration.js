@@ -43,15 +43,34 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
   };
   const store = new SharePointStore({ webUrl, prefix, fetchImpl });
   const root = key => `/_api/web/lists/getbytitle('${quote(`${prefix}${CONTAINERS.find(c => c.key === key).suffix}`)}')`;
+  const documentUrls = new Map();
+  const documentKey = (key, id, name) => JSON.stringify([key, Number(id), name.toLowerCase()]);
+  function rememberDocuments(key, id, files) {
+    for (const file of files) {
+      if (!file.ServerRelativeUrl) continue;
+      // FileName is decoded metadata. Encode the last segment explicitly so
+      // literal # and % characters cannot become fragments or escape sequences.
+      const address = file.ServerRelativeUrl.slice(0, file.ServerRelativeUrl.lastIndexOf('/') + 1) + encodeURIComponent(file.FileName);
+      const url = new URL(address, webUrl), site = new URL(webUrl);
+      if (url.origin !== site.origin || !url.pathname.toLowerCase().startsWith(`${site.pathname.toLowerCase()}/`) || url.username || url.password || url.hash) throw new Error('SharePoint returned an unexpected document address.');
+      documentUrls.set(documentKey(key, id, file.FileName), url.href);
+    }
+  }
+  async function attachmentNames(key, id) {
+    const files = items(await store.get(`${root(key)}/items(${Number(id)})/AttachmentFiles?$select=FileName,ServerRelativeUrl`));
+    rememberDocuments(key, id, files);
+    return files.map(file => file.FileName);
+  }
   async function readRows(key, fields, withAttachments = false) {
-    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
+    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName', 'AttachmentFiles/ServerRelativeUrl'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
     const rows = [], visited = new Set();
     while (path) {
       if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
       visited.add(path);
       const response = await fetchImpl(`${webUrl}${path}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
       if (!response.ok) throw new Error(`Cannot read ${key} (${response.status}).`);
-      const body = await response.json(); rows.push(...items(body));
+      const body = await response.json(), page = items(body); rows.push(...page);
+      if (withAttachments) for (const row of page) rememberDocuments(key, row.Id, row.AttachmentFiles?.results || row.AttachmentFiles || []);
       const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
       if (!next) break;
       const url = new URL(next, `${webUrl}/`);
@@ -93,11 +112,22 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       if (!etag) throw new Error('SharePoint did not return a concurrency token. No existing record was overwritten.');
       await store.post(`${root(key)}/items(${Number(id)})`, { body: fields, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
     },
-    async attachments(key, id) { return items(await store.get(`${root(key)}/items(${Number(id)})/AttachmentFiles?$select=FileName`)).map(file => file.FileName); },
+    attachments: attachmentNames,
     async bytes(key, id, name) {
-      const response = await fetchImpl(`${webUrl}${root(key)}/items(${Number(id)})/AttachmentFiles/getByFileName('${quote(name)}')/$value`, { credentials: 'include', cache: 'no-store' });
-      if (!response.ok) throw new Error(`Cannot read ${name} (${response.status}).`);
-      return response.arrayBuffer();
+      // Use the same direct file download route as normal tracker downloads.
+      // The embedded host's REST proxy may not complete binary $value requests.
+      const keyForFile = documentKey(key, id, name);
+      if (!documentUrls.has(keyForFile)) await attachmentNames(key, id);
+      const url = documentUrls.get(keyForFile);
+      if (!url) throw new Error(`SharePoint did not return a download address for ${name}. No document was skipped.`);
+      try {
+        const response = await fetchImpl(url, { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (/text\/html/i.test(response.headers.get('Content-Type') || '') && !/\.html?$/i.test(name)) throw new Error('SharePoint returned an HTML page instead of the document');
+        return await response.arrayBuffer();
+      } catch (error) {
+        throw new Error(`Document download failed: ${name} (${key}, item ${id}). ${error.message}. Try downloading this document from the tracker document menu to check site access. No document was skipped.`);
+      }
     },
     async attach(key, id, name, bytes) { await store.post(`${root(key)}/items(${Number(id)})/AttachmentFiles/add(FileName='${quote(name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: bytes }); },
   };
