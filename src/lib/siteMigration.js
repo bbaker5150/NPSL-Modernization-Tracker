@@ -12,7 +12,9 @@ const fieldsFor = container => ['Title', ...container.fields.map(field => field.
 const fieldTypes = new Map(CONTAINERS.flatMap(container => container.fields.map(field => [field.name, field.type])));
 const clean = (value, field) => fieldTypes.get(field) === 'Boolean' ? Number(Boolean(value)) : value == null ? '' : fieldTypes.get(field) === 'DateTime' && value ? new Date(value).toISOString() : value;
 const same = (a, b, fields) => fields.every(field => clean(a[field], field) === clean(b[field], field));
-const identity = (key, row) => key === 'users' ? String(row.LoginKey || row.Email || '').toLowerCase().split('|').pop() : key === 'projects' ? row.ProjectKey : key === 'acronyms' ? String(row.Acronym || '').toLowerCase() : '';
+// Archived users are historical records, not competing active accounts. Keep
+// their RecordIds and match them only by RecordId, never by login/email.
+const identity = (key, row) => key === 'users' ? row.Archived ? '' : String(row.LoginKey || row.Email || '').trim().toLowerCase().split('|').pop() : key === 'projects' ? row.ProjectKey : key === 'acronyms' ? String(row.Acronym || '').toLowerCase() : '';
 const writable = (row, fields) => Object.fromEntries(fields.map(field => [field, fieldTypes.get(field) === 'Boolean' ? Boolean(row[field]) : row[field] ?? null]));
 const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
 
@@ -77,15 +79,19 @@ function assertSites(source, target) {
   if (normalizeUrl(source.webUrl) !== normalizeUrl(MIGRATION_SOURCE) || !isMigrationTarget(target.webUrl)) throw new Error('This migration only supports ISEA METENG → metsoft.');
 }
 
-function indexRows(key, rows) {
-  const index = new Map(), identities = new Set();
+function indexRows(key, rows, site) {
+  const index = new Map(), identities = new Map();
   for (const row of rows) {
     if (!row.RecordId || index.has(row.RecordId)) throw new Error(`${key}: missing or duplicate RecordId; resolve before migration.`);
     index.set(row.RecordId, row);
     const logical = identity(key, row);
-    if (logical && identities.has(logical)) throw new Error(`${key}: duplicate logical identity; resolve before migration.`);
+    if (logical && identities.has(logical)) {
+      const previous = identities.get(logical);
+      if (key === 'users') throw new Error(`${site}: multiple active user records for ${logical}: ${previous.Title} (item ${previous.Id}, role ${previous.AppRole || 'unset'}) and ${row.Title} (item ${row.Id}, role ${row.AppRole || 'unset'}). Review these accounts in that site's tracker directory and remove the obsolete entry, then preview again. Archived users are preserved automatically; no role has been selected or changed.`);
+      throw new Error(`${key}: duplicate logical identity; resolve before migration.`);
+    }
     if (key === 'projects' && !logical) throw new Error('Project is missing ProjectKey.');
-    if (logical) identities.add(logical);
+    if (logical) identities.set(logical, row);
   }
   return index;
 }
@@ -102,7 +108,7 @@ export async function previewMigration(source, target, onProgress = () => {}) {
     const missing = fields.filter(field => !targetSchema.has(field));
     if (missing.length) throw new Error(`${container.suffix}: destination needs fields ${missing.join(', ')}. Open the current tracker build on metsoft as a site owner to complete setup.`);
     const [rows, existing] = await Promise.all([source.readRows(container.key, fields), target.readRows(container.key, fields)]);
-    indexRows(container.key, rows); const byId = indexRows(container.key, existing);
+    indexRows(container.key, rows, 'ISEA METENG source'); const byId = indexRows(container.key, existing, 'metsoft destination');
     const matched = new Set(), entries = [];
     for (const row of rows) {
       const logical = identity(container.key, row);

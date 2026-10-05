@@ -38,6 +38,37 @@ function fixture() {
 }
 
 describe('owner-run site migration', () => {
+  it('preserves archived user history while matching the recreated active account, including retries', async () => {
+    const { source, target } = fixture();
+    source.rows.users.unshift(record('old-person', { Id: 8, LoginKey: 'owner@example.invalid', AppRole: 'Viewer', Archived: true }));
+    target.rows.users.push(record('bootstrap-person', { Id: 9, LoginKey: 'owner@example.invalid', AppRole: 'Viewer' }));
+    const report = await runMigration(source, target, await previewMigration(source, target), { replaceConflicts: true });
+    expect(report.verified).toBe(true);
+    expect(target.rows.users).toHaveLength(2);
+    expect(target.rows.users.find(row => row.RecordId === 'old-person')).toMatchObject({ Archived: true, AppRole: 'Viewer' });
+    expect(target.rows.users.find(row => row.RecordId === 'person')).toMatchObject({ Id: 9, Archived: false, AppRole: 'Manager' });
+    const creates = target.create.mock.calls.length;
+    await runMigration(source, target, await previewMigration(source, target));
+    expect(target.create).toHaveBeenCalledTimes(creates);
+    expect(source.update).not.toHaveBeenCalled();
+  });
+  it('does not reuse or reactivate an archived destination account by email', async () => {
+    const { source, target } = fixture();
+    target.rows.users.push(record('destination-history', { Id: 9, Email: 'owner@example.invalid', AppRole: 'Manager', Archived: true }));
+    await runMigration(source, target, await previewMigration(source, target));
+    expect(target.rows.users).toHaveLength(2);
+    expect(target.rows.users.find(row => row.Id === 9)).toMatchObject({ RecordId: 'destination-history', Archived: true });
+  });
+  it('identifies the site, account, item IDs and roles for genuinely ambiguous active users', async () => {
+    const { source, target } = fixture();
+    source.rows.users.push(record('other-active', { Id: 7, LoginKey: 'OWNER@EXAMPLE.INVALID', AppRole: 'Viewer' }));
+    await expect(previewMigration(source, target)).rejects.toThrow(/ISEA METENG source: multiple active user records.*item 1, role Manager.*item 7, role Viewer/);
+    expect(target.create).not.toHaveBeenCalled();
+    source.rows.users.pop();
+    target.rows.users = structuredClone(source.rows.users);
+    target.rows.users.push(record('destination-duplicate', { Id: 8, Email: 'owner@example.invalid', AppRole: 'Viewer' }));
+    await expect(previewMigration(source, target)).rejects.toThrow('metsoft destination: multiple active user records');
+  });
   it('preserves all seven lists, archived data, relationships and binary documents without source writes', async () => {
     const { source, target } = fixture();
     const before = structuredClone(source.rows);
