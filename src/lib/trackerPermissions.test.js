@@ -150,7 +150,7 @@ describe('project ACLs and inherited creation', () => {
 });
 
 describe('scoped store integration', () => {
-  it.each(['tasks', 'updates', 'risks'])('sends ResourcePath objects over HTTP when creating a %s project folder', async key => {
+  it.each(['tasks', 'updates', 'risks'])('creates, verifies, and reuses a %s project folder through HTTP', async key => {
     resetWebUrlCache();
     const webUrl = 'https://tenant.sharepoint.com/sites/metsoft';
     const listId = '11111111-1111-1111-1111-111111111111';
@@ -158,10 +158,18 @@ describe('scoped store integration', () => {
     const root = `/sites/metsoft/Lists/Modernization${label}`;
     const folderName = 'tracker-project-5';
     const requests = [];
+    let folderRow;
     const fetchImpl = vi.fn(async (url, options) => {
       const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+      if (/ItemChildCount|FolderChildCount/.test(url)) return new Response(JSON.stringify({ error: { message: { value: "The field or property 'ItemChildCount' does not exist." } } }), { status: 400 });
       if (url.endsWith('/_api/contextinfo')) return json({ FormDigestValue: 'test-digest', FormDigestTimeoutSeconds: 1800 });
       if (url.includes('/lists?')) return json({ value: [{ Id: listId, Title: `NPSL Tracker - ${label}`, BaseTemplate: 100 }] });
+      if (url.includes('?$select=EnableFolderCreation,RootFolder/ServerRelativeUrl')) return json({ EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: root } });
+      if (url.includes('/items?$select=Id&$filter=FileRef')) return json({ value: folderRow ? [{ Id: folderRow.Id }] : [] });
+      if (url.includes('/items(23)?')) {
+        expect(new URL(url).searchParams.get('$select')).toBe('Id,FileSystemObjectType,FileRef,ProjectKey');
+        return json(folderRow);
+      }
       if (url.endsWith(`/lists(guid'${listId}')/AddValidateUpdateItemUsingPath`)) {
         const body = JSON.parse(options.body);
         requests.push({ options, body });
@@ -170,12 +178,18 @@ describe('scoped store integration', () => {
             typeof body.listItemCreateInfo.LeafName !== 'object') {
           return new Response(JSON.stringify({ error: { message: { value: "An unexpected 'PrimitiveValue' node was found when reading from the JSON reader. A 'StartObject' node was expected." } } }), { status: 400 });
         }
+        if (body.listItemCreateInfo.UnderlyingObjectType === 1) folderRow = { Id: 23, FileSystemObjectType: 1, FileRef: `${root}/${folderName}`, ProjectKey: 'p' };
         return json({ value: [{ FieldName: 'Id', FieldValue: String(22 + requests.length) }] });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
     const store = new SharePointStore({ webUrl, fetchImpl, scopedAccess: true });
-    expect(await store.permissions.addInFolder(key, root, { Title: folderName, ProjectKey: 'p' }, folderName)).toBe(23);
+    const project = { spId: 5, projectKey: 'p' };
+    const folder = await store.permissions.folder(key, project, true);
+    expect(folder.path).toBe(`${root}/${folderName}`);
+    expect(folder.scope).toContain('/items(23)');
+    expect(await store.permissions.folder(key, project, true)).toEqual(folder);
+    expect(requests).toHaveLength(1); // retry reuses the verified folder
     expect(requests[0].body).toEqual({
       listItemCreateInfo: { FolderPath: { DecodedUrl: `${webUrl}/Lists/Modernization${label}` }, LeafName: { DecodedUrl: folderName }, UnderlyingObjectType: 1 },
       formValues: [{ FieldName: 'Title', FieldValue: folderName }, { FieldName: 'ProjectKey', FieldValue: 'p' }],
@@ -284,10 +298,13 @@ function folderFixture({ exists = true, key = 'p', type = 1 } = {}) {
   const project = { spId: 5, projectKey: 'p' };
   const root = '/sites/metsoft/Lists/ModernizationTasks';
   const path = `${root}/tracker-project-5`;
-  const row = { Id: 22, FileSystemObjectType: type, FileRef: path, ProjectKey: key, ItemChildCount: '0', FolderChildCount: '0', 'odata.etag': '"2"' };
+  const row = { Id: 22, FileSystemObjectType: type, FileRef: path, ProjectKey: key, 'odata.etag': '"2"' };
+  const folderInfo = { ServerRelativeUrl: path, ItemCount: 0 };
   permissions.metadata = vi.fn(async () => ({ EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: root } }));
   store.formValues = fields => Object.entries(fields).map(([FieldName, FieldValue]) => ({ FieldName, FieldValue }));
   store.get.mockImplementation(async url => {
+    if (/ItemChildCount|FolderChildCount/.test(url)) throw Object.assign(new Error("The field or property 'ItemChildCount' does not exist."), { status: 400 });
+    if (url.includes('/items(22)/Folder?')) return { ...folderInfo };
     if (url.includes('/items?') && url.includes('$filter=FileRef')) return { value: exists ? [{ Id: 22 }] : [] };
     if (url.includes('GetFolderByServerRelativePath')) throw new Error('Do not use the broken folder-navigation endpoint');
     if (url.includes("getbytitle('ModernizationProjects')/items(5)")) return { Id: 5, ProjectKey: 'p' };
@@ -306,10 +323,42 @@ function folderFixture({ exists = true, key = 'p', type = 1 } = {}) {
     }
     throw new Error(`Unexpected POST: ${url}`);
   });
-  return { store, permissions, project, row, path };
+  return { store, permissions, project, row, path, folderInfo };
 }
 
 describe('project folder identity regression', () => {
+  it.each([0, '0'])('uses Folder.ItemCount %s only to recover a blank project key', async count => {
+    const { store, permissions, project, folderInfo } = folderFixture({ key: null });
+    folderInfo.ItemCount = count;
+    await permissions.folder('tasks', project, true);
+    expect(store.get).toHaveBeenCalledWith(expect.stringContaining('/items(22)/Folder?$select=ServerRelativeUrl,ItemCount'), undefined);
+    expect(store.get.mock.calls.some(([url]) => /ItemChildCount|FolderChildCount/.test(url))).toBe(false);
+  });
+  it.each([
+    { ItemCount: 1 }, { ItemCount: '2' }, { ItemCount: undefined },
+    { ItemCount: null }, { ItemCount: false }, { ItemCount: '' },
+    { ServerRelativeUrl: '/wrong-folder' }, { ServerRelativeUrl: undefined },
+  ])('does not repair a populated or unverified folder: %j', async changes => {
+    const { store, permissions, project, folderInfo } = folderFixture({ key: null });
+    Object.assign(folderInfo, changes);
+    await expect(permissions.folder('tasks', project, true)).rejects.toThrow('Project folder identity');
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('does not read child counts for a folder with the verified project key', async () => {
+    const { store, permissions, project } = folderFixture();
+    await permissions.folder('tasks', project, true);
+    expect(store.get.mock.calls.some(([url]) => url.includes('/Folder?'))).toBe(false);
+  });
+  it.each([403, 404])('does not interpret a failed folder count read (%s) as empty', async status => {
+    const { store, permissions, project } = folderFixture({ key: null });
+    const get = store.get.getMockImplementation();
+    store.get.mockImplementation((url, headers) => {
+      if (url.includes('/Folder?')) throw Object.assign(new Error('Folder unavailable'), { status });
+      return get(url, headers);
+    });
+    await expect(permissions.folder('tasks', project, true)).rejects.toMatchObject({ status });
+    expect(store.post).not.toHaveBeenCalled();
+  });
   it.each([1, '1'])('reads canonical folder metadata and accepts folder enum %s', async type => {
     const { store, permissions, project, path } = folderFixture({ type });
     expect(await permissions.folder('tasks', project)).toEqual({ path, scope: "/_api/web/lists/getbytitle('ModernizationTasks')/items(22)" });
@@ -336,10 +385,7 @@ describe('project folder identity regression', () => {
   });
   it.each([
     { ProjectKey: 'another-project' },
-    { ProjectKey: null, ItemChildCount: '1' },
-    { ProjectKey: null, FolderChildCount: '1' },
     { ProjectKey: undefined },
-    { ProjectKey: null, ItemChildCount: undefined },
     { ProjectKey: null, 'odata.etag': undefined },
     { FileSystemObjectType: 0 },
     { FileRef: '/sites/metsoft/Lists/ModernizationTasks/wrong-folder' },
@@ -391,7 +437,7 @@ describe('Manager promotion after interrupted folder setup', () => {
     const folders = Object.fromEntries(['Tasks', 'Updates', 'Risks'].map(suffix => [suffix, {
       Id: 22, FileSystemObjectType: '1', ProjectKey: null,
       FileRef: `/sites/metsoft/Lists/Modernization${suffix}/tracker-project-5`,
-      ItemChildCount: '0', FolderChildCount: '0', 'odata.etag': '"2"',
+      'odata.etag': '"2"',
     }]));
     let savedUser;
     store.directoryRows = vi.fn(async () => [previous]);
@@ -405,6 +451,8 @@ describe('Manager promotion after interrupted folder setup', () => {
       if (suffix && path.includes('RootFolder')) return { EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: `/sites/metsoft/Lists/Modernization${suffix}` } };
       if (suffix && path.includes('/items?') && path.includes('$filter=FileRef')) return { value: [{ Id: 22 }] };
       if (path.includes('GetFolderByServerRelativePath')) throw new Error('Do not use the broken folder-navigation endpoint');
+      if (/ItemChildCount|FolderChildCount/.test(path)) throw new Error('Unsupported computed field');
+      if (suffix && path.includes('/items(22)/Folder?')) return { ServerRelativeUrl: folders[suffix].FileRef, ItemCount: 0 };
       if (suffix && path.includes('/items(22)?')) {
         expect(headers.Accept).toContain('minimalmetadata');
         return { ...folders[suffix] };

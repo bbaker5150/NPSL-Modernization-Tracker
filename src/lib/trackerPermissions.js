@@ -145,7 +145,7 @@ export class TrackerPermissions {
     }
     if (!positiveId(id)) throw new Error(`Could not identify the ${key} project folder at ${path}.`);
     const scope = `${this.root(key)}/items(${Number(id)})`;
-    const read = async () => unwrap(await this.get(`${scope}?$select=Id,FileSystemObjectType,FileRef,ProjectKey,ItemChildCount,FolderChildCount`, { Accept: 'application/json;odata=minimalmetadata' }));
+    const read = async () => unwrap(await this.get(`${scope}?$select=Id,FileSystemObjectType,FileRef,ProjectKey`, { Accept: 'application/json;odata=minimalmetadata' }));
     const identityError = detail => new Error(`Project folder identity does not match in ${key} at ${path}. ${detail} No permissions were changed for this folder.`);
     const validateFolder = row => {
       if (Number(row.Id) !== Number(id) || ![1, '1'].includes(row.FileSystemObjectType) || String(row.FileRef || '').toLowerCase() !== path.toLowerCase()) {
@@ -159,8 +159,14 @@ export class TrackerPermissions {
       // its custom key. Only the setup path may finish that initialization.
       // Never overwrite another project's key or adopt a populated folder.
       const unassigned = row.ProjectKey === null || row.ProjectKey === '';
-      const empty = [0, '0'].includes(row.ItemChildCount) && [0, '0'].includes(row.FolderChildCount);
-      if (!create || !unassigned || !empty) throw identityError(`Expected project key ${project.projectKey}; received ${row.ProjectKey == null ? '(missing)' : row.ProjectKey}. Rerun setup only after resolving any conflicting folder data.`);
+      if (!create || !unassigned) throw identityError(`Expected project key ${project.projectKey}; received ${row.ProjectKey == null ? '(missing)' : row.ProjectKey}. Rerun setup only after resolving any conflicting folder data.`);
+      // Computed ItemChildCount/FolderChildCount columns are not REST item
+      // properties on every list. Use the associated Folder resource, and
+      // only when recovering a blank key; absent counts never mean zero.
+      const folderInfo = unwrap(await this.get(`${scope}/Folder?$select=ServerRelativeUrl,ItemCount`));
+      if (String(folderInfo?.ServerRelativeUrl || '').toLowerCase() !== path.toLowerCase() || ![0, '0'].includes(folderInfo?.ItemCount)) {
+        throw identityError('SharePoint did not verify that the unassigned folder is empty. Resolve its contents before retrying setup.');
+      }
       const parent = unwrap(await this.get(`${this.root('projects')}/items(${project.spId})?$select=Id,ProjectKey`));
       if (Number(parent.Id) !== Number(project.spId) || parent.ProjectKey !== project.projectKey) throw identityError('The saved parent project could not be verified.');
       const etag = row['odata.etag'] || row['@odata.etag'] || row.__metadata?.etag;
