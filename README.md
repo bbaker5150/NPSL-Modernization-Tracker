@@ -65,23 +65,23 @@ The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin 
 <script>
   window.MOD_TRACKER_CONFIG = {
     listPrefix: 'Modernization',
-    webUrl: 'https://tenant.sharepoint.com/sites/Modernization',
-    hideLists: true
+    webUrl: 'https://tenant.sharepoint.com/sites/Modernization'
   };
 </script>
 ```
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `listPrefix` | `Modernization` | Prefix for the seven SharePoint List titles. |
+| `listPrefix` | `Modernization` | Existing list identity namespace. Keep unchanged when organizing display names. |
 | `webUrl` | Auto-detected | Target SharePoint web URL. |
 | `testingManagerPassword` | `admin123` | Testing-only self-promotion password; always disabled in scoped access mode. |
 | `scopedAccess` | `true` on `/sites/metsoft`, otherwise `false` | Use tracker SharePoint groups and project-scoped engineer permissions. |
 | `forceLocal` | `false` | Force clean-slate browser storage for local troubleshooting. |
 | `forceSharePoint` | `false` | Force REST mode for an on-premises or custom SharePoint host. |
-| `hideLists` | `true` | Hide the seven backing lists from the normal Site Contents view without affecting API access. |
 
-On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. Newly created backing lists are hidden from the normal Site Contents view in their initial create request, so startup does not issue follow-up MERGE operations. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. In legacy mode the saved Users directory determines application roles and the testing password can grant Manager access. In scoped mode, current-user roles come from SharePoint tracker groups or site-owner permissions, and testing promotion is disabled. SharePoint permissions remain the server-side access boundary; see the deployment guide before granting list access.
+On first SharePoint load, the app silently creates empty lists and missing fields while the loading screen is displayed. New lists are visible in Site Contents with the `NPSL Tracker - ` prefix. The former `hideLists` option is no longer used. The signed-in user needs permission to create lists and fields for that first run; normal use needs whatever read/edit rights the site owner grants. In legacy mode the saved Users directory determines application roles and the testing password can grant Manager access. In scoped mode, current-user roles come from SharePoint tracker groups or site-owner permissions, and testing promotion is disabled. SharePoint permissions remain the server-side access boundary; see the deployment guide before granting list access.
+
+To organize an existing deployment, upload the updated HTML, reload as a site owner, and open **Users and managers → Site Contents organization → Organize tracker lists**. This renames and unhides all seven lists in place; it preserves list IDs, URLs, records, documents, and permissions. No export or migration is needed. See [List organization](docs/list-organization.md) for the naming map and deployment checks.
 
 For the metsoft rollout, first follow [Tracker permissions](docs/tracker-permissions.md), including the one-time **Apply tracker permissions** action and non-owner acceptance tests.
 

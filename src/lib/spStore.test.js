@@ -17,6 +17,7 @@ describe('SharePoint store', () => {
     const calls = [];
     const fetchImpl = async (url) => {
       calls.push(url);
+      if (url.includes("/lists?")) return new Response(JSON.stringify({ value: [{ Id: "11111111-1111-1111-1111-111111111111", Title: "NPSL Tracker - Projects", BaseTemplate: 100, Hidden: false }] }));
       const second = url.includes('$skiptoken');
       return new Response(JSON.stringify(second
         ? { value: [{ Id: 2, Title: 'Second' }] }
@@ -26,8 +27,8 @@ describe('SharePoint store', () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod', fetchImpl });
     const rows = await store.listItems('projects', [], (item) => item.Title);
     expect(rows).toEqual(['First', 'Second']);
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain('/sites/mod/_api/list?$skiptoken=2');
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toContain('/sites/mod/_api/list?$skiptoken=2');
   });
 
   it('routes existing lists with missing identity fields through additive setup', async () => {
@@ -39,7 +40,7 @@ describe('SharePoint store', () => {
     expect(readiness.checks.every((check) => check.exists && check.missingFields.length > 0)).toBe(true);
   });
 
-  it('creates backing lists hidden without follow-up MERGE operations', async () => {
+  it('creates visible, app-prefixed lists without follow-up MERGE operations', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.listExists = async () => false;
     store.get = vi.fn(async () => ({ value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }));
@@ -49,7 +50,8 @@ describe('SharePoint store', () => {
 
     const listCreates = store.post.mock.calls.filter(([path]) => path === '/_api/web/lists');
     expect(listCreates).toHaveLength(CONTAINERS.length);
-    expect(listCreates.every(([, options]) => options.body.Hidden === true)).toBe(true);
+    expect(listCreates.every(([, options]) => options.body.Hidden === false)).toBe(true);
+    expect(listCreates.map(([, { body }]) => body.Title)).toEqual(['NPSL Tracker - Projects', 'NPSL Tracker - Tasks', 'NPSL Tracker - Updates', 'NPSL Tracker - Risks', 'NPSL Tracker - Acronyms', 'NPSL Tracker - Users', 'NPSL Tracker - Reference Documents']);
     expect(JSON.stringify(store.post.mock.calls)).not.toContain('X-HTTP-Method');
   });
 

@@ -42,7 +42,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
     return (options.method || 'GET').toUpperCase() === 'GET' ? retryMigrationRead(request, wait) : request();
   };
   const store = new SharePointStore({ webUrl, prefix, fetchImpl });
-  const root = key => `/_api/web/lists/getbytitle('${quote(`${prefix}${CONTAINERS.find(c => c.key === key).suffix}`)}')`;
+  const root = key => store.listApi(key);
   const documentUrls = new Map();
   const documentKey = (key, id, name) => JSON.stringify([key, Number(id), name.toLowerCase()]);
   function rememberDocuments(key, id, files) {
@@ -57,12 +57,12 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
     }
   }
   async function attachmentNames(key, id) {
-    const files = items(await store.get(`${root(key)}/items(${Number(id)})/AttachmentFiles?$select=FileName,ServerRelativeUrl`));
+    const files = items(await store.get(`${await root(key)}/items(${Number(id)})/AttachmentFiles?$select=FileName,ServerRelativeUrl`));
     rememberDocuments(key, id, files);
     return files.map(file => file.FileName);
   }
   async function readRows(key, fields, withAttachments = false) {
-    let path = `${root(key)}/items?$select=${['Id', 'Modified', 'FileSystemObjectType', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName', 'AttachmentFiles/ServerRelativeUrl'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
+    let path = `${await root(key)}/items?$select=${['Id', 'Modified', 'FileSystemObjectType', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName', 'AttachmentFiles/ServerRelativeUrl'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
     const rows = [], visited = new Set();
     while (path) {
       if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
@@ -90,20 +90,20 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       return (BigInt(permissions.Low || 0) & required) === required;
     },
     async schema(container) {
-      const body = await store.get(`${root(container.key)}/fields?$select=InternalName&$top=500`);
+      const body = await store.get(`${await root(container.key)}/fields?$select=InternalName&$top=500`);
       return new Set(items(body).map(field => field.InternalName));
     },
     readRows,
     async writeBatch(key, operations) {
       if (!operations.length) return;
-      const batch = makeMigrationBatch(webUrl, root(key), operations);
+      const batch = makeMigrationBatch(webUrl, await root(key), operations);
       const digest = await getFormDigest(webUrl, fetchImpl);
       const response = await fetchImpl(`${webUrl}/_api/$batch`, { method: 'POST', credentials: 'include', headers: { 'X-RequestDigest': digest, 'Content-Type': batch.contentType, Accept: 'multipart/mixed' }, body: batch.body });
       if (!response.ok) throw new Error(`SharePoint batch failed (${response.status}). Preview again before resuming.`);
       checkMigrationBatch(await response.text(), operations.length);
     },
     async readItem(key, id, fields) {
-      const response = await fetchImpl(`${webUrl}${root(key)}/items(${Number(id)})?$select=${['Id', 'Modified', ...fields].join(',')}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
+      const response = await fetchImpl(`${webUrl}${await root(key)}/items(${Number(id)})?$select=${['Id', 'Modified', ...fields].join(',')}`, { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json;odata=minimalmetadata' } });
       if (!response.ok) throw new Error(`Cannot read ${key}/${id} (${response.status}).`);
       const row = unwrap(await response.json());
       return { ...row, etag: response.headers.get('ETag') || row['odata.etag'] || row['@odata.etag'] || row.__metadata?.etag };
@@ -111,7 +111,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
     async create(key, fields) { const id = await store.create(key, fields); if (!id) throw new Error(`No ID returned creating ${key}. Refresh the preview before retrying.`); return id; },
     async update(key, id, fields, etag) {
       if (!etag) throw new Error('SharePoint did not return a concurrency token. No existing record was overwritten.');
-      await store.post(`${root(key)}/items(${Number(id)})`, { body: fields, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
+      await store.post(`${await root(key)}/items(${Number(id)})`, { body: fields, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
     },
     attachments: attachmentNames,
     async bytes(key, id, name) {
@@ -130,7 +130,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
         throw new Error(`Document download failed: ${name} (${key}, item ${id}). ${error.message}. Try downloading this document from the tracker document menu to check site access. No document was skipped.`);
       }
     },
-    async attach(key, id, name, bytes) { await store.post(`${root(key)}/items(${Number(id)})/AttachmentFiles/add(FileName='${quote(name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: bytes }); },
+    async attach(key, id, name, bytes) { await store.post(`${await root(key)}/items(${Number(id)})/AttachmentFiles/add(FileName='${quote(name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: bytes }); },
   };
 }
 

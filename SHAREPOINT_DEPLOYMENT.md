@@ -44,16 +44,17 @@ With the default prefix, the automatic clean-slate provisioning creates:
 
 | List | Purpose |
 | --- | --- |
-| `ModernizationProjects` | One portfolio row per modernization project. |
-| `ModernizationTasks` | Pipeline tasks linked by `ProjectKey`. |
-| `ModernizationUpdates` | Status updates and decisions. |
-| `ModernizationRisks` | Risks, issues, ownership, and mitigation. |
-| `ModernizationAcronyms` | Shared acronym glossary. |
-| `ModernizationUsers` | Saved identities and Manager/User application roles. |
+| `NPSL Tracker - Projects` | One portfolio row per modernization project. |
+| `NPSL Tracker - Tasks` | Pipeline tasks linked by `ProjectKey`. |
+| `NPSL Tracker - Updates` | Status updates and decisions. |
+| `NPSL Tracker - Risks` | Risks, issues, ownership, and mitigation. |
+| `NPSL Tracker - Acronyms` | Shared acronym glossary. |
+| `NPSL Tracker - Users` | Saved identities and application roles. |
+| `NPSL Tracker - Reference Documents` | Shared document and folder metadata, with attached files. |
 
 Provisioning is idempotent and additive. It creates missing lists and fields but does not delete, rename, retype, or import example records.
 
-New backing lists are marked `Hidden` in the same request that creates them. This keeps each tracker page from adding six more entries to the normal **Site Contents** view while preserving full REST access for the application and site administrators. Existing lists retain their current visibility so normal startup never performs a separate visibility MERGE. A site owner can still reach a hidden list by its direct URL or set `hideLists: false` before a new workspace is provisioned.
+New lists are visible in **Site Contents** under the `NPSL Tracker - ` prefix. To rename and unhide existing lists in place, deploy the updated HTML and run **Users and managers → Site Contents organization → Organize tracker lists** as a site owner. This preserves list IDs, URLs, records, attachments, and permissions. Normal startup supports both old and new titles without renaming anything. `hideLists` is no longer used. See [List organization](docs/list-organization.md).
 
 ### Project fields
 
@@ -130,7 +131,7 @@ Directory editing uses Edit → Update User / Delete User. Delete archives the t
 ### Reference Documents
 Reference Documents appears below My work for all roles. Users and managers can upload (20 MB per file), create nested folders, rename entries, and move them between folders. SMEs can browse, search, and download. Search spans the shared library. Downloads fetch bytes without opening a SharePoint document page.
 
-The deployment adds the ModernizationReferenceDocuments list (or the configured prefix). Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
+The deployment adds the NPSL Tracker - Reference Documents list (or the configured prefix), resolving an existing ModernizationReferenceDocuments list by its permanent ID. Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
 
 The user directory now has compact scrollable rows and a name/email/role search while retaining each user's role badge and Edit menu.
 

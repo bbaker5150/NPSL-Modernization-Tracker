@@ -96,7 +96,7 @@ export function createRepository() {
   if ((inSharePoint || config.forceSharePoint === true) && config.forceLocal !== true) {
     const scopedAccess = config.scopedAccess ?? /^\/sites\/metsoft\/?$/i.test(new URL(webUrl).pathname);
     if (scopedAccess) config.testingManagerPassword = false;
-    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', hideLists: config.hideLists !== false, scopedAccess }), config };
+    return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', scopedAccess }), config };
   }
   return { mode: 'local', store: new LocalStore(), config };
 }

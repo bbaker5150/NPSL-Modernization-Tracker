@@ -182,13 +182,15 @@ describe('owner-run site migration', () => {
   });
 });
 
+const catalogResponse = (suffix = 'Tasks') => new Response(JSON.stringify({ value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: `Modernization${suffix}`, BaseTemplate: 100, Hidden: true }] }));
+
 describe('SharePoint migration adapter', () => {
   it('retries a host timeout on a GET and requests smaller list pages', async () => {
-    const fetcher = vi.fn().mockRejectedValueOnce(new Error('SharePoint request timed out')).mockResolvedValueOnce(new Response(JSON.stringify({ value: [] })));
+    const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockRejectedValueOnce(new Error('SharePoint request timed out')).mockResolvedValueOnce(new Response(JSON.stringify({ value: [] })));
     const site = migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher, { wait: vi.fn() });
     expect(await site.readRows('tasks', ['RecordId'])).toEqual([]);
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[0][0]).toContain('$top=500');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1][0]).toContain('$top=500');
   });
   const response = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
   it('distinguishes site members from owners', async () => {
@@ -198,10 +200,10 @@ describe('SharePoint migration adapter', () => {
     expect(await site.canMigrate()).toBe(true);
   });
   it('reads every pagination page without filtering archived records and rejects foreign pagination', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(response({ value: [{ Id: 1 }], 'odata.nextLink': `${MIGRATION_SOURCE}/_api/next` })).mockResolvedValueOnce(response({ value: [{ Id: 2, Archived: true }] }));
+    const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockResolvedValueOnce(response({ value: [{ Id: 1 }], 'odata.nextLink': `${MIGRATION_SOURCE}/_api/next` })).mockResolvedValueOnce(response({ value: [{ Id: 2, Archived: true }] }));
     const site = migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher);
     expect(await site.readRows('tasks', ['RecordId', 'Archived'])).toEqual([{ Id: 1 }, { Id: 2, Archived: true }]);
-    expect(fetcher.mock.calls[0][0]).not.toContain('$filter');
+    expect(fetcher.mock.calls[1][0]).not.toContain('$filter');
     fetcher.mockResolvedValueOnce(response({ value: [], 'odata.nextLink': 'https://example.invalid/_api/next' }));
     await expect(site.readRows('tasks', ['RecordId'])).rejects.toThrow('Unexpected pagination');
   });
@@ -218,6 +220,7 @@ describe('migration document downloads', () => {
   it('uses cached SharePoint file addresses instead of the stalled REST binary route', async () => {
     const binary = new Uint8Array([0, 255, 254, 128, 13, 10]);
     const fetcher = vi.fn(async url => {
+      if (url.includes('/lists?')) return catalogResponse('ReferenceDocuments');
       if (url.includes('/$value')) return new Promise(() => {});
       if (url.includes('/items?')) return response({ value: [{ Id: 2, AttachmentFiles: [{ FileName: 'template.xlsx', ServerRelativeUrl: relative }] }] });
       if (url === `https://flankspeed.sharepoint-mil.us${relative}`) return new Response(binary, { headers: { 'Content-Type': 'application/octet-stream' } });
@@ -226,26 +229,26 @@ describe('migration document downloads', () => {
     const site = migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher);
     await site.readRows('references', ['RecordId'], true);
     expect(new Uint8Array(await site.bytes('references', 2, 'template.xlsx'))).toEqual(binary);
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[0][0]).toContain('AttachmentFiles/ServerRelativeUrl');
-    expect(fetcher.mock.calls[1][1]).toMatchObject({ credentials: 'include', headers: { Accept: '*/*' } });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1][0]).toContain('AttachmentFiles/ServerRelativeUrl');
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ credentials: 'include', headers: { Accept: '*/*' } });
   });
   it('resolves newly uploaded destination files from metadata before hash verification', async () => {
     const path = '/sites/metsoft/Lists/ModernizationTasks/Attachments/8/report%20one.pdf';
-    const fetcher = vi.fn().mockResolvedValueOnce(response({ value: [{ FileName: 'report one.pdf', ServerRelativeUrl: path }] })).mockResolvedValueOnce(new Response(new Uint8Array([9, 8, 7])));
+    const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockResolvedValueOnce(response({ value: [{ FileName: 'report one.pdf', ServerRelativeUrl: path }] })).mockResolvedValueOnce(new Response(new Uint8Array([9, 8, 7])));
     const site = migrationSite(MIGRATION_TARGET, 'Modernization', fetcher);
     expect(new Uint8Array(await site.bytes('tasks', 8, 'report one.pdf'))).toEqual(new Uint8Array([9, 8, 7]));
-    expect(fetcher.mock.calls[0][0]).toContain('/AttachmentFiles?$select=FileName,ServerRelativeUrl');
-    expect(fetcher.mock.calls[1][0]).toBe(`https://flankspeed.sharepoint-mil.us${path}`);
+    expect(fetcher.mock.calls[1][0]).toContain('/AttachmentFiles?$select=FileName,ServerRelativeUrl');
+    expect(fetcher.mock.calls[2][0]).toBe(`https://flankspeed.sharepoint-mil.us${path}`);
   });
   it('blocks foreign/missing download addresses and HTML sign-in responses without omitting documents', async () => {
     for (const address of ['https://example.invalid/file.pdf', '/sites/metsoft/Lists/Tasks/Attachments/1/file.pdf', '']) {
-      const fetcher = vi.fn().mockResolvedValueOnce(response({ value: [{ FileName: 'file.pdf', ServerRelativeUrl: address }] }));
+      const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockResolvedValueOnce(response({ value: [{ FileName: 'file.pdf', ServerRelativeUrl: address }] }));
       const site = migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher);
       await expect(site.bytes('tasks', 1, 'file.pdf')).rejects.toThrow(/address/);
-      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher).toHaveBeenCalledTimes(2);
     }
-    const fetcher = vi.fn().mockResolvedValueOnce(response({ value: [{ FileName: 'file.pdf', ServerRelativeUrl: relative }] })).mockResolvedValueOnce(new Response('<html>Sign in</html>', { headers: { 'Content-Type': 'text/html' } }));
+    const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockResolvedValueOnce(response({ value: [{ FileName: 'file.pdf', ServerRelativeUrl: relative }] })).mockResolvedValueOnce(new Response('<html>Sign in</html>', { headers: { 'Content-Type': 'text/html' } }));
     await expect(migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher).bytes('tasks', 1, 'file.pdf')).rejects.toThrow('HTML page instead of the document');
   });
 });
@@ -253,7 +256,7 @@ describe('migration document downloads', () => {
 it('encodes literal hash and percent characters in attachment file names', async () => {
   const name = 'MTR #1 100% final.docx';
   const path = '/sites/ISEAMETENG/Lists/ModernizationTasks/Attachments/239/';
-  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ value: [{ FileName: name, ServerRelativeUrl: path + name }] }))).mockResolvedValueOnce(new Response(new Uint8Array([1, 2])));
+  const fetcher = vi.fn().mockResolvedValueOnce(catalogResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ value: [{ FileName: name, ServerRelativeUrl: path + name }] }))).mockResolvedValueOnce(new Response(new Uint8Array([1, 2])));
   await migrationSite(MIGRATION_SOURCE, 'Modernization', fetcher).bytes('tasks', 239, name);
-  expect(fetcher.mock.calls[1][0]).toBe(`https://flankspeed.sharepoint-mil.us${path}MTR%20%231%20100%25%20final.docx`);
+  expect(fetcher.mock.calls[2][0]).toBe(`https://flankspeed.sharepoint-mil.us${path}MTR%20%231%20100%25%20final.docx`);
 });
