@@ -216,13 +216,14 @@ describe('scoped store integration', () => {
     await expect(store.recycle('users', 7)).rejects.toThrow('Cannot revoke');
     expect(store.update).not.toHaveBeenCalled();
   });
-  it('reconciles all projects on removal, including interrupted former assignments', async () => {
+  it('targets the removed user’s existing grants without rebuilding project scopes', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
     store.permissionProjects = vi.fn(async () => [{ spId: 1, ownerKey: person.loginName }, { spId: 2, ownerKey: 'someone-else' }]);
-    store.permissions.syncProject = vi.fn(); store.permissions.syncGroups = vi.fn(async (_person, _role, { beforeChange }) => beforeChange([]));
+    store.permissions.syncProject = vi.fn(); store.permissions.revokeEngineerAccess = vi.fn(); store.permissions.syncGroups = vi.fn(async (_person, _role, { beforeChange }) => beforeChange([]));
     await store.syncUserAccess(person, null, [person]);
-    expect(store.permissions.syncProject).toHaveBeenCalledTimes(2);
-    expect(store.permissions.syncProject.mock.calls.every(([, users]) => users.length === 0)).toBe(true);
+    expect(store.permissions.syncProject).not.toHaveBeenCalled();
+    expect(store.permissionProjects).not.toHaveBeenCalled();
+    expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledExactlyOnceWith(person, []);
     expect(store.permissions.syncGroups).toHaveBeenCalledWith(person, null, { beforeChange: expect.any(Function) });
   });
   it('does not write on read-only startup and rejects testing promotion', async () => {
@@ -446,12 +447,12 @@ describe('Manager promotion with scoped project cleanup', () => {
     store.get = backing.store.get; store.post = backing.store.post;
     const projects = [{ spId: 5, projectKey: 'assigned', ownerKey: person.loginName }, { spId: 6, projectKey: 'former', ownerKey: 'someone-else' }];
     store.permissionProjects = vi.fn(async () => projects);
-    store.permissions.syncProject = vi.fn(async () => {
+    store.permissions.revokeEngineerAccess = vi.fn(async () => {
       expect(store.post).not.toHaveBeenCalled(); // cleanup precedes all group mutations
     });
     await store.syncUserAccess(person, requested, savedRole ? [{ ...person, role: savedRole }] : []);
-    expect(store.permissionProjects).toHaveBeenCalledTimes(cleanup ? 1 : 0);
-    expect(store.permissions.syncProject).toHaveBeenCalledTimes(cleanup ? 2 : 0);
+    expect(store.permissionProjects).not.toHaveBeenCalled();
+    expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledTimes(cleanup ? 1 : 0);
     if (requested) expect(backing.groups.find(group => group.role === requested).members).toHaveLength(1);
     else expect(backing.groups.every(group => group.members.length === 0)).toBe(true);
   });
@@ -462,7 +463,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     store.get = backing.store.get; store.post = backing.store.post;
     store.directoryRows = vi.fn(async () => [{ ...person, spId: 7 }]);
     store.permissionProjects = vi.fn(async () => [{ spId: 5, projectKey: 'p' }]);
-    store.permissions.syncProject = vi.fn(async () => { throw new Error('Cleanup incomplete'); });
+    store.permissions.revokeEngineerAccess = vi.fn(async () => { throw new Error('Cleanup incomplete'); });
     store.update = vi.fn(); store.create = vi.fn();
     await expect(store.saveUser({ ...person, role: 'Manager' })).rejects.toThrow('Cleanup incomplete');
     expect(store.post).not.toHaveBeenCalled();
@@ -496,64 +497,26 @@ describe('Manager promotion with scoped project cleanup', () => {
     ['Viewer', 'Viewer', false],
     ['Project Engineer', 'Project Engineer', true],
     ['Viewer', 'Project Engineer', true],
-  ])('saves %s → Manager with live %s membership (project cleanup: %s)', async (oldRole, liveRole, cleanup) => {
+  ])('saves %s → Manager with live %s membership (targeted cleanup: %s)', async (oldRole, liveRole, cleanup) => {
     const backing = fixture();
     backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
     const previous = { ...person, role: oldRole, spId: 7 };
-    const project = { spId: 5, projectKey: 'p', ownerKey: person.loginName, title: 'Migrated project' };
-    const folders = Object.fromEntries(['Tasks', 'Updates', 'Risks'].map(suffix => [suffix, {
-      Id: 22, FileSystemObjectType: '1', ProjectKey: null,
-      FileRef: `/sites/metsoft/Lists/Modernization${suffix}/tracker-project-5`,
-      'odata.etag': '"2"',
-    }]));
     let savedUser;
     store.directoryRows = vi.fn(async () => [previous]);
-    store.permissionProjects = vi.fn(async () => [project]);
+    store.permissionProjects = vi.fn();
     store.update = vi.fn(async (_key, _id, fields) => { savedUser = { Id: 7, ...fields }; });
-    store.get = vi.fn(async (path, headers) => {
-      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
-      if (path.includes('/roledefinitions')) return { value: [{ Id: 3, RoleTypeKind: 3 }] };
-      if (path.includes('/items(7)?')) return savedUser;
-      if (path.includes("getbytitle('ModernizationProjects')/items(5)?")) return { Id: 5, ProjectKey: 'p' };
-      if (suffix && path.includes('RootFolder')) return { EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: `/sites/metsoft/Lists/Modernization${suffix}` } };
-      if (suffix && path.includes('/items?') && path.includes('$filter=FileRef')) return { value: [{ Id: 22 }] };
-      if (path.includes('GetFolderByServerRelativePath')) throw new Error('Do not use the broken folder-navigation endpoint');
-      if (/ItemChildCount|FolderChildCount/.test(path)) throw new Error('Unsupported computed field');
-      if (suffix && path.includes('/items(22)/Folder?')) return { ServerRelativeUrl: folders[suffix].FileRef, ItemCount: 0 };
-      if (suffix && path.includes('/items(22)?')) {
-        expect(headers.Accept).toContain('minimalmetadata');
-        return { ...folders[suffix] };
-      }
-      if (suffix && path.includes('/items?')) return { value: [] };
-      return backing.store.get(path);
-    });
-    store.post = vi.fn(async (path, options) => {
-      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
-      if (suffix && path.endsWith('/items(22)')) {
-        expect(options.headers['IF-MATCH']).toBe('"2"');
-        Object.assign(folders[suffix], options.body);
-        return {};
-      }
-      return backing.store.post(path, options);
-    });
-    // ACL wire behavior is separately covered above; retain the real project,
-    // folder, group membership, and user persistence orchestration here.
-    store.permissions.applyScope = vi.fn(async (scope, principalId) => {
-      expect(principalId).toBeNull(); // remove former direct engineer rights
-      if (scope.includes('/items(22)')) {
-        const suffix = Object.keys(folders).find(name => scope.includes(`Modernization${name}`));
-        expect(folders[suffix].ProjectKey).toBe('p'); // verified before ACL use
-      }
-    });
+    store.get = vi.fn(async path => path.includes('/items(7)?') ? savedUser : backing.store.get(path));
+    store.post = backing.store.post;
+    store.permissions.revokeEngineerAccess = vi.fn();
+    store.permissions.syncProject = vi.fn();
     const saved = await store.saveUser({ ...previous, role: 'Manager' });
     expect(saved.role).toBe('Manager');
-    expect(store.permissions.applyScope).toHaveBeenCalledTimes(cleanup ? 4 : 0);
-    if (!cleanup) {
-      expect(store.permissionProjects).not.toHaveBeenCalled();
-      expect(store.post.mock.calls).toHaveLength(2); // remove Viewer, add Manager
-      expect(store.post.mock.calls.every(([path]) => path.includes('/sitegroups('))).toBe(true);
-    }
+    expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledTimes(cleanup ? 1 : 0);
+    expect(store.permissionProjects).not.toHaveBeenCalled();
+    expect(store.permissions.syncProject).not.toHaveBeenCalled();
+    expect(store.post.mock.calls).toHaveLength(2);
+    expect(store.post.mock.calls.every(([path]) => path.includes('/sitegroups('))).toBe(true);
     expect(backing.groups.find(group => group.role === 'Manager').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
     expect(backing.groups.filter(group => group.role !== 'Manager').every(group => group.members.length === 0)).toBe(true);
     expect(store.update).toHaveBeenCalledExactlyOnceWith('users', 7, expect.objectContaining({ AppRole: 'Manager' }));

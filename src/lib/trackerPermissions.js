@@ -79,6 +79,46 @@ export class TrackerPermissions {
     if (target && !(await this.membership(target.group, person.loginName))) throw new Error(`SharePoint did not verify ${target.group.Title} membership. Retry the role change.`);
     return target?.group;
   }
+  async revokeEngineerAccess(person, memberships = []) {
+    if (!person.loginName) throw new Error('Select a resolved SharePoint identity.');
+    // Prefer the principal already verified in the live tracker memberships.
+    // An interrupted earlier demotion may have removed every membership, so
+    // resolve that case with a read, never ensureuser or a new permission grant.
+    const members = memberships.filter(entry => entry.member).map(entry => entry.member);
+    if (!members.length) members.push(...await this.pages(`/_api/web/siteusers?$select=Id,LoginName&$filter=LoginName eq '${quote(person.loginName)}'`));
+    if (!members.length || members.some(member => !positiveId(member.Id) || member.LoginName?.toLowerCase() !== person.loginName.toLowerCase()) || new Set(members.map(member => Number(member.Id))).size !== 1) {
+      throw new Error('Could not uniquely verify this user’s SharePoint identity before removing engineer access.');
+    }
+    const principalId = Number(members[0].Id), roleId = await this.contributionRole();
+    const hasGrant = rows => rows.some(row => Number(row.PrincipalId) === principalId && Number(row.Member.PrincipalType) === 1 &&
+      (row.RoleDefinitionBindings.results || row.RoleDefinitionBindings).some(binding => Number(binding.Id) === Number(roleId)));
+    // Include folders, archived records, and former assignments, but never
+    // initialize scopes or repair other people's access during a role change.
+    const inventories = await Promise.all(['projects', ...CHILDREN].map(async key => {
+      const rows = await this.pages(`${this.root(key)}/items?$select=Id,HasUniqueRoleAssignments&$top=500`);
+      if (rows.some(row => !positiveId(row.Id) || typeof row.HasUniqueRoleAssignments !== 'boolean')) throw new Error(`Cannot verify unique permission scopes in ${key}. No engineer grants were removed.`);
+      return rows.filter(row => row.HasUniqueRoleAssignments).map(row => `${this.root(key)}/items(${Number(row.Id)})`);
+    }));
+    const scopes = [...new Set(inventories.flat())], removals = [];
+    // Preflight all ACL reads before the first mutation. Limit parallel reads
+    // so a large legacy task list does not flood SharePoint or the host bridge.
+    for (let offset = 0; offset < scopes.length; offset += 4) {
+      const checks = await Promise.allSettled(scopes.slice(offset, offset + 4).map(async scope => ({ scope, rows: await this.assignments(scope) })));
+      const failed = checks.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+      removals.push(...checks.filter(result => hasGrant(result.value.rows)).map(result => result.value.scope));
+    }
+    let removed = 0;
+    for (const scope of removals) {
+      const info = unwrap(await this.get(`${scope}?$select=HasUniqueRoleAssignments`));
+      if (info.HasUniqueRoleAssignments !== true) throw new Error('Project access changed during this role update. Retry to check the current permissions.');
+      if (!hasGrant(await this.assignments(scope))) continue;
+      await this.post(`${scope}/roleassignments/removeroleassignment(principalid=${principalId},roledefid=${roleId})`);
+      if (hasGrant(await this.assignments(scope))) throw new Error('SharePoint did not verify removal of the former engineer grant. Retry this role change.');
+      removed++;
+    }
+    return removed;
+  }
   async contributionRole() {
     const roles = await this.pages('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 3');
     const role = roles.find(row => row.RoleTypeKind === 3);

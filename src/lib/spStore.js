@@ -555,9 +555,9 @@ export class SharePointStore {
       const cleanNonEngineer = !existing || existing.role === 'Viewer' || (existing.role === 'Manager' && role === 'Manager');
       // Viewer → Manager and ordinary non-engineer profile saves are group-only.
       // Demotions, removals, legacy roles, and actual engineer membership still
-      // reconcile all projects, including old grants from interrupted changes.
+      // check existing grants, including those left by interrupted changes.
       if (role !== 'Project Engineer' && (!role || !cleanNonEngineer || liveEngineer || liveManagerDemotion)) {
-        for (const project of await this.permissionProjects()) await this.permissions.syncProject(project, next);
+        await this.permissions.revokeEngineerAccess(person, memberships);
       }
     } });
     if (role === 'Project Engineer') {
