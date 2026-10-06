@@ -116,14 +116,15 @@ it('requires SharePoint owner permissions for export and import', async () => {
 });
 it('sends authenticated multipart batches and rejects an inner failure without retrying writes', async () => {
   const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'NPSL Tracker - Tasks', BaseTemplate: 100, Hidden: false }] })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ FormDigestValue: 'test-digest', FormDigestTimeoutSeconds: 1800 })))
     .mockResolvedValueOnce(new Response('HTTP/1.1 201 Created\r\n\r\n{}\r\nHTTP/1.1 403 Denied\r\n', { headers: { 'Content-Type': 'multipart/mixed; boundary=test' } }));
   const site = migrationSite('https://example.invalid/sites/batch-adapter', 'Modernization', fetcher);
   await expect(site.writeBatch('tasks', [{ fields: { Title: 'A' } }, { fields: { Title: 'B' } }])).rejects.toThrow('every batch');
-  expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(fetcher.mock.calls[1][0]).toBe('https://example.invalid/sites/batch-adapter/_api/$batch');
-  expect(fetcher.mock.calls[1][1]).toMatchObject({ method: 'POST', credentials: 'include', headers: { 'X-RequestDigest': 'test-digest' } });
-  expect(fetcher.mock.calls[1][1].body).toContain("/getbytitle('ModernizationTasks')/items HTTP/1.1");
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher.mock.calls[2][0]).toBe('https://example.invalid/sites/batch-adapter/_api/$batch');
+  expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'POST', credentials: 'include', headers: { 'X-RequestDigest': 'test-digest' } });
+  expect(fetcher.mock.calls[2][1].body).toContain("/lists(guid'11111111-1111-1111-1111-111111111111')/items HTTP/1.1");
 });
 
 it('excludes Reference Documents completely by default and leaves destination references untouched', async () => {

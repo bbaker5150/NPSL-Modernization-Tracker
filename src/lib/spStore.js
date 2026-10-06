@@ -1,3 +1,4 @@
+import { TrackerLists, displayListTitle, legacyListTitle } from './trackerLists';
 import { normalizeDirectory } from './identity';
 import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment, validateAttachmentName } from './taskAttachments';
@@ -71,7 +72,7 @@ export const CONTAINERS = [
 
 const escapeXml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const escapeOData = (value) => encodeURIComponent(String(value).replace(/'/g, "''"));
-const titleFor = (prefix, key) => `${String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization'}${CONTAINERS.find((c) => c.key === key).suffix}`;
+const titleFor = legacyListTitle;
 const apiFor = (prefix, key) => `/_api/web/lists/getbytitle('${escapeOData(titleFor(prefix, key))}')`;
 
 function schemaXml(field) {
@@ -160,7 +161,7 @@ const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
 export class SharePointStore {
-  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true, scopedAccess = false }) {
+  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, scopedAccess = false }) {
     this.webUrl = String(webUrl || '').replace(/\/+$/, '');
     this.prefix = prefix;
     this.fetchImpl = !scopedAccess ? fetchImpl : async (url, options = {}) => {
@@ -177,14 +178,16 @@ export class SharePointStore {
       catch (error) { if (controller.signal.aborted) throw new Error('SharePoint request timed out after 60 seconds. A write may have completed; reload or rerun permission setup to verify it.'); throw error; }
       finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     };
-    this.hideLists = hideLists;
+    this.lists = new TrackerLists(prefix, path => spGet(this.webUrl, path, this.fetchImpl), (path, options) => spPost(this.webUrl, path, options, this.fetchImpl));
     this.userPromise = null;
     this.scopedAccess = scopedAccess;
     this.permissions = scopedAccess ? new TrackerPermissions(this) : null;
   }
 
-  get = (path) => spGet(this.webUrl, path, this.fetchImpl);
-  post = (path, options) => spPost(this.webUrl, path, options, this.fetchImpl);
+  get = async (path) => spGet(this.webUrl, await this.lists.rewrite(path), this.fetchImpl);
+  post = async (path, options) => spPost(this.webUrl, await this.lists.rewrite(path), options, this.fetchImpl);
+  listApi = key => this.lists.path(key);
+  organizeTrackerLists = onProgress => this.lists.organize(onProgress);
   currentUser = () => this.userPromise ||= getCurrentUser(this.webUrl, this.fetchImpl);
 
   async listExists(key) {
@@ -207,8 +210,9 @@ export class SharePointStore {
     const steps = [];
     for (const container of CONTAINERS) {
       if (!(await this.listExists(container.key))) {
-        await this.post('/_api/web/lists', { body: { Title: titleFor(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(['tasks', 'references'].includes(container.key) ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: this.hideLists } });
-        steps.push(`Created ${titleFor(this.prefix, container.key)}`);
+        await this.post('/_api/web/lists', { body: { Title: displayListTitle(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(['tasks', 'references'].includes(container.key) ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: false } });
+        this.lists.cache.delete(container.key);
+        steps.push(`Created ${displayListTitle(this.prefix, container.key)}`);
       }
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
       const existing = new Set((body.value || []).map((field) => field.InternalName));
