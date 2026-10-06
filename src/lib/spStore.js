@@ -6,6 +6,7 @@ import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normaliz
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 import { TrackerPermissions } from './trackerPermissions';
+import { TrackerAccessJob } from './trackerAccessJob';
 import { isOwnedByUser } from './identity';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
@@ -182,6 +183,7 @@ export class SharePointStore {
     this.userPromise = null;
     this.scopedAccess = scopedAccess;
     this.permissions = scopedAccess ? new TrackerPermissions(this) : null;
+    this.trackerAccessJob = scopedAccess ? new TrackerAccessJob(this) : null;
   }
 
   get = async (path, headers) => spGet(this.webUrl, await this.lists.rewrite(path), this.fetchImpl, headers);

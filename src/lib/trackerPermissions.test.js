@@ -108,6 +108,7 @@ describe('project ACLs and inherited creation', () => {
     permissions.membership = vi.fn(async () => ({ Id: 11 }));
     permissions.contributionRole = vi.fn(async () => 3);
     permissions.applyScope = vi.fn();
+    permissions.assignments = vi.fn(async () => []);
     permissions.folder = vi.fn(async key => ({ path: `/${key}/tracker-project-5`, scope: `/${key}/items(50)` }));
     permissions.pages = vi.fn(async path => {
       const key = path.includes('Tasks') ? 'tasks' : path.includes('Updates') ? 'updates' : 'risks';
