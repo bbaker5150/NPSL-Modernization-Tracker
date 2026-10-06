@@ -190,6 +190,7 @@ export class SharePointStore {
   post = async (path, options) => spPost(this.webUrl, await this.lists.rewrite(path), options, this.fetchImpl);
   listApi = key => this.lists.path(key);
   organizeTrackerLists = onProgress => this.lists.organize(onProgress);
+  maintainListNames = () => this.listNameMaintenance ||= this.lists.maintainNames();
   currentUser = () => this.userPromise ||= getCurrentUser(this.webUrl, this.fetchImpl);
 
   async listExists(key) {

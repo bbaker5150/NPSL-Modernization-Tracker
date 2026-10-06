@@ -17,7 +17,7 @@ describe('SharePoint store', () => {
     const calls = [];
     const fetchImpl = async (url) => {
       calls.push(url);
-      if (url.includes("/lists?")) return new Response(JSON.stringify({ value: [{ Id: "11111111-1111-1111-1111-111111111111", Title: "NPSL Tracker - Projects", BaseTemplate: 100, Hidden: false }] }));
+      if (url.includes("/lists?")) return new Response(JSON.stringify({ value: [{ Id: "11111111-1111-1111-1111-111111111111", Title: "Modernization-Tracker - Projects", BaseTemplate: 100, Hidden: false }] }));
       const second = url.includes('$skiptoken');
       return new Response(JSON.stringify(second
         ? { value: [{ Id: 2, Title: 'Second' }] }
@@ -51,7 +51,7 @@ describe('SharePoint store', () => {
     const listCreates = store.post.mock.calls.filter(([path]) => path === '/_api/web/lists');
     expect(listCreates).toHaveLength(CONTAINERS.length);
     expect(listCreates.every(([, options]) => options.body.Hidden === false)).toBe(true);
-    expect(listCreates.map(([, { body }]) => body.Title)).toEqual(['NPSL Tracker - Projects', 'NPSL Tracker - Tasks', 'NPSL Tracker - Updates', 'NPSL Tracker - Risks', 'NPSL Tracker - Acronyms', 'NPSL Tracker - Users', 'NPSL Tracker - Reference Documents']);
+    expect(listCreates.map(([, { body }]) => body.Title)).toEqual(['Modernization-Tracker - Projects', 'Modernization-Tracker - Tasks', 'Modernization-Tracker - Updates', 'Modernization-Tracker - Risks', 'Modernization-Tracker - Acronyms', 'Modernization-Tracker - Users', 'Modernization-Tracker - Reference Documents']);
     expect(JSON.stringify(store.post.mock.calls)).not.toContain('X-HTTP-Method');
   });
 

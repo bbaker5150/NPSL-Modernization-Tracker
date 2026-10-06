@@ -41,7 +41,7 @@ describe('tracker list organization', () => {
     const originalIds = rows.map(row => row.Id);
     await expect(catalog.organize()).resolves.toBe(7);
     expect(rows.map(row => row.Id)).toEqual(originalIds);
-    expect(rows.every(row => !row.Hidden && row.Title.startsWith('NPSL Tracker - '))).toBe(true);
+    expect(rows.every(row => !row.Hidden && row.Title.startsWith('Modernization-Tracker - '))).toBe(true);
     expect(post).toHaveBeenCalledTimes(7);
     for (const [path, options] of post.mock.calls) {
       expect(path).toMatch(/\/lists\(guid'/);
@@ -55,7 +55,7 @@ describe('tracker list organization', () => {
       const { rows, catalog, post } = fixture();
       if (kind === 'duplicate') rows.push({ ...rows[6], Id: '11111111-1111-1111-1111-111111111111', Title: 'NPSL Tracker - Reference Documents' });
       else rows.pop();
-      await expect(catalog.organize()).rejects.toThrow(kind === 'duplicate' ? 'Both' : 'not found');
+      await expect(catalog.organize()).rejects.toThrow(kind === 'duplicate' ? 'Multiple' : 'not found');
       expect(post).not.toHaveBeenCalled();
     }
   });
@@ -73,7 +73,7 @@ describe('tracker list organization', () => {
     const originalPost = post.getMockImplementation();
     post.mockImplementationOnce(originalPost).mockRejectedValueOnce(new Error('Connection interrupted'));
     await expect(catalog.organize()).rejects.toThrow('Connection interrupted');
-    expect(rows[0].Title).toBe('NPSL Tracker - Projects');
+    expect(rows[0].Title).toBe('Modernization-Tracker - Projects');
     expect(rows[1].Title).toBe('ModernizationTasks');
     await expect(catalog.organize()).resolves.toBe(7);
     expect(post).toHaveBeenCalledTimes(8); // one completed, one failed, six resumed
@@ -83,7 +83,18 @@ describe('tracker list organization', () => {
     post.mockResolvedValueOnce({});
     await expect(catalog.organize()).rejects.toThrow('Could not verify');
   });
-  it('keeps custom list namespaces separate', () => {
+  it('automatically maintains names only for site owners and accepts all three aliases', async () => {
+    const { rows, catalog, get, post } = fixture();
+    rows[0].Title = 'NPSL Tracker - Projects';
+    rows[1].Title = 'Modernization-Tracker - Tasks';
+    get.mockResolvedValueOnce({ Low: '2048' });
+    expect(await catalog.maintainNames()).toBe(0);
+    expect(post).not.toHaveBeenCalled();
+    get.mockResolvedValueOnce({ Low: '33556480' });
+    expect(await catalog.maintainNames()).toBe(7);
+    expect(rows.every(row => row.Title.startsWith('Modernization-Tracker - '))).toBe(true);
+  });
+  it('keeps custom list namespaces separate' , () => {
     expect(displayListTitle('OtherApp', 'projects')).toBe('OtherApp Tracker - Projects');
     expect(legacyListTitle('OtherApp', 'references')).toBe('OtherAppReferenceDocuments');
   });
