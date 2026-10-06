@@ -52,7 +52,7 @@ export class TrackerPermissions {
     return (await this.pages(`/_api/web/sitegroups(${group.Id})/users?$select=Id,LoginName&$filter=LoginName eq '${quote(login)}'`))
       .find(row => row.LoginName?.toLowerCase() === login.toLowerCase());
   }
-  async syncGroups(person, role) {
+  async syncGroups(person, role, { beforeChange } = {}) {
     if (!person.loginName) throw new Error('Select a resolved SharePoint identity.');
     // Read every membership before changing any. Failure is never interpreted as absence.
     const state = [];
@@ -62,6 +62,9 @@ export class TrackerPermissions {
     }
     const target = state.find(entry => entry.name === role);
     if (role && !target) throw new Error('Select a valid tracker role.');
+    // Let role changes revoke engineer grants using the live memberships we
+    // just read, before removing groups or granting the replacement role.
+    if (beforeChange) await beforeChange(state);
     // Remove stale privileged membership before granting the replacement role.
     for (const entry of state.filter(entry => entry.member && entry !== target)) {
       try {

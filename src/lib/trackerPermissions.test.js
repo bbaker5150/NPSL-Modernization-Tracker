@@ -219,11 +219,11 @@ describe('scoped store integration', () => {
   it('reconciles all projects on removal, including interrupted former assignments', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
     store.permissionProjects = vi.fn(async () => [{ spId: 1, ownerKey: person.loginName }, { spId: 2, ownerKey: 'someone-else' }]);
-    store.permissions.syncProject = vi.fn(); store.permissions.syncGroups = vi.fn();
+    store.permissions.syncProject = vi.fn(); store.permissions.syncGroups = vi.fn(async (_person, _role, { beforeChange }) => beforeChange([]));
     await store.syncUserAccess(person, null, [person]);
     expect(store.permissions.syncProject).toHaveBeenCalledTimes(2);
     expect(store.permissions.syncProject.mock.calls.every(([, users]) => users.length === 0)).toBe(true);
-    expect(store.permissions.syncGroups).toHaveBeenCalledWith(person, null);
+    expect(store.permissions.syncGroups).toHaveBeenCalledWith(person, null, { beforeChange: expect.any(Function) });
   });
   it('does not write on read-only startup and rejects testing promotion', async () => {
     const raw = {
@@ -428,10 +428,77 @@ describe('project folder identity regression', () => {
   });
 });
 
-describe('Manager promotion after interrupted folder setup', () => {
-  it.each(['Viewer', 'Project Engineer'])('saves and verifies a %s → Manager change through the folder recovery path', async oldRole => {
+describe('Manager promotion with scoped project cleanup', () => {
+  it.each([
+    ['Viewer', 'Viewer', 'Viewer', false],
+    ['Manager', 'Manager', 'Manager', false],
+    [null, null, 'Manager', false],
+    ['Manager', 'Manager', 'Viewer', true],
+    ['Viewer', 'Manager', 'Viewer', true],
+    ['Project Engineer', 'Viewer', 'Viewer', true],
+    ['User', 'Viewer', 'Manager', true],
+    ['Viewer', 'Viewer', null, true],
+    [null, 'Project Engineer', 'Manager', true],
+  ])('preserves role transition behavior: saved %s, live %s, requested %s, cleanup %s', async (savedRole, liveRole, requested, cleanup) => {
     const backing = fixture();
-    backing.groups.find(group => group.role === oldRole).members = [{ Id: 11, LoginName: person.loginName }];
+    if (liveRole) backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    store.get = backing.store.get; store.post = backing.store.post;
+    const projects = [{ spId: 5, projectKey: 'assigned', ownerKey: person.loginName }, { spId: 6, projectKey: 'former', ownerKey: 'someone-else' }];
+    store.permissionProjects = vi.fn(async () => projects);
+    store.permissions.syncProject = vi.fn(async () => {
+      expect(store.post).not.toHaveBeenCalled(); // cleanup precedes all group mutations
+    });
+    await store.syncUserAccess(person, requested, savedRole ? [{ ...person, role: savedRole }] : []);
+    expect(store.permissionProjects).toHaveBeenCalledTimes(cleanup ? 1 : 0);
+    expect(store.permissions.syncProject).toHaveBeenCalledTimes(cleanup ? 2 : 0);
+    if (requested) expect(backing.groups.find(group => group.role === requested).members).toHaveLength(1);
+    else expect(backing.groups.every(group => group.members.length === 0)).toBe(true);
+  });
+  it('stops promotion before group changes or directory persistence when engineer cleanup fails', async () => {
+    const backing = fixture();
+    backing.groups.find(group => group.role === 'Project Engineer').members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    store.get = backing.store.get; store.post = backing.store.post;
+    store.directoryRows = vi.fn(async () => [{ ...person, spId: 7 }]);
+    store.permissionProjects = vi.fn(async () => [{ spId: 5, projectKey: 'p' }]);
+    store.permissions.syncProject = vi.fn(async () => { throw new Error('Cleanup incomplete'); });
+    store.update = vi.fn(); store.create = vi.fn();
+    await expect(store.saveUser({ ...person, role: 'Manager' })).rejects.toThrow('Cleanup incomplete');
+    expect(store.post).not.toHaveBeenCalled();
+    expect(store.update).not.toHaveBeenCalled(); expect(store.create).not.toHaveBeenCalled();
+    expect(backing.groups.find(group => group.role === 'Project Engineer').members).toHaveLength(1);
+  });
+  it('checks all memberships before cleanup and stops when a membership read fails', async () => {
+    const backing = fixture();
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    store.get = vi.fn(async path => {
+      if (path.includes('sitegroups(2)/users')) throw new Error('Cannot read engineer group');
+      return backing.store.get(path);
+    });
+    store.post = backing.store.post; store.permissionProjects = vi.fn();
+    await expect(store.syncUserAccess(person, 'Manager', [{ ...person, role: 'Viewer' }])).rejects.toThrow('Cannot read engineer group');
+    expect(store.permissionProjects).not.toHaveBeenCalled(); expect(store.post).not.toHaveBeenCalled();
+  });
+  it('grants Project Engineer access only to assigned projects after verifying group membership', async () => {
+    const backing = fixture();
+    backing.groups.find(group => group.role === 'Viewer').members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    store.get = backing.store.get; store.post = backing.store.post;
+    store.permissionProjects = vi.fn(async () => [{ spId: 5, ownerKey: person.loginName }, { spId: 6, ownerKey: 'someone-else' }]);
+    store.permissions.syncProject = vi.fn(async () => {
+      expect(backing.groups.find(group => group.role === 'Project Engineer').members).toHaveLength(1);
+    });
+    await store.syncUserAccess(person, 'Project Engineer', [{ ...person, role: 'Viewer' }]);
+    expect(store.permissions.syncProject).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ spId: 5 }), [person]);
+  });
+  it.each([
+    ['Viewer', 'Viewer', false],
+    ['Project Engineer', 'Project Engineer', true],
+    ['Viewer', 'Project Engineer', true],
+  ])('saves %s → Manager with live %s membership (project cleanup: %s)', async (oldRole, liveRole, cleanup) => {
+    const backing = fixture();
+    backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
     const previous = { ...person, role: oldRole, spId: 7 };
     const project = { spId: 5, projectKey: 'p', ownerKey: person.loginName, title: 'Migrated project' };
@@ -481,7 +548,12 @@ describe('Manager promotion after interrupted folder setup', () => {
     });
     const saved = await store.saveUser({ ...previous, role: 'Manager' });
     expect(saved.role).toBe('Manager');
-    expect(store.permissions.applyScope).toHaveBeenCalledTimes(4);
+    expect(store.permissions.applyScope).toHaveBeenCalledTimes(cleanup ? 4 : 0);
+    if (!cleanup) {
+      expect(store.permissionProjects).not.toHaveBeenCalled();
+      expect(store.post.mock.calls).toHaveLength(2); // remove Viewer, add Manager
+      expect(store.post.mock.calls.every(([path]) => path.includes('/sitegroups('))).toBe(true);
+    }
     expect(backing.groups.find(group => group.role === 'Manager').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
     expect(backing.groups.filter(group => group.role !== 'Manager').every(group => group.members.length === 0)).toBe(true);
     expect(store.update).toHaveBeenCalledExactlyOnceWith('users', 7, expect.objectContaining({ AppRole: 'Manager' }));

@@ -546,14 +546,21 @@ export class SharePointStore {
   directoryRows() { return this.listItems('users', CONTAINERS[5].fields.map(field => field.name), fromUser); }
   permissionProjects() { return this.listItems('projects', CONTAINERS[0].fields.map(field => field.name), item => ({ ...fromProject(item), archived: !!item.Archived }), true); }
   async syncUserAccess(person, role, users) {
-    const projects = await this.permissionProjects();
+    const existing = users.find(row => row.id === person.id);
     const next = [...users.filter(row => row.id !== person.id), ...(role ? [{ ...person, role }] : [])];
-    // Revoke project writes before a demotion/removal. Retry repeats verification.
-    // Include every project on removal/demotion: a previous interrupted engineer
-    // reassignment may have left an old grant on a child record.
-    if (role !== 'Project Engineer' && users.some(row => row.id === person.id)) for (const project of projects) await this.permissions.syncProject(project, next);
-    await this.permissions.syncGroups(person, role);
+    await this.permissions.syncGroups(person, role, { beforeChange: async memberships => {
+      const liveEngineer = memberships.some(entry => entry.name === 'Project Engineer' && entry.member);
+      const liveManagerDemotion = role === 'Viewer' && memberships.some(entry => entry.name === 'Manager' && entry.member);
+      const cleanNonEngineer = !existing || existing.role === 'Viewer' || (existing.role === 'Manager' && role === 'Manager');
+      // Viewer → Manager and ordinary non-engineer profile saves are group-only.
+      // Demotions, removals, legacy roles, and actual engineer membership still
+      // reconcile all projects, including old grants from interrupted changes.
+      if (role !== 'Project Engineer' && (!role || !cleanNonEngineer || liveEngineer || liveManagerDemotion)) {
+        for (const project of await this.permissionProjects()) await this.permissions.syncProject(project, next);
+      }
+    } });
     if (role === 'Project Engineer') {
+      const projects = await this.permissionProjects();
       for (const project of projects.filter(project => isOwnedByUser(project, person))) await this.permissions.syncProject(project, next);
     }
   }
