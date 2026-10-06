@@ -56,8 +56,12 @@ API references: [List items in folders](https://learn.microsoft.com/en-us/sharep
 
 ## Recovering interrupted project-folder setup
 
-If **Apply tracker permissions** stopped with **Project folder identity does not match**, deploy the folder-verification update and run the action again. Verification now reads the underlying list item by ID rather than relying on custom metadata in the folder-navigation response, and accepts either numeric or string `1` for a folder.
+If **Apply tracker permissions** stopped with **Project folder identity does not match**, deploy the folder-verification update and run the action again. Verification now finds the folder by its exact FileRef path in the backing list and reads the canonical list item by ID. It does not use GetFolderByServerRelativePath/ListItemAllFields, which returned no usable item ID in the reported deployment. It accepts either numeric or string `1` for a folder. A missing or malformed lookup response is not treated as an empty list.
 
 Setup can finish initialization of an existing empty `tracker-project-<ID>` folder when its ProjectKey is explicitly blank. It checks the exact folder path, item ID, folder type, zero child items/folders, and the saved parent project's identity before writing only the missing ProjectKey. The write uses the returned ETag and is read back before folder permissions are applied. Ordinary task creation cannot repair folder metadata. Non-empty folders, another project's key, missing identity evidence, and concurrent changes stop setup with the affected list and path in the error.
 
+The same folder verification runs when saving role changes for existing users, including promotion to Manager. After deploying this fix and completing setup, retry **Edit → Manager → Save user**. The role is saved only after project access and SharePoint group membership succeed.
+
 Completed permission changes remain in place; rerunning rechecks them. Do not delete imported records or broaden group permissions to work around this error. SharePoint's host confirmation prompts still apply. Automated regression tests cover the recovery paths; the specific live folder state must be verified by rerunning setup on metsoft.
+
+The follow-up **Could not identify the tasks project folder** error indicates a missing folder item ID, not an incorrect list display title. The root URL comes from SharePoint list metadata; changing a display title to `NPSL Tracker - Tasks` leaves the existing `/Lists/ModernizationTasks` path intact. Do not rename or move that URL to match the display title.

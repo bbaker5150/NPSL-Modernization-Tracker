@@ -241,8 +241,8 @@ describe('scoped store integration', () => {
   });
 });
 
-// Reproduce a folder navigation response that lacks custom metadata, plus
-// an interrupted setup that created the folder without persisting ProjectKey.
+// Resolve folder records without the broken folder-navigation endpoint, and
+// reproduce interrupted setup that created a folder without ProjectKey.
 function folderFixture({ exists = true, key = 'p', type = 1 } = {}) {
   const { store, permissions } = fixture();
   const project = { spId: 5, projectKey: 'p' };
@@ -252,10 +252,8 @@ function folderFixture({ exists = true, key = 'p', type = 1 } = {}) {
   permissions.metadata = vi.fn(async () => ({ EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: root } }));
   store.formValues = fields => Object.entries(fields).map(([FieldName, FieldValue]) => ({ FieldName, FieldValue }));
   store.get.mockImplementation(async url => {
-    if (url.includes('GetFolderByServerRelativePath')) {
-      if (!exists) throw Object.assign(new Error('Not found'), { status: 404 });
-      return { d: { Id: 22 } }; // custom fields are read through the canonical item
-    }
+    if (url.includes('/items?') && url.includes('$filter=FileRef')) return { value: exists ? [{ Id: 22 }] : [] };
+    if (url.includes('GetFolderByServerRelativePath')) throw new Error('Do not use the broken folder-navigation endpoint');
     if (url.includes("getbytitle('ModernizationProjects')/items(5)")) return { Id: 5, ProjectKey: 'p' };
     if (url.includes('/items(22)?')) return { ...row };
     throw new Error(`Unexpected GET: ${url}`);
@@ -280,6 +278,8 @@ describe('project folder identity regression', () => {
     const { store, permissions, project, path } = folderFixture({ type });
     expect(await permissions.folder('tasks', project)).toEqual({ path, scope: "/_api/web/lists/getbytitle('ModernizationTasks')/items(22)" });
     expect(store.get).toHaveBeenLastCalledWith(expect.stringContaining('/items(22)?$select=Id,FileSystemObjectType,FileRef,ProjectKey'), { Accept: 'application/json;odata=minimalmetadata' });
+    expect(store.get.mock.calls[0][0]).toContain("$filter=FileRef eq '%2Fsites%2Fmetsoft%2FLists%2FModernizationTasks%2Ftracker-project-5'");
+    expect(store.get.mock.calls.some(([url]) => url.includes('GetFolderByServerRelativePath'))).toBe(false);
     expect(store.post).not.toHaveBeenCalled();
   });
   it('finishes an empty unassigned folder left by an interrupted setup and verifies the saved key', async () => {
@@ -341,6 +341,84 @@ describe('project folder identity regression', () => {
     const { store, permissions, project } = folderFixture();
     await expect(permissions.folder('tasks', { ...project, projectKey: '' }, true)).rejects.toThrow('no identity key');
     expect(store.get).not.toHaveBeenCalled();
+    expect(store.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('Manager promotion after interrupted folder setup', () => {
+  it.each(['Viewer', 'Project Engineer'])('saves and verifies a %s → Manager change through the folder recovery path', async oldRole => {
+    const backing = fixture();
+    backing.groups.find(group => group.role === oldRole).members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    const previous = { ...person, role: oldRole, spId: 7 };
+    const project = { spId: 5, projectKey: 'p', ownerKey: person.loginName, title: 'Migrated project' };
+    const folders = Object.fromEntries(['Tasks', 'Updates', 'Risks'].map(suffix => [suffix, {
+      Id: 22, FileSystemObjectType: '1', ProjectKey: null,
+      FileRef: `/sites/metsoft/Lists/Modernization${suffix}/tracker-project-5`,
+      ItemChildCount: '0', FolderChildCount: '0', 'odata.etag': '"2"',
+    }]));
+    let savedUser;
+    store.directoryRows = vi.fn(async () => [previous]);
+    store.permissionProjects = vi.fn(async () => [project]);
+    store.update = vi.fn(async (_key, _id, fields) => { savedUser = { Id: 7, ...fields }; });
+    store.get = vi.fn(async (path, headers) => {
+      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
+      if (path.includes('/roledefinitions')) return { value: [{ Id: 3, RoleTypeKind: 3 }] };
+      if (path.includes('/items(7)?')) return savedUser;
+      if (path.includes("getbytitle('ModernizationProjects')/items(5)?")) return { Id: 5, ProjectKey: 'p' };
+      if (suffix && path.includes('RootFolder')) return { EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: `/sites/metsoft/Lists/Modernization${suffix}` } };
+      if (suffix && path.includes('/items?') && path.includes('$filter=FileRef')) return { value: [{ Id: 22 }] };
+      if (path.includes('GetFolderByServerRelativePath')) throw new Error('Do not use the broken folder-navigation endpoint');
+      if (suffix && path.includes('/items(22)?')) {
+        expect(headers.Accept).toContain('minimalmetadata');
+        return { ...folders[suffix] };
+      }
+      if (suffix && path.includes('/items?')) return { value: [] };
+      return backing.store.get(path);
+    });
+    store.post = vi.fn(async (path, options) => {
+      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
+      if (suffix && path.endsWith('/items(22)')) {
+        expect(options.headers['IF-MATCH']).toBe('"2"');
+        Object.assign(folders[suffix], options.body);
+        return {};
+      }
+      return backing.store.post(path, options);
+    });
+    // ACL wire behavior is separately covered above; retain the real project,
+    // folder, group membership, and user persistence orchestration here.
+    store.permissions.applyScope = vi.fn(async (scope, principalId) => {
+      expect(principalId).toBeNull(); // remove former direct engineer rights
+      if (scope.includes('/items(22)')) {
+        const suffix = Object.keys(folders).find(name => scope.includes(`Modernization${name}`));
+        expect(folders[suffix].ProjectKey).toBe('p'); // verified before ACL use
+      }
+    });
+    const saved = await store.saveUser({ ...previous, role: 'Manager' });
+    expect(saved.role).toBe('Manager');
+    expect(store.permissions.applyScope).toHaveBeenCalledTimes(4);
+    expect(backing.groups.find(group => group.role === 'Manager').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
+    expect(backing.groups.filter(group => group.role !== 'Manager').every(group => group.members.length === 0)).toBe(true);
+    expect(store.update).toHaveBeenCalledExactlyOnceWith('users', 7, expect.objectContaining({ AppRole: 'Manager' }));
+  });
+});
+
+describe('list-based project folder lookup', () => {
+  it.each([
+    {},
+    { value: [{ Id: 22 }, { Id: 23 }] },
+    { value: [], 'odata.nextLink': 'https://tenant.sharepoint.com/sites/metsoft/_api/next' },
+    { value: [{ Id: null }] },
+  ])('refuses malformed, incomplete, or ambiguous lookup responses without creating a folder: %j', async lookup => {
+    const { store, permissions, project } = folderFixture();
+    store.get.mockResolvedValueOnce(lookup);
+    await expect(permissions.folder('tasks', project, true)).rejects.toThrow(/No folder|Could not identify/);
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('does not treat a list-level 404 as a missing project folder', async () => {
+    const { store, permissions, project } = folderFixture();
+    store.get.mockRejectedValueOnce(Object.assign(new Error('List unavailable'), { status: 404 }));
+    await expect(permissions.folder('tasks', project, true)).rejects.toMatchObject({ status: 404 });
     expect(store.post).not.toHaveBeenCalled();
   });
 });

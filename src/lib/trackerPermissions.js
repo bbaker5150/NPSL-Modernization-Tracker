@@ -131,13 +131,16 @@ export class TrackerPermissions {
     if (!root) throw new Error(`Could not resolve the ${key} list folder.`);
     const name = this.folderName(project);
     const path = `${root}/${name}`;
-    const api = `/_api/web/GetFolderByServerRelativePath(decodedurl='${quote(path)}')/ListItemAllFields`;
+    // List folders are list items. Resolve them in the list itself: some hosts
+    // return no usable item ID from GetFolder.../ListItemAllFields.
+    const lookup = await this.get(`${this.root(key)}/items?$select=Id&$filter=FileRef eq '${quote(path)}'&$top=2`);
+    const matches = lookup?.value || lookup?.d?.results || lookup?.results;
+    if (!Array.isArray(matches)) throw new Error(`SharePoint did not return list records while finding the ${key} project folder at ${path}. No folder was created.`);
+    if (matches.length > 1 || lookup['@odata.nextLink'] || lookup['odata.nextLink'] || lookup.d?.__next) throw new Error(`More than one result was returned for the ${key} project folder at ${path}. No folder was selected.`);
     let id;
-    try { id = unwrap(await this.get(`${api}?$select=Id`))?.Id; }
-    catch (error) {
-      if (error.status !== 404 || !create) throw error;
-      // Use the returned ID to read the canonical list item, not a partially
-      // hydrated folder-navigation response. No ordinary item is accepted.
+    if (matches.length === 1) id = matches[0].Id;
+    else {
+      if (!create) throw new Error(`The ${key} project folder is not set up. Run Apply tracker permissions first.`);
       id = await this.addInFolder(key, root, { Title: name, ProjectKey: project.projectKey }, name);
     }
     if (!positiveId(id)) throw new Error(`Could not identify the ${key} project folder at ${path}.`);
