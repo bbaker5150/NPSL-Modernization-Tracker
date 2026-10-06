@@ -137,7 +137,7 @@ describe('project ACLs and inherited creation', () => {
   it('stops creation if folder setup is missing; never falls back to a root item', async () => {
     const { permissions, store } = fixture();
     permissions.metadata = vi.fn(async () => ({ EnableFolderCreation: false }));
-    await expect(permissions.folder('tasks', { spId: 1 }, true)).rejects.toThrow('site owner');
+    await expect(permissions.folder('tasks', { spId: 1, projectKey: 'p' }, true)).rejects.toThrow('site owner');
     expect(store.post).not.toHaveBeenCalled();
   });
   it('rejects per-field folder creation failures even on HTTP success', async () => {
@@ -238,5 +238,109 @@ describe('scoped store integration', () => {
     expect((await store.saveProject({ id: 'project', projectKey: 'p', title: 'Retry' })).spId).toBe(8);
     expect(store.create).not.toHaveBeenCalled();
     expect(store.permissions.syncProject).toHaveBeenCalledWith(expect.objectContaining({ spId: 8 }), []);
+  });
+});
+
+// Reproduce a folder navigation response that lacks custom metadata, plus
+// an interrupted setup that created the folder without persisting ProjectKey.
+function folderFixture({ exists = true, key = 'p', type = 1 } = {}) {
+  const { store, permissions } = fixture();
+  const project = { spId: 5, projectKey: 'p' };
+  const root = '/sites/metsoft/Lists/ModernizationTasks';
+  const path = `${root}/tracker-project-5`;
+  const row = { Id: 22, FileSystemObjectType: type, FileRef: path, ProjectKey: key, ItemChildCount: '0', FolderChildCount: '0', 'odata.etag': '"2"' };
+  permissions.metadata = vi.fn(async () => ({ EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: root } }));
+  store.formValues = fields => Object.entries(fields).map(([FieldName, FieldValue]) => ({ FieldName, FieldValue }));
+  store.get.mockImplementation(async url => {
+    if (url.includes('GetFolderByServerRelativePath')) {
+      if (!exists) throw Object.assign(new Error('Not found'), { status: 404 });
+      return { d: { Id: 22 } }; // custom fields are read through the canonical item
+    }
+    if (url.includes("getbytitle('ModernizationProjects')/items(5)")) return { Id: 5, ProjectKey: 'p' };
+    if (url.includes('/items(22)?')) return { ...row };
+    throw new Error(`Unexpected GET: ${url}`);
+  });
+  store.post.mockImplementation(async (url, options) => {
+    if (url.includes('AddValidateUpdateItemUsingPath')) {
+      exists = true;
+      return { value: [{ FieldName: 'Id', FieldValue: '22' }] };
+    }
+    if (url.endsWith('/items(22)')) {
+      if (options.headers['IF-MATCH'] !== row['odata.etag']) throw Object.assign(new Error('Concurrent folder update'), { status: 412 });
+      Object.assign(row, options.body);
+      return {};
+    }
+    throw new Error(`Unexpected POST: ${url}`);
+  });
+  return { store, permissions, project, row, path };
+}
+
+describe('project folder identity regression', () => {
+  it.each([1, '1'])('reads canonical folder metadata and accepts folder enum %s', async type => {
+    const { store, permissions, project, path } = folderFixture({ type });
+    expect(await permissions.folder('tasks', project)).toEqual({ path, scope: "/_api/web/lists/getbytitle('ModernizationTasks')/items(22)" });
+    expect(store.get).toHaveBeenLastCalledWith(expect.stringContaining('/items(22)?$select=Id,FileSystemObjectType,FileRef,ProjectKey'), { Accept: 'application/json;odata=minimalmetadata' });
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('finishes an empty unassigned folder left by an interrupted setup and verifies the saved key', async () => {
+    const { store, permissions, project, row } = folderFixture({ key: null });
+    await permissions.folder('tasks', project, true);
+    expect(row.ProjectKey).toBe('p');
+    expect(store.post).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('/items(22)'), { body: { ProjectKey: 'p' }, headers: { 'IF-MATCH': '"2"', 'X-HTTP-Method': 'MERGE' } });
+    await permissions.folder('tasks', project, true);
+    expect(store.post).toHaveBeenCalledTimes(1);
+  });
+  it('verifies a newly created folder by its returned ID and initializes missing metadata', async () => {
+    const { store, permissions, project, row } = folderFixture({ exists: false, key: null });
+    await permissions.folder('tasks', project, true);
+    expect(store.post.mock.calls[0][0]).toContain('AddValidateUpdateItemUsingPath');
+    expect(store.post.mock.calls[0][1].body.listItemCreateInfo).toMatchObject({ UnderlyingObjectType: 1, LeafName: 'tracker-project-5' });
+    expect(row.ProjectKey).toBe('p');
+    expect(store.post.mock.calls.filter(([url]) => url.includes('AddValidateUpdateItemUsingPath'))).toHaveLength(1);
+  });
+  it.each([
+    { ProjectKey: 'another-project' },
+    { ProjectKey: null, ItemChildCount: '1' },
+    { ProjectKey: null, FolderChildCount: '1' },
+    { ProjectKey: undefined },
+    { ProjectKey: null, ItemChildCount: undefined },
+    { ProjectKey: null, 'odata.etag': undefined },
+    { FileSystemObjectType: 0 },
+    { FileRef: '/sites/metsoft/Lists/ModernizationTasks/wrong-folder' },
+    { Id: 99 },
+  ])('rejects ambiguous or unsafe folder identity: %j', async changes => {
+    const { store, permissions, project, row } = folderFixture();
+    Object.assign(row, changes);
+    await expect(permissions.folder('tasks', project, true)).rejects.toThrow('Project folder identity does not match in tasks');
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('does not initialize folder metadata during ordinary engineer task creation', async () => {
+    const { store, permissions, project } = folderFixture({ key: null });
+    await expect(permissions.folder('tasks', project)).rejects.toThrow('Project folder identity');
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('stops on a concurrency conflict without overwriting or applying ACLs', async () => {
+    const { store, permissions, project } = folderFixture({ key: null });
+    store.post.mockRejectedValue(Object.assign(new Error('Concurrent folder update'), { status: 412 }));
+    await expect(permissions.folder('tasks', project, true)).rejects.toMatchObject({ status: 412 });
+    expect(store.post).toHaveBeenCalledTimes(1);
+    expect(store.post.mock.calls[0][1].headers['IF-MATCH']).not.toBe('*');
+  });
+  it('does not claim success when SharePoint did not save the repaired key', async () => {
+    const { store, permissions, project } = folderFixture({ key: null });
+    store.post.mockResolvedValue({});
+    await expect(permissions.folder('tasks', project, true)).rejects.toThrow('did not save');
+  });
+  it('does not create a replacement folder on access denied', async () => {
+    const { store, permissions, project } = folderFixture();
+    store.get.mockRejectedValue(Object.assign(new Error('Access denied'), { status: 403 }));
+    await expect(permissions.folder('tasks', project, true)).rejects.toMatchObject({ status: 403 });
+    expect(store.post).not.toHaveBeenCalled();
+  });
+  it('rejects a missing parent project key before requesting folders', async () => {
+    const { store, permissions, project } = folderFixture();
+    await expect(permissions.folder('tasks', { ...project, projectKey: '' }, true)).rejects.toThrow('no identity key');
+    expect(store.get).not.toHaveBeenCalled();
+    expect(store.post).not.toHaveBeenCalled();
   });
 });

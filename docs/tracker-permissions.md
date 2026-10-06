@@ -53,3 +53,11 @@ Existing broad access must be reviewed separately. Permissions are cumulative. U
 Live Flank Speed group ownership, folder behavior, page-sharing policy, and effective user permissions must be verified on the tenant. Automated tests use mocked SharePoint responses; they are not evidence of live access enforcement.
 
 API references: [List items in folders](https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/working-with-lists-and-list-items-with-rest#create-list-item-in-a-folder), [REST permission assignment](https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/set-custom-permissions-on-a-list-by-using-the-rest-interface).
+
+## Recovering interrupted project-folder setup
+
+If **Apply tracker permissions** stopped with **Project folder identity does not match**, deploy the folder-verification update and run the action again. Verification now reads the underlying list item by ID rather than relying on custom metadata in the folder-navigation response, and accepts either numeric or string `1` for a folder.
+
+Setup can finish initialization of an existing empty `tracker-project-<ID>` folder when its ProjectKey is explicitly blank. It checks the exact folder path, item ID, folder type, zero child items/folders, and the saved parent project's identity before writing only the missing ProjectKey. The write uses the returned ETag and is read back before folder permissions are applied. Ordinary task creation cannot repair folder metadata. Non-empty folders, another project's key, missing identity evidence, and concurrent changes stop setup with the affected list and path in the error.
+
+Completed permission changes remain in place; rerunning rechecks them. Do not delete imported records or broaden group permissions to work around this error. SharePoint's host confirmation prompts still apply. Automated regression tests cover the recovery paths; the specific live folder state must be verified by rerunning setup on metsoft.

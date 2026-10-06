@@ -17,7 +17,7 @@ const positiveId = value => Number.isInteger(Number(value)) && Number(value) > 0
 export class TrackerPermissions {
   constructor(store) { this.store = store; }
   root(key) { return `/_api/web/lists/getbytitle('${quote(`${String(this.store.prefix).replace(/[^A-Za-z0-9]/g, '') || 'Modernization'}${suffixes[key]}`)}')`; }
-  get(path) { return this.store.get(path); }
+  get(path, headers) { return this.store.get(path, headers); }
   post(path, options) { return this.store.post(path, options); }
   async pages(path) {
     const rows = [];
@@ -124,6 +124,7 @@ export class TrackerPermissions {
     return `tracker-project-${project.spId}`;
   }
   async folder(key, project, create = false) {
+    if (typeof project.projectKey !== 'string' || !project.projectKey.trim()) throw new Error('The project has no identity key. Restore its ProjectKey before preparing access.');
     const meta = await this.metadata(key);
     if (!meta.EnableFolderCreation) throw new Error('A site owner must run Apply tracker permissions once to enable project folders.');
     const root = meta.RootFolder?.ServerRelativeUrl;
@@ -131,11 +132,42 @@ export class TrackerPermissions {
     const name = this.folderName(project);
     const path = `${root}/${name}`;
     const api = `/_api/web/GetFolderByServerRelativePath(decodedurl='${quote(path)}')/ListItemAllFields`;
-    try { const row = unwrap(await this.get(`${api}?$select=Id,FileSystemObjectType,ProjectKey`)); if (row.FileSystemObjectType !== 1 || row.ProjectKey !== project.projectKey) throw new Error('Project folder identity does not match.'); return { path, scope: `${this.root(key)}/items(${row.Id})` }; }
-    catch (error) { if (error.status !== 404 || !create) throw error; }
-    await this.addInFolder(key, root, { Title: name, ProjectKey: project.projectKey }, name);
-    // Resolve the folder again after creation; never treat an ordinary item as a folder.
-    return this.folder(key, project);
+    let id;
+    try { id = unwrap(await this.get(`${api}?$select=Id`))?.Id; }
+    catch (error) {
+      if (error.status !== 404 || !create) throw error;
+      // Use the returned ID to read the canonical list item, not a partially
+      // hydrated folder-navigation response. No ordinary item is accepted.
+      id = await this.addInFolder(key, root, { Title: name, ProjectKey: project.projectKey }, name);
+    }
+    if (!positiveId(id)) throw new Error(`Could not identify the ${key} project folder at ${path}.`);
+    const scope = `${this.root(key)}/items(${Number(id)})`;
+    const read = async () => unwrap(await this.get(`${scope}?$select=Id,FileSystemObjectType,FileRef,ProjectKey,ItemChildCount,FolderChildCount`, { Accept: 'application/json;odata=minimalmetadata' }));
+    const identityError = detail => new Error(`Project folder identity does not match in ${key} at ${path}. ${detail} No permissions were changed for this folder.`);
+    const validateFolder = row => {
+      if (Number(row.Id) !== Number(id) || ![1, '1'].includes(row.FileSystemObjectType) || String(row.FileRef || '').toLowerCase() !== path.toLowerCase()) {
+        throw identityError('SharePoint did not verify the expected folder type, item ID, and path.');
+      }
+    };
+    let row = await read();
+    validateFolder(row);
+    if (row.ProjectKey !== project.projectKey) {
+      // A failed first setup can leave an empty infrastructure folder without
+      // its custom key. Only the setup path may finish that initialization.
+      // Never overwrite another project's key or adopt a populated folder.
+      const unassigned = row.ProjectKey === null || row.ProjectKey === '';
+      const empty = [0, '0'].includes(row.ItemChildCount) && [0, '0'].includes(row.FolderChildCount);
+      if (!create || !unassigned || !empty) throw identityError(`Expected project key ${project.projectKey}; received ${row.ProjectKey == null ? '(missing)' : row.ProjectKey}. Rerun setup only after resolving any conflicting folder data.`);
+      const parent = unwrap(await this.get(`${this.root('projects')}/items(${project.spId})?$select=Id,ProjectKey`));
+      if (Number(parent.Id) !== Number(project.spId) || parent.ProjectKey !== project.projectKey) throw identityError('The saved parent project could not be verified.');
+      const etag = row['odata.etag'] || row['@odata.etag'] || row.__metadata?.etag;
+      if (!etag || etag === '*') throw identityError('SharePoint did not return a concurrency token for the empty folder.');
+      await this.post(scope, { body: { ProjectKey: project.projectKey }, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
+      row = await read();
+      validateFolder(row);
+      if (row.ProjectKey !== project.projectKey) throw identityError('SharePoint did not save the folder project key.');
+    }
+    return { path, scope };
   }
   async addInFolder(key, path, fields, leafName) {
     const result = await this.post(`${this.root(key)}/AddValidateUpdateItemUsingPath`, { body: {
@@ -166,7 +198,7 @@ export class TrackerPermissions {
       await this.applyScope(folder.scope, principalId, roleId);
       // Include archived records: former engineers must not retain their ACLs.
       const rows = await this.pages(`${this.root(key)}/items?$select=Id,FileSystemObjectType,HasUniqueRoleAssignments,FileDirRef&$filter=ProjectKey eq '${quote(project.projectKey)}'&$top=500`);
-      for (const row of rows.filter(row => row.FileSystemObjectType !== 1)) {
+      for (const row of rows.filter(row => ![1, '1'].includes(row.FileSystemObjectType))) {
         if (row.HasUniqueRoleAssignments || row.FileDirRef !== folder.path) {
           onProgress(`Updating ${key} access: ${project.title || project.projectKey} · item ${row.Id}`);
           await this.applyScope(`${this.root(key)}/items(${row.Id})`, principalId, roleId);

@@ -184,7 +184,7 @@ export class SharePointStore {
     this.permissions = scopedAccess ? new TrackerPermissions(this) : null;
   }
 
-  get = async (path) => spGet(this.webUrl, await this.lists.rewrite(path), this.fetchImpl);
+  get = async (path, headers) => spGet(this.webUrl, await this.lists.rewrite(path), this.fetchImpl, headers);
   post = async (path, options) => spPost(this.webUrl, await this.lists.rewrite(path), options, this.fetchImpl);
   listApi = key => this.lists.path(key);
   organizeTrackerLists = onProgress => this.lists.organize(onProgress);
