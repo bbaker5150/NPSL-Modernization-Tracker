@@ -60,4 +60,6 @@ If **Apply tracker permissions** stopped with **Project folder identity does not
 
 Setup can finish initialization of an existing empty `tracker-project-<ID>` folder when its ProjectKey is explicitly blank. It checks the exact folder path, item ID, folder type, zero child items/folders, and the saved parent project's identity before writing only the missing ProjectKey. The write uses the returned ETag and is read back before folder permissions are applied. Ordinary task creation cannot repair folder metadata. Non-empty folders, another project's key, missing identity evidence, and concurrent changes stop setup with the affected list and path in the error.
 
+The same folder verification runs when saving role changes for existing users, including promotion to Manager. After deploying this fix and completing setup, retry **Edit → Manager → Save user**. The role is saved only after project access and SharePoint group membership succeed.
+
 Completed permission changes remain in place; rerunning rechecks them. Do not delete imported records or broaden group permissions to work around this error. SharePoint's host confirmation prompts still apply. Automated regression tests cover the recovery paths; the specific live folder state must be verified by rerunning setup on metsoft.

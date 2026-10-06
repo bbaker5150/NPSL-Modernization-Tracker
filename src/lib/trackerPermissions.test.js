@@ -344,3 +344,60 @@ describe('project folder identity regression', () => {
     expect(store.post).not.toHaveBeenCalled();
   });
 });
+
+describe('Manager promotion after interrupted folder setup', () => {
+  it.each(['Viewer', 'Project Engineer'])('saves and verifies a %s → Manager change through the folder recovery path', async oldRole => {
+    const backing = fixture();
+    backing.groups.find(group => group.role === oldRole).members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    const previous = { ...person, role: oldRole, spId: 7 };
+    const project = { spId: 5, projectKey: 'p', ownerKey: person.loginName, title: 'Migrated project' };
+    const folders = Object.fromEntries(['Tasks', 'Updates', 'Risks'].map(suffix => [suffix, {
+      Id: 22, FileSystemObjectType: '1', ProjectKey: null,
+      FileRef: `/sites/metsoft/Lists/Modernization${suffix}/tracker-project-5`,
+      ItemChildCount: '0', FolderChildCount: '0', 'odata.etag': '"2"',
+    }]));
+    let savedUser;
+    store.directoryRows = vi.fn(async () => [previous]);
+    store.permissionProjects = vi.fn(async () => [project]);
+    store.update = vi.fn(async (_key, _id, fields) => { savedUser = { Id: 7, ...fields }; });
+    store.get = vi.fn(async (path, headers) => {
+      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
+      if (path.includes('/roledefinitions')) return { value: [{ Id: 3, RoleTypeKind: 3 }] };
+      if (path.includes('/items(7)?')) return savedUser;
+      if (path.includes("getbytitle('ModernizationProjects')/items(5)?")) return { Id: 5, ProjectKey: 'p' };
+      if (suffix && path.includes('RootFolder')) return { EnableFolderCreation: true, RootFolder: { ServerRelativeUrl: `/sites/metsoft/Lists/Modernization${suffix}` } };
+      if (path.includes('GetFolderByServerRelativePath')) return { Id: 22 };
+      if (suffix && path.includes('/items(22)?')) {
+        expect(headers.Accept).toContain('minimalmetadata');
+        return { ...folders[suffix] };
+      }
+      if (suffix && path.includes('/items?')) return { value: [] };
+      return backing.store.get(path);
+    });
+    store.post = vi.fn(async (path, options) => {
+      const suffix = Object.keys(folders).find(name => path.includes(`Modernization${name}`));
+      if (suffix && path.endsWith('/items(22)')) {
+        expect(options.headers['IF-MATCH']).toBe('"2"');
+        Object.assign(folders[suffix], options.body);
+        return {};
+      }
+      return backing.store.post(path, options);
+    });
+    // ACL wire behavior is separately covered above; retain the real project,
+    // folder, group membership, and user persistence orchestration here.
+    store.permissions.applyScope = vi.fn(async (scope, principalId) => {
+      expect(principalId).toBeNull(); // remove former direct engineer rights
+      if (scope.includes('/items(22)')) {
+        const suffix = Object.keys(folders).find(name => scope.includes(`Modernization${name}`));
+        expect(folders[suffix].ProjectKey).toBe('p'); // verified before ACL use
+      }
+    });
+    const saved = await store.saveUser({ ...previous, role: 'Manager' });
+    expect(saved.role).toBe('Manager');
+    expect(store.permissions.applyScope).toHaveBeenCalledTimes(4);
+    expect(backing.groups.find(group => group.role === 'Manager').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
+    expect(backing.groups.filter(group => group.role !== 'Manager').every(group => group.members.length === 0)).toBe(true);
+    expect(store.update).toHaveBeenCalledExactlyOnceWith('users', 7, expect.objectContaining({ AppRole: 'Manager' }));
+  });
+});
