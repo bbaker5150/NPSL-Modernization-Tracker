@@ -44,17 +44,17 @@ With the default prefix, the automatic clean-slate provisioning creates:
 
 | List | Purpose |
 | --- | --- |
-| `NPSL Tracker - Projects` | One portfolio row per modernization project. |
-| `NPSL Tracker - Tasks` | Pipeline tasks linked by `ProjectKey`. |
-| `NPSL Tracker - Updates` | Status updates and decisions. |
-| `NPSL Tracker - Risks` | Risks, issues, ownership, and mitigation. |
-| `NPSL Tracker - Acronyms` | Shared acronym glossary. |
-| `NPSL Tracker - Users` | Saved identities and application roles. |
-| `NPSL Tracker - Reference Documents` | Shared document and folder metadata, with attached files. |
+| `Modernization-Tracker - Projects` | One portfolio row per modernization project. |
+| `Modernization-Tracker - Tasks` | Pipeline tasks linked by `ProjectKey`. |
+| `Modernization-Tracker - Updates` | Status updates and decisions. |
+| `Modernization-Tracker - Risks` | Risks, issues, ownership, and mitigation. |
+| `Modernization-Tracker - Acronyms` | Shared acronym glossary. |
+| `Modernization-Tracker - Users` | Saved identities and application roles. |
+| `Modernization-Tracker - Reference Documents` | Shared document and folder metadata, with attached files. |
 
 Provisioning is idempotent and additive. It creates missing lists and fields but does not delete, rename, retype, or import example records.
 
-New lists are visible in **Site Contents** under the `NPSL Tracker - ` prefix. To rename and unhide existing lists in place, deploy the updated HTML and run **Users and managers → Site Contents organization → Organize tracker lists** as a site owner. This preserves list IDs, URLs, records, attachments, and permissions. Normal startup supports both old and new titles without renaming anything. `hideLists` is no longer used. See [List organization](docs/list-organization.md).
+New lists are visible in **Site Contents** under the `Modernization-Tracker - ` prefix. To rename and unhide existing lists in place, deploy the updated HTML and open the app as a site owner; title/visibility maintenance runs automatically. This preserves list IDs, URLs, records, attachments, and permissions. Reads support original, former NPSL, and current titles. Only a site owner with Manage Lists can update titles; other sessions stay read-only for this maintenance. `hideLists` is no longer used. See [List organization](docs/list-organization.md).
 
 ### Project fields
 
@@ -131,7 +131,7 @@ Directory editing uses Edit → Update User / Delete User. Delete archives the t
 ### Reference Documents
 Reference Documents appears below My work for all roles. Users and managers can upload (20 MB per file), create nested folders, rename entries, and move them between folders. SMEs can browse, search, and download. Search spans the shared library. Downloads fetch bytes without opening a SharePoint document page.
 
-The deployment adds the NPSL Tracker - Reference Documents list (or the configured prefix), resolving an existing ModernizationReferenceDocuments list by its permanent ID. Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
+The deployment adds the Modernization-Tracker - Reference Documents list (or the configured prefix), resolving an existing ModernizationReferenceDocuments list by its permanent ID. Open the updated app once with site-owner/list-creation rights so automatic provisioning can create it and its fields. The list uses attachments for file bytes and metadata for folder organization; incomplete uploads remain archived and hidden. Moves and renames update metadata without copying document bytes. SharePoint permissions remain the server-side boundary; ensure Members can read/add/edit this list. Local preview stores metadata in localStorage and file bytes in IndexedDB.
 
 The user directory now has compact scrollable rows and a name/email/role search while retaining each user's role badge and Edit menu.
 

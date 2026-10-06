@@ -13,7 +13,8 @@ const definition = key => {
   return entry;
 };
 export const legacyListTitle = (prefix, key) => namespace(prefix) + definition(key)[1];
-export const displayListTitle = (prefix, key) => `${namespace(prefix) === 'Modernization' ? 'NPSL Tracker' : `${namespace(prefix)} Tracker`} - ${definition(key)[2]}`;
+export const displayListTitle = (prefix, key) => `${namespace(prefix) === 'Modernization' ? 'Modernization-Tracker' : `${namespace(prefix)} Tracker`} - ${definition(key)[2]}`;
+export const listTitleAliases = (prefix, key) => [...new Set([legacyListTitle(prefix, key), displayListTitle(prefix, key), ...(namespace(prefix) === 'Modernization' ? [`NPSL Tracker - ${definition(key)[2]}`] : [])])];
 const literal = value => `'${String(value).replace(/'/g, "''")}'`;
 const guidPath = id => {
   if (!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id || '')) throw new Error('SharePoint returned an invalid tracker list ID.');
@@ -27,15 +28,16 @@ export class TrackerLists {
   async resolve(key) {
     if (!this.cache.has(key)) {
       const promise = (async () => {
-        const oldTitle = legacyListTitle(this.prefix, key), title = displayListTitle(this.prefix, key);
-        const filter = `Title eq ${literal(oldTitle)} or Title eq ${literal(title)}`;
+        const title = displayListTitle(this.prefix, key);
+        const aliases = listTitleAliases(this.prefix, key);
+        const filter = aliases.map(name => `Title eq ${literal(name)}`).join(' or ');
         const body = await this.get(`/_api/web/lists?$select=Id,Title,Hidden,BaseTemplate&$filter=${encodeURIComponent(filter)}`);
         const matches = body.value || body.d?.results;
         if (!Array.isArray(matches)) throw new Error(`Cannot read the tracker list catalog for ${title}.`);
-        if (matches.length > 1) throw new Error(`Both ${oldTitle} and ${title} exist. Resolve the duplicate lists before continuing; no list was selected.`);
+        if (matches.length > 1) throw new Error(`Multiple tracker list aliases exist for ${title}. Resolve the duplicate lists before continuing; no list was selected.`);
         if (!matches.length) throw new SharePointError(`Tracker list not found: ${title}`, 404);
         const row = matches[0];
-        if (![oldTitle, title].includes(row.Title) || Number(row.BaseTemplate) !== 100) throw new Error(`Unexpected list returned for ${title}.`);
+        if (!aliases.includes(row.Title) || Number(row.BaseTemplate) !== 100) throw new Error(`Unexpected list returned for ${title}.`);
         return { ...row, path: guidPath(row.Id) };
       })();
       this.cache.set(key, promise);
@@ -48,8 +50,16 @@ export class TrackerLists {
     const match = String(path).match(/\/_api\/web\/lists\/getbytitle\('((?:''|[^'])*)'\)/i);
     if (!match) return path;
     const title = decodeURIComponent(match[1]).replace(/''/g, "'");
-    const key = TRACKER_LISTS.find(([key]) => [legacyListTitle(this.prefix, key), displayListTitle(this.prefix, key)].includes(title))?.[0];
+    const key = TRACKER_LISTS.find(([key]) => listTitleAliases(this.prefix, key).includes(title))?.[0];
     return key ? path.replace(match[0], await this.path(key)) : path;
+  }
+  async maintainNames() {
+    const body = await this.get('/_api/web/EffectiveBasePermissions');
+    const permissions = body.d || body;
+    const low = BigInt((permissions.EffectiveBasePermissions || permissions).Low || 0);
+    // Require site-level Manage Permissions and Manage Lists, never app role.
+    if ((low & 33554432n) === 0n || (low & 2048n) === 0n) return 0;
+    return this.organize();
   }
   async organize(onProgress = () => {}) {
     const body = await this.get('/_api/web/EffectiveBasePermissions');
@@ -67,7 +77,7 @@ export class TrackerLists {
       }
       const response = await this.get(`${row.path}?$select=Id,Title,Hidden`);
       const verified = response.d || response;
-      if (String(verified.Id).toLowerCase() !== row.Id.toLowerCase() || verified.Title !== title || verified.Hidden !== false) throw new Error(`Could not verify ${title}. Run organization again to finish.`);
+      if (String(verified.Id).toLowerCase() !== row.Id.toLowerCase() || verified.Title !== title || verified.Hidden !== false) throw new Error(`Could not verify ${title}. Reload as a site owner to finish updating list names.`);
       this.cache.set(key, Promise.resolve({ ...row, ...verified }));
     }
     return rows.length;
