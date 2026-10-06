@@ -4,6 +4,8 @@ import { validateAttachment, validateAttachmentName } from './taskAttachments';
 import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations, ROLES } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
+import { TrackerPermissions } from './trackerPermissions';
+import { isOwnedByUser } from './identity';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
@@ -158,12 +160,27 @@ const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
 export class SharePointStore {
-  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true }) {
+  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, hideLists = true, scopedAccess = false }) {
     this.webUrl = String(webUrl || '').replace(/\/+$/, '');
     this.prefix = prefix;
-    this.fetchImpl = fetchImpl;
+    this.fetchImpl = !scopedAccess ? fetchImpl : async (url, options = {}) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (options.signal?.aborted) abort();
+      options.signal?.addEventListener('abort', abort, { once: true });
+      const timer = setTimeout(abort, 60000);
+      try {
+        const response = await fetchImpl(url, { ...options, signal: controller.signal });
+        const bytes = await response.arrayBuffer();
+        return new Response([204, 205, 304].includes(response.status) ? null : bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
+      }
+      catch (error) { if (controller.signal.aborted) throw new Error('SharePoint request timed out after 60 seconds. A write may have completed; reload or rerun permission setup to verify it.'); throw error; }
+      finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
+    };
     this.hideLists = hideLists;
     this.userPromise = null;
+    this.scopedAccess = scopedAccess;
+    this.permissions = scopedAccess ? new TrackerPermissions(this) : null;
   }
 
   get = (path) => spGet(this.webUrl, path, this.fetchImpl);
@@ -224,8 +241,8 @@ export class SharePointStore {
     return steps;
   }
 
-  async listItems(key, fields, converter) {
-    const select = ['Id', 'Title', ...fields].join(',');
+  async listItems(key, fields, converter, includeArchived = false) {
+    const select = ['Id', 'Title', 'FileSystemObjectType', ...fields].join(',');
     let path = `${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`;
     const rows = [];
     while (path) {
@@ -239,7 +256,7 @@ export class SharePointStore {
         path = `${parsed.pathname}${parsed.search}`;
       } else path = next;
     }
-    return rows.filter((row) => !row.Archived).map(converter);
+    return rows.filter((row) => row.FileSystemObjectType !== 1 && (includeArchived || !row.Archived)).map(converter);
   }
 
   async load() {
@@ -251,15 +268,24 @@ export class SharePointStore {
       this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
       this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
-    return { projects, tasks: normalizeTaskOrganizations(tasks, projects), updates, risks, acronyms, users: normalizeDirectory(users, projects) };
+    const directory = normalizeDirectory(users, projects);
+    if (this.permissions) {
+      const current = await this.currentUser();
+      const { role } = await this.permissions.currentRole(current);
+      const entry = directory.find(row => isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, current));
+      if (entry) { entry.role = role; delete entry.roleMigrationPending; }
+      else directory.push({ id: `session-${current.id}`, title: current.title, email: current.email, loginName: current.loginName, role, sessionOnly: true });
+    }
+    return { projects, tasks: normalizeTaskOrganizations(tasks, projects), updates, risks, acronyms, users: directory };
   }
 
   async create(key, fields) {
+    if (this.permissions && ['tasks', 'updates', 'risks'].includes(key)) return this.permissions.createChild(key, fields);
     const created = await this.post(`${apiFor(this.prefix, key)}/items`, { body: fields });
     return created?.Id;
   }
 
-  async update(key, spId, fields) {
+  formValues(fields) {
     // ValidateUpdateListItem parses field values as if they came from a
     // SharePoint edit form. Unlike normal REST item payloads, its DateTime
     // parser rejects ISO-8601 strings, so date fields use the site's standard
@@ -267,9 +293,13 @@ export class SharePointStore {
     const serialize = (fieldName, value) => DATE_FIELDS.has(fieldName)
       ? sharePointFormDate(value)
       : value == null ? '' : typeof value === 'boolean' ? (value ? '1' : '0') : String(value);
+    return Object.entries(fields).map(([FieldName, value]) => ({ FieldName, FieldValue: serialize(FieldName, value) }));
+  }
+
+  async update(key, spId, fields) {
     const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/validateupdatelistitem`, {
       body: {
-        formValues: Object.entries(fields).map(([FieldName, value]) => ({ FieldName, FieldValue: serialize(FieldName, value) })),
+        formValues: this.formValues(fields),
         bNewDocumentUpdate: true,
       },
     });
@@ -279,6 +309,16 @@ export class SharePointStore {
   }
 
   async recycle(key, spId) {
+    if (this.permissions && key === 'users') {
+      const users = await this.directoryRows();
+      const person = users.find(row => row.spId === spId);
+      if (!person) throw new Error('This user no longer exists.');
+      await this.syncUserAccess(person, null, users);
+    }
+    if (this.permissions && key === 'projects') {
+      const project = (await this.permissionProjects()).find(row => row.spId === spId);
+      if (project) await this.permissions.syncProject({ ...project, archived: true }, []);
+    }
     // Like Uncertalytics, remove from the app through a normal metadata update.
     await this.update(key, spId, { Archived: true });
   }
@@ -389,7 +429,7 @@ export class SharePointStore {
     catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
     if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
     if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
-    const groupResponse = await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
+    const groupResponse = this.permissions ? await this.permissions.syncGroups(person, role) : await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
     const group = groupResponse.d || groupResponse;
     if (!Number.isInteger(group.Id) || group.Id <= 0) throw new Error('The site Members group is unavailable. Ask a site owner to configure it.');
     const membersApi = `/_api/web/sitegroups(${group.Id})/users`;
@@ -420,7 +460,8 @@ export class SharePointStore {
     // emails, so keep it free of URLs and markup. The generated card and Open
     // button below the message provide the direct tracker link.
     const emailBody = `You have been added to the NPSL Modernization Tracker. Assigned role: ${role.toUpperCase()}.`;
-    const response = await this.post('/_api/SP.Web.ShareObject', { body: {
+    let response;
+    try { response = await this.post('/_api/SP.Web.ShareObject', { body: {
       url: link.href,
       peoplePickerInput: JSON.stringify([{ Key: person.loginName }]),
       roleValue: 'role:' + readRole.Id,
@@ -429,7 +470,10 @@ export class SharePointStore {
       emailSubject: 'Invitation to the NPSL Modernization Tracker',
       emailBody,
       useSimplifiedRoles: false,
-    } });
+    } }); } catch (error) {
+      if (this.permissions) throw new Error(`Tracker group membership was verified, but the invitation email was not confirmed. A site owner may need to send the page invitation if your account cannot share it. Retry only the invitation. ${error.message}`);
+      throw error;
+    }
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
     if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm the invitation email request.');
     return { access: group.Title || 'Site Members', emailRequested: true };
@@ -452,6 +496,14 @@ export class SharePointStore {
   }
 
   async saveUser(row) {
+    if (this.permissions) {
+      const users = await this.directoryRows();
+      const existing = users.find(entry => entry.id === row.id);
+      if (existing && existing.loginName.toLowerCase() !== row.loginName.toLowerCase()) throw new Error('An existing SharePoint identity cannot be changed. Invite the new identity separately.');
+      // Session-only owner entries become real directory records when explicitly saved.
+      row = { ...row, spId: existing?.spId || row.spId };
+      await this.syncUserAccess(row, row.role, users);
+    }
     const fields = { Title: row.title, RecordId: row.id, LoginKey: row.loginName, Email: row.email || '', AppRole: row.role };
     let spId = row.spId;
     if (spId) await this.update('users', spId, fields);
@@ -465,12 +517,56 @@ export class SharePointStore {
     return fromUser(item);
   }
 
-  async saveProject(row) { return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) }; }
+  async saveProject(row) {
+    if (!this.permissions) return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) };
+    const { role } = await this.permissions.currentRole(await this.currentUser());
+    // A retry after a partial permission update reuses the already-saved project.
+    const existing = (await this.permissionProjects()).find(project => project.id === row.id);
+    const saved = { ...row, spId: existing?.spId || row.spId };
+    if (saved.spId) await this.update('projects', saved.spId, projectFields(saved));
+    else saved.spId = await this.create('projects', projectFields(saved));
+    if (role === 'Manager') {
+      try { await this.permissions.syncProject(saved, await this.directoryRows()); }
+      catch (error) { throw new Error(`Project saved, but its access setup is incomplete. Retry Save or Apply tracker permissions. ${error.message}`); }
+    }
+    return saved;
+  }
   async saveTask(row) { return row.spId ? (await this.update('tasks', row.spId, taskFields(row)), row) : { ...row, spId: await this.create('tasks', taskFields(row)) }; }
   async saveTasks(rows) { return Promise.all(rows.map((row) => this.saveTask(row))); }
-  async saveUpdate(row) { return { ...row, spId: await this.create('updates', updateFields(row)) }; }
+  async saveUpdate(row) { return row.spId ? (await this.update('updates', row.spId, updateFields(row)), row) : { ...row, spId: await this.create('updates', updateFields(row)) }; }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
   async saveAcronym(row) { return row.spId ? (await this.update('acronyms', row.spId, acronymFields(row)), row) : { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }
+
+  directoryRows() { return this.listItems('users', CONTAINERS[5].fields.map(field => field.name), fromUser); }
+  permissionProjects() { return this.listItems('projects', CONTAINERS[0].fields.map(field => field.name), item => ({ ...fromProject(item), archived: !!item.Archived }), true); }
+  async syncUserAccess(person, role, users) {
+    const projects = await this.permissionProjects();
+    const next = [...users.filter(row => row.id !== person.id), ...(role ? [{ ...person, role }] : [])];
+    // Revoke project writes before a demotion/removal. Retry repeats verification.
+    // Include every project on removal/demotion: a previous interrupted engineer
+    // reassignment may have left an old grant on a child record.
+    if (role !== 'Project Engineer' && users.some(row => row.id === person.id)) for (const project of projects) await this.permissions.syncProject(project, next);
+    await this.permissions.syncGroups(person, role);
+    if (role === 'Project Engineer') {
+      for (const project of projects.filter(project => isOwnedByUser(project, person))) await this.permissions.syncProject(project, next);
+    }
+  }
+  async prepareTrackerAccess(onProgress = () => {}) {
+    if (!this.permissions) throw new Error('Scoped tracker access is not enabled on this site.');
+    const { role, siteOwner } = await this.permissions.currentRole(await this.currentUser());
+    if (role !== 'Manager') throw new Error('Only tracker managers or site owners can apply permissions.');
+    if (siteOwner) await this.permissions.enableFolders();
+    else for (const key of ['tasks', 'updates', 'risks']) if (!(await this.permissions.metadata(key)).EnableFolderCreation) throw new Error('A site owner must run this setup once to enable project folders.');
+    const users = normalizeDirectory(await this.directoryRows(), await this.permissionProjects());
+    for (const person of users) {
+      onProgress(`Checking group membership: ${person.title}`);
+      await this.permissions.syncGroups(person, person.role);
+      if (person.roleMigrationPending) await this.update('users', person.spId, { AppRole: person.role });
+    }
+    const projects = await this.permissionProjects();
+    for (const project of projects) await this.permissions.syncProject(project, users, onProgress);
+    return { users: users.length, projects: projects.length };
+  }
 
 }
 

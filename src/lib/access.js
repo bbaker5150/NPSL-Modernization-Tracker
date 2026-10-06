@@ -81,6 +81,11 @@ export function authorizedStore(raw, config = {}) {
         const key = userIdentityKey(user);
         if (!key) throw new Error('Your signed-in identity could not be resolved.');
         const existing = (data.users || []).find((entry) => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user));
+        if (raw.scopedAccess) {
+          if (property === 'activateTestingManager') throw new Error('Testing manager access is disabled. Ask the Tracker Managers group owner to assign your role.');
+          // Read-only users must not write to the directory during startup.
+          return existing;
+        }
         if (property === 'activateTestingManager') {
           const expected = config.testingManagerPassword ?? DEFAULT_TEST_MANAGER_PASSWORD;
           if (!expected || password !== expected) throw new Error('Testing password is incorrect or testing access is disabled.');
@@ -151,7 +156,7 @@ export function authorizedStore(raw, config = {}) {
         if (!manager && property === 'saveProject') {
           const current = data.projects.find((entry) => entry.id === args[0]?.id);
           if (!current || !canManageProject(current, user, data.users)) throw new Error('Only managers or assigned project engineers can edit this project.');
-          args[0] = { ...args[0], spId: current.spId, projectKey: current.projectKey, targetFinish: current.targetFinish || '' };
+          args[0] = { ...args[0], spId: current.spId, projectKey: current.projectKey, targetFinish: current.targetFinish || '', ownerName: current.ownerName, ownerEmail: current.ownerEmail, ownerKey: current.ownerKey };
         }
         if (!manager && ['saveUpdate', 'saveRisk'].includes(property)) {
           const collection = property === 'saveUpdate' ? 'updates' : 'risks';
@@ -162,6 +167,7 @@ export function authorizedStore(raw, config = {}) {
         }
         if (!manager && property === 'recycle') {
           const [collection, spId, id] = args;
+          if (raw.scopedAccess && collection === 'projects') throw new Error('Only managers can delete a project and revoke its engineer access.');
           const rows = data[collection] || [];
           const row = rows.find((entry) => entry.id === id || (spId != null && entry.spId === spId));
           const projectKey = collection === 'projects' ? row?.projectKey : row?.projectKey;

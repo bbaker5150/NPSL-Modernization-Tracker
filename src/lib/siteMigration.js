@@ -62,7 +62,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
     return files.map(file => file.FileName);
   }
   async function readRows(key, fields, withAttachments = false) {
-    let path = `${root(key)}/items?$select=${['Id', 'Modified', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName', 'AttachmentFiles/ServerRelativeUrl'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
+    let path = `${root(key)}/items?$select=${['Id', 'Modified', 'FileSystemObjectType', ...fields, ...(withAttachments ? ['AttachmentFiles/FileName', 'AttachmentFiles/ServerRelativeUrl'] : [])].join(',')}&$top=500${withAttachments ? '&$expand=AttachmentFiles' : ''}`;
     const rows = [], visited = new Set();
     while (path) {
       if (visited.has(path)) throw new Error('SharePoint returned a repeated pagination link.');
@@ -77,7 +77,8 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       if (!normalizeUrl(url.href).startsWith(`${normalizeUrl(webUrl)}/_api/`)) throw new Error('Unexpected pagination destination.');
       path = url.href.slice(webUrl.length);
     }
-    return rows;
+    // Permission folders are destination infrastructure, not tracker records.
+    return rows.filter(row => row.FileSystemObjectType !== 1);
   }
   return {
     webUrl,
