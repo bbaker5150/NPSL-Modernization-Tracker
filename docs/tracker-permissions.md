@@ -52,6 +52,14 @@ Existing broad access must be reviewed separately. Permissions are cumulative. U
 
 Live Flank Speed group ownership, folder behavior, page-sharing policy, and effective user permissions must be verified on the tenant. Automated tests use mocked SharePoint responses; they are not evidence of live access enforcement.
 
+## Retrying after a host interruption
+
+Firepit may suspend or reload the embedded app when you leave it. SharePoint retains each completed permission change. Run **Apply tracker permissions** again after a reload: setup reads the current child-item ACLs four at a time and skips uniquely permissioned tasks, updates, and risks whose direct engineer Contribute bindings already match. It reports **Checking**, **already correct**, and **updated** separately. Mismatches use the existing reconciliation and verification path; legacy items still inheriting from the list are prepared for project-specific access. Group grants and unrelated permission levels remain untouched.
+
+Retries still scan live permissions from the beginning, but do not repeat the full update path for matching items. There is no local permission checkpoint or cached authorization decision: manual SharePoint changes and interrupted requests are checked on retry. Unreadable or malformed ACLs stop the current batch before mutations, rather than being treated as correct. A test reproduces interruption at item 131 and verifies that retry only updates items 131 and 132 when the first 130 already match.
+
+Within the same loaded app, leaving and returning to Users and managers retains the running job and progress, and cannot start a duplicate job. This cannot prevent Firepit from suspending or destroying the app; after a host reload, start the live check again.
+
 API references: [List items in folders](https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/working-with-lists-and-list-items-with-rest#create-list-item-in-a-folder), [REST permission assignment](https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/set-custom-permissions-on-a-list-by-using-the-rest-interface).
 
 ## Recovering interrupted project-folder setup

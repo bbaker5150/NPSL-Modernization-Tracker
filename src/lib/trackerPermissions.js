@@ -8,7 +8,6 @@ export const TRACKER_GROUPS = {
 const CHILDREN = ['tasks', 'updates', 'risks'];
 const suffixes = { projects: 'Projects', tasks: 'Tasks', updates: 'Updates', risks: 'Risks' };
 const unwrap = body => body?.d || body;
-const values = body => body?.value || body?.d?.results || body?.results || [];
 const quote = value => encodeURIComponent(String(value).replace(/'/g, "''"));
 const positiveId = value => Number.isInteger(Number(value)) && Number(value) > 0;
 
@@ -23,7 +22,9 @@ export class TrackerPermissions {
     const rows = [];
     while (path) {
       const body = await this.get(path);
-      rows.push(...values(body));
+      const page = body?.value || body?.d?.results || body?.results;
+      if (!Array.isArray(page)) throw new Error('SharePoint did not return the requested permission records. Retry after checking access.');
+      rows.push(...page);
       const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
       if (!next) break;
       const url = new URL(next, `${this.store.webUrl}/`);
@@ -82,7 +83,20 @@ export class TrackerPermissions {
     return role.Id;
   }
   async assignments(scope) {
-    return this.pages(`${scope}/roleassignments?$expand=Member,RoleDefinitionBindings&$select=PrincipalId,Member/PrincipalType,RoleDefinitionBindings/Id&$top=500`);
+    const rows = await this.pages(`${scope}/roleassignments?$expand=Member,RoleDefinitionBindings&$select=PrincipalId,Member/PrincipalType,RoleDefinitionBindings/Id&$top=500`);
+    for (const row of rows) {
+      const bindings = row.RoleDefinitionBindings?.results || row.RoleDefinitionBindings;
+      if (!positiveId(row.PrincipalId) || !positiveId(row.Member?.PrincipalType) || !Array.isArray(bindings) || bindings.some(binding => !positiveId(binding.Id))) {
+        throw new Error(`SharePoint returned incomplete permission assignments for ${scope}. No matching-permission shortcut was used.`);
+      }
+    }
+    return rows;
+  }
+  matchesEngineer(rows, principalId, roleId) {
+    const engineers = rows.filter(row => Number(row.Member.PrincipalType) === 1 &&
+      (row.RoleDefinitionBindings.results || row.RoleDefinitionBindings).some(binding => Number(binding.Id) === Number(roleId)));
+    return engineers.every(row => Number(row.PrincipalId) === Number(principalId)) &&
+      (!principalId || engineers.some(row => Number(row.PrincipalId) === Number(principalId)));
   }
   async applyScope(scope, principalId, roleId) {
     const info = unwrap(await this.get(`${scope}?$select=HasUniqueRoleAssignments`));
@@ -209,11 +223,26 @@ export class TrackerPermissions {
       await this.applyScope(folder.scope, principalId, roleId);
       // Include archived records: former engineers must not retain their ACLs.
       const rows = await this.pages(`${this.root(key)}/items?$select=Id,FileSystemObjectType,HasUniqueRoleAssignments,FileDirRef&$filter=ProjectKey eq '${quote(project.projectKey)}'&$top=500`);
-      for (const row of rows.filter(row => ![1, '1'].includes(row.FileSystemObjectType))) {
-        if (row.HasUniqueRoleAssignments || row.FileDirRef !== folder.path) {
+      const candidates = rows.filter(row => ![1, '1'].includes(row.FileSystemObjectType) && (row.HasUniqueRoleAssignments || row.FileDirRef !== folder.path));
+      let unchanged = 0, updated = 0;
+      // Bound concurrent reads to four. Mutations remain sequential, and each
+      // batch must be readable before any item in that batch is changed.
+      for (let offset = 0; offset < candidates.length; offset += 4) {
+        const batch = candidates.slice(offset, offset + 4);
+        onProgress(`Checking ${key} access: ${project.title || project.projectKey} · ${offset + 1}–${offset + batch.length} of ${candidates.length}`);
+        const checks = await Promise.allSettled(batch.map(async row => ({
+          row, scope: `${this.root(key)}/items(${row.Id})`,
+          acl: row.HasUniqueRoleAssignments ? await this.assignments(`${this.root(key)}/items(${row.Id})`) : null,
+        })));
+        const failed = checks.find(result => result.status === 'rejected');
+        if (failed) throw failed.reason;
+        for (const { value: { row, scope, acl } } of checks) {
+          if (acl && this.matchesEngineer(acl, principalId, roleId)) { unchanged++; continue; }
           onProgress(`Updating ${key} access: ${project.title || project.projectKey} · item ${row.Id}`);
-          await this.applyScope(`${this.root(key)}/items(${row.Id})`, principalId, roleId);
+          await this.applyScope(scope, principalId, roleId);
+          updated++;
         }
+        onProgress(`Checked ${key} access: ${project.title || project.projectKey} · ${offset + batch.length} of ${candidates.length}; ${unchanged} already correct, ${updated} updated`);
       }
     }
   }
