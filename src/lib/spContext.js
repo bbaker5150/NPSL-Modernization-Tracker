@@ -193,12 +193,12 @@ export class SharePointError extends Error {
 }
 
 /** GET returning parsed JSON. */
-export async function spGet(webUrl, path, fetchImpl = fetch) {
+export async function spGet(webUrl, path, fetchImpl = fetch, headers = {}) {
   const response = await fetchImpl(`${webUrl}${path}`, {
     method: 'GET',
     cache: 'no-store',
     credentials: 'include',
-    headers: { Accept: JSON_ACCEPT },
+    headers: { Accept: JSON_ACCEPT, ...headers },
   });
   return readJson(response, `GET ${path}`);
 }
