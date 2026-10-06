@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TrackerPermissions, TRACKER_GROUPS } from './trackerPermissions';
 import { SharePointStore } from './spStore';
 import { authorizedStore } from './access';
+import { resetWebUrlCache } from './spContext';
 
 function fixture() {
   const groups = Object.entries(TRACKER_GROUPS).map(([role, Title], index) => ({ Id: index + 1, Title, role, members: [] }));
@@ -149,6 +150,41 @@ describe('project ACLs and inherited creation', () => {
 });
 
 describe('scoped store integration', () => {
+  it.each(['tasks', 'updates', 'risks'])('sends ResourcePath objects over HTTP when creating a %s project folder', async key => {
+    resetWebUrlCache();
+    const webUrl = 'https://tenant.sharepoint.com/sites/metsoft';
+    const listId = '11111111-1111-1111-1111-111111111111';
+    const label = key[0].toUpperCase() + key.slice(1);
+    const root = `/sites/metsoft/Lists/Modernization${label}`;
+    const folderName = 'tracker-project-5';
+    const requests = [];
+    const fetchImpl = vi.fn(async (url, options) => {
+      const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/_api/contextinfo')) return json({ FormDigestValue: 'test-digest', FormDigestTimeoutSeconds: 1800 });
+      if (url.includes('/lists?')) return json({ value: [{ Id: listId, Title: `NPSL Tracker - ${label}`, BaseTemplate: 100 }] });
+      if (url.endsWith(`/lists(guid'${listId}')/AddValidateUpdateItemUsingPath`)) {
+        const body = JSON.parse(options.body);
+        requests.push({ options, body });
+        // SharePoint's UsingPath contract expects a ResourcePath, not a string.
+        if (body.listItemCreateInfo.UnderlyingObjectType === 1 &&
+            typeof body.listItemCreateInfo.LeafName !== 'object') {
+          return new Response(JSON.stringify({ error: { message: { value: "An unexpected 'PrimitiveValue' node was found when reading from the JSON reader. A 'StartObject' node was expected." } } }), { status: 400 });
+        }
+        return json({ value: [{ FieldName: 'Id', FieldValue: String(22 + requests.length) }] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const store = new SharePointStore({ webUrl, fetchImpl, scopedAccess: true });
+    expect(await store.permissions.addInFolder(key, root, { Title: folderName, ProjectKey: 'p' }, folderName)).toBe(23);
+    expect(requests[0].body).toEqual({
+      listItemCreateInfo: { FolderPath: { DecodedUrl: `${webUrl}/Lists/Modernization${label}` }, LeafName: { DecodedUrl: folderName }, UnderlyingObjectType: 1 },
+      formValues: [{ FieldName: 'Title', FieldValue: folderName }, { FieldName: 'ProjectKey', FieldValue: 'p' }],
+      bNewDocumentUpdate: false,
+    });
+    expect(requests[0].options.headers).toMatchObject({ 'Content-Type': 'application/json;odata=nometadata', 'X-RequestDigest': 'test-digest' });
+    expect(await store.permissions.addInFolder(key, `${root}/${folderName}`, { Title: 'New record', ProjectKey: 'p' })).toBe(24);
+    expect(requests[1].body.listItemCreateInfo).toEqual({ FolderPath: { DecodedUrl: `${webUrl}/Lists/Modernization${label}/${folderName}` }, UnderlyingObjectType: 0 });
+  });
   it('does not persist a role when permission synchronization fails', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
     store.directoryRows = vi.fn(async () => []);
@@ -294,7 +330,7 @@ describe('project folder identity regression', () => {
     const { store, permissions, project, row } = folderFixture({ exists: false, key: null });
     await permissions.folder('tasks', project, true);
     expect(store.post.mock.calls[0][0]).toContain('AddValidateUpdateItemUsingPath');
-    expect(store.post.mock.calls[0][1].body.listItemCreateInfo).toMatchObject({ UnderlyingObjectType: 1, LeafName: 'tracker-project-5' });
+    expect(store.post.mock.calls[0][1].body.listItemCreateInfo).toMatchObject({ UnderlyingObjectType: 1, LeafName: { DecodedUrl: 'tracker-project-5' } });
     expect(row.ProjectKey).toBe('p');
     expect(store.post.mock.calls.filter(([url]) => url.includes('AddValidateUpdateItemUsingPath'))).toHaveLength(1);
   });

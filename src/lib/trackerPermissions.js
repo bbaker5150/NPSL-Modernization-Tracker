@@ -173,8 +173,10 @@ export class TrackerPermissions {
     return { path, scope };
   }
   async addInFolder(key, path, fields, leafName) {
+    // UsingPath takes ResourcePath objects for BOTH FolderPath and LeafName.
+    // A plain LeafName string produces SharePoint's PrimitiveValue/StartObject 400.
     const result = await this.post(`${this.root(key)}/AddValidateUpdateItemUsingPath`, { body: {
-      listItemCreateInfo: { FolderPath: { DecodedUrl: `${new URL(this.store.webUrl).origin}${path}` }, UnderlyingObjectType: leafName ? 1 : 0, ...(leafName ? { LeafName: leafName } : {}) },
+      listItemCreateInfo: { FolderPath: { DecodedUrl: `${new URL(this.store.webUrl).origin}${path}` }, UnderlyingObjectType: leafName ? 1 : 0, ...(leafName ? { LeafName: { DecodedUrl: leafName } } : {}) },
       formValues: this.store.formValues(fields), bNewDocumentUpdate: false,
     } });
     const rows = result?.value || result?.d?.AddValidateUpdateItemUsingPath?.results || result?.d?.AddValidateUpdateItemUsingPath || result?.AddValidateUpdateItemUsingPath?.results || result?.AddValidateUpdateItemUsingPath || [];
