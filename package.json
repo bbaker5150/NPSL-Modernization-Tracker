@@ -11,12 +11,15 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run",
     "verify:singlefile": "node scripts/verifySingleFile.mjs",
-    "smoke:singlefile": "node scripts/smoke-forge-srcdoc.mjs && node scripts/smoke-tasking.mjs"
+    "smoke:singlefile": "node scripts/smoke-forge-srcdoc.mjs && node scripts/smoke-tasking.mjs",
+    "build:reference-export": "vite build --config vite.reference-export.config.mjs",
+    "verify:reference-export": "node scripts/verifyReferenceExport.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "jszip": "3.10.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "4.3.4",

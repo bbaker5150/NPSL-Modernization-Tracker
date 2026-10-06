@@ -1,0 +1,55 @@
+name: One-time reference document exporter
+on:
+  push:
+    branches: [one-time/reference-document-export]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-exporter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npx vitest run tools/reference-export/exporter.test.js
+      - name: Build and verify standalone exporter
+        env:
+          BUILD_STAMP: ${{ github.sha }}
+        run: |
+          npm run build:reference-export
+          npm run verify:reference-export
+      - name: Install browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - run: node scripts/smoke-reference-export.mjs
+      - name: Checksums
+        run: |
+          cd build-reference-export
+          sha256sum *.html > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v5
+        with:
+          name: reference-document-export
+          path: build-reference-export/
+          retention-days: 90
+      - name: Publish separate utility release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          TAG="reference-export-${COMMIT:0:7}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" build-reference-export/* --clobber
+          else
+            gh release create "$TAG" build-reference-export/* \
+              --target "$COMMIT" --prerelease --latest=false \
+              --title "One-time reference document exporter" \
+              --notes "Upload reference-document-export.html to a temporary host page on the old ISEA METENG site. The separate guide explains setup and destination uploads. Each exported ZIP includes a populated folder/file guide and SHA-256 manifest. This utility reads the old site only and does not replace the tracker application."
+          fi

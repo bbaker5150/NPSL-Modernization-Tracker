@@ -1,0 +1,14 @@
+import fs from 'node:fs/promises';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+const html = await fs.readFile('build-reference-export/reference-document-export.html', 'utf8');
+assert(html.startsWith('<!--WFC-MANIFEST:'), 'Missing Forge manifest');
+const doc = new JSDOM(html).window.document;
+assert(!doc.querySelector('script[src],link[href]'), 'External bundle dependency');
+for (const script of doc.querySelectorAll('script')) new vm.Script(script.textContent);
+assert(doc.querySelector('#scan') && doc.querySelector('#export'), 'Missing exporter controls');
+const guide = await fs.readFile('build-reference-export/Reference-Document-Upload-Guide.html', 'utf8');
+assert(guide.includes('metsoft/SitePages/Modernization-Tracker.aspx'));
+assert(guide.includes('Reference Documents'));
+console.log('Reference exporter verified: inline scripts parse, manifest present, no external dependencies, upload guide included.');
