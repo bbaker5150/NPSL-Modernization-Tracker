@@ -614,6 +614,7 @@ export class SharePointStore {
     if (!this.permissions) throw new Error('Scoped tracker access is not enabled on this site.');
     const { role, siteOwner } = await this.permissions.currentRole(await this.currentUser());
     if (role !== 'Manager') throw new Error('Only tracker managers or site owners can apply permissions.');
+    const baseline = await this.permissions.baselineGrants();
     if (siteOwner) await this.permissions.enableFolders();
     else for (const key of ['tasks', 'updates', 'risks']) if (!(await this.permissions.metadata(key)).EnableFolderCreation) throw new Error('A site owner must run this setup once to enable project folders.');
     const users = normalizeDirectory(await this.directoryRows(), await this.permissionProjects());
@@ -623,7 +624,7 @@ export class SharePointStore {
       if (person.roleMigrationPending) await this.update('users', person.spId, { AppRole: person.role });
     }
     const projects = await this.permissionProjects();
-    for (const project of projects) await this.permissions.syncProject(project, users, onProgress);
+    for (const project of projects) await this.permissions.syncProject(project, users, onProgress, baseline);
     return { users: users.length, projects: projects.length };
   }
 

@@ -23,7 +23,9 @@ function fixture() {
     else if (group && options?.body?.LoginName) group.members.push({ Id: 11, LoginName: options.body.LoginName });
     else throw new Error(`Unexpected POST: ${path}`);
   });
-  return { store, groups, calls, permissions: new TrackerPermissions(store) };
+  const permissions = new TrackerPermissions(store);
+  permissions.baselineGrants = vi.fn(async () => []);
+  return { store, groups, calls, permissions };
 }
 const person = { id: 'u1', loginName: 'i:0#.f|membership|engineer@example.com', title: 'Engineer', role: 'Project Engineer' };
 

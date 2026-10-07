@@ -124,6 +124,28 @@ export class TrackerPermissions {
     if (!positiveId(role?.Id)) throw new Error('SharePoint Contribute permission level is unavailable.');
     return role.Id;
   }
+  async baselineGrants() {
+    const roles = await this.pages('/_api/web/roledefinitions?$select=Id,Name,RoleTypeKind,BasePermissions');
+    const read = roles.find(row => row.RoleTypeKind === 2);
+    const manager = roles.find(row => row.Name === 'Tracker Project Access Manager');
+    const required = 33554447n; // Manage Permissions plus View/Add/Edit/Delete Items.
+    let managerBits = 0n;
+    try { managerBits = BigInt(manager?.BasePermissions?.Low || 0); } catch { /* reject below */ }
+    if (!positiveId(read?.Id) || !positiveId(manager?.Id) || (managerBits & required) !== required) {
+      throw new Error('A site owner must configure Read and Tracker Project Access Manager (Contribute plus Manage Permissions) before repairing project access.');
+    }
+    const grants = [];
+    for (const [title, roleId] of [['Metrology App User', read.Id], [TRACKER_GROUPS['Project Engineer'], read.Id], [TRACKER_GROUPS.Manager, manager.Id]]) {
+      const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
+      if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`A site owner must configure the SharePoint group ${title} before repairing project access.`);
+      grants.push({ principalId: Number(group.Id), roleId: Number(roleId) });
+    }
+    return grants;
+  }
+  matchesBaseline(rows, grants) {
+    return grants.every(grant => rows.some(row => Number(row.PrincipalId) === grant.principalId && Number(row.Member.PrincipalType) === 8 &&
+      (row.RoleDefinitionBindings.results || row.RoleDefinitionBindings).some(binding => Number(binding.Id) === grant.roleId)));
+  }
   async assignments(scope) {
     const rows = await this.pages(`${scope}/roleassignments?$expand=Member,RoleDefinitionBindings&$select=PrincipalId,Member/PrincipalType,RoleDefinitionBindings/Id&$top=500`);
     for (const row of rows) {
@@ -140,12 +162,21 @@ export class TrackerPermissions {
     return engineers.every(row => Number(row.PrincipalId) === Number(principalId)) &&
       (!principalId || engineers.some(row => Number(row.PrincipalId) === Number(principalId)));
   }
-  async applyScope(scope, principalId, roleId) {
+  async applyScope(scope, principalId, roleId, baseline = null) {
+    baseline ??= await this.baselineGrants();
     const info = unwrap(await this.get(`${scope}?$select=HasUniqueRoleAssignments`));
+    if (typeof info.HasUniqueRoleAssignments !== 'boolean') throw new Error('Could not verify permission inheritance. No scope changes were made.');
     if (!info.HasUniqueRoleAssignments) await this.post(`${scope}/breakroleinheritance(copyRoleAssignments=true,clearSubscopes=false)`);
     const bindings = row => row.RoleDefinitionBindings?.results || row.RoleDefinitionBindings || [];
     const current = await this.assignments(scope);
     let changed = false;
+    // Add baseline roles without replacing any existing owner or manual grants.
+    for (const grant of baseline) {
+      if (!this.matchesBaseline(current, [grant])) {
+        await this.post(`${scope}/roleassignments/addroleassignment(principalid=${grant.principalId},roledefid=${grant.roleId})`);
+        changed = true;
+      }
+    }
     // These app scopes reserve direct-user Contribute for the assigned engineer.
     // Preserve groups, Full Control, Read, and any other manually assigned roles.
     for (const row of current) {
@@ -158,7 +189,9 @@ export class TrackerPermissions {
       await this.post(`${scope}/roleassignments/addroleassignment(principalid=${principalId},roledefid=${roleId})`);
       changed = true;
     }
-    const verified = (changed ? await this.assignments(scope) : current).filter(row => row.Member?.PrincipalType === 1 && bindings(row).some(binding => binding.Id === roleId));
+    const checked = changed ? await this.assignments(scope) : current;
+    if (!this.matchesBaseline(checked, baseline)) throw new Error('SharePoint did not verify baseline group access. Retry Apply tracker permissions.');
+    const verified = checked.filter(row => row.Member?.PrincipalType === 1 && bindings(row).some(binding => binding.Id === roleId));
     if (verified.some(row => row.PrincipalId !== principalId) || (principalId && !verified.some(row => row.PrincipalId === principalId))) {
       throw new Error('SharePoint did not verify the project engineer permission change. Retry Apply tracker permissions.');
     }
@@ -248,7 +281,8 @@ export class TrackerPermissions {
     if (!positiveId(id)) throw new Error('SharePoint did not return the new record ID. Reload before retrying.');
     return id;
   }
-  async syncProject(project, users, onProgress = () => {}) {
+  async syncProject(project, users, onProgress = () => {}, baseline = null) {
+    baseline ??= await this.baselineGrants();
     const engineer = users.find(row => row.role === 'Project Engineer' && isOwnedByUser(project, row));
     let principalId = null;
     if (engineer && !project.archived) {
@@ -259,10 +293,10 @@ export class TrackerPermissions {
     }
     const roleId = await this.contributionRole();
     onProgress(`Updating access: ${project.title || project.projectKey}`);
-    await this.applyScope(`${this.root('projects')}/items(${project.spId})`, principalId, roleId);
+    await this.applyScope(`${this.root('projects')}/items(${project.spId})`, principalId, roleId, baseline);
     for (const key of CHILDREN) {
       const folder = await this.folder(key, project, true);
-      await this.applyScope(folder.scope, principalId, roleId);
+      await this.applyScope(folder.scope, principalId, roleId, baseline);
       // Include archived records: former engineers must not retain their ACLs.
       const rows = await this.pages(`${this.root(key)}/items?$select=Id,FileSystemObjectType,HasUniqueRoleAssignments,FileDirRef&$filter=ProjectKey eq '${quote(project.projectKey)}'&$top=500`);
       const candidates = rows.filter(row => ![1, '1'].includes(row.FileSystemObjectType) && (row.HasUniqueRoleAssignments || row.FileDirRef !== folder.path));
@@ -279,9 +313,9 @@ export class TrackerPermissions {
         const failed = checks.find(result => result.status === 'rejected');
         if (failed) throw failed.reason;
         for (const { value: { row, scope, acl } } of checks) {
-          if (acl && this.matchesEngineer(acl, principalId, roleId)) { unchanged++; continue; }
+          if (acl && this.matchesEngineer(acl, principalId, roleId) && this.matchesBaseline(acl, baseline)) { unchanged++; continue; }
           onProgress(`Updating ${key} access: ${project.title || project.projectKey} · item ${row.Id}`);
-          await this.applyScope(scope, principalId, roleId);
+          await this.applyScope(scope, principalId, roleId, baseline);
           updated++;
         }
         onProgress(`Checked ${key} access: ${project.title || project.projectKey} · ${offset + batch.length} of ${candidates.length}; ${unchanged} already correct, ${updated} updated`);

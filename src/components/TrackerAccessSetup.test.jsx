@@ -28,3 +28,18 @@ it('restores the running status when returning to Users and managers without sta
     expect(container.querySelector('[role="status"]').textContent).toContain('Verified tracker groups');
   } finally { await act(async () => root.unmount()); container.remove(); }
 });
+
+it('exposes an explicit repair action without running it when rendered', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const node = document.createElement('div');
+  const root = createRoot(node);
+  const snapshot = { busy: false, status: '', error: '' };
+  const job = { subscribe: () => () => {}, getSnapshot: () => snapshot, run: vi.fn() };
+  try {
+    await act(async () => root.render(<TrackerAccessSetup store={{ scopedAccess: true, trackerAccessJob: job }} />));
+    expect(node.textContent).toContain('Repair shared Read and manager access');
+    expect(job.run).not.toHaveBeenCalled();
+    await act(async () => node.querySelector('button').click());
+    expect(job.run).toHaveBeenCalledOnce();
+  } finally { await act(async () => root.unmount()); }
+});

@@ -5,6 +5,7 @@ const acl = id => [{ PrincipalId: id, Member: { PrincipalType: 1 }, RoleDefiniti
   { PrincipalId: 50, Member: { PrincipalType: 8 }, RoleDefinitionBindings: [{ Id: 3 }] }];
 function fixture(count = 132) {
   const permissions = new TrackerPermissions({ prefix: 'Modernization' });
+  permissions.baselineGrants = vi.fn(async () => []);
   const rows = Array.from({ length: count }, (_, i) => ({ Id: i + 1, FileSystemObjectType: 0, FileDirRef: '/legacy', HasUniqueRoleAssignments: true }));
   const project = { spId: 500, projectKey: 'p', title: 'Project' };
   const state = new Map(rows.map(row => [row.Id, acl(99)]));
@@ -62,7 +63,7 @@ it('does not skip inherited legacy tasks merely because their current grants mat
   f.state.set(1, []);
   await f.permissions.syncProject(f.project, []);
   expect(f.permissions.assignments).not.toHaveBeenCalled();
-  expect(f.permissions.applyScope).toHaveBeenCalledWith(expect.stringContaining('ModernizationTasks'), null, 3);
+  expect(f.permissions.applyScope).toHaveBeenCalledWith(expect.stringContaining('ModernizationTasks'), null, 3, []);
 });
 
 it('compares only the assigned engineer Contribute binding while preserving group and owner grants', () => {
