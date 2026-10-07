@@ -589,12 +589,12 @@ describe('application shell', () => {
     await act(async () => changeValue(document.querySelector('select'), 'Viewer'));
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Invite and grant access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Site sharing denied');
-    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry invitation').click());
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
     expect(document.querySelector('.invitation-result')).toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
-    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry site invitation').disabled).toBe(true);
+    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry invitation').disabled).toBe(true);
     expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'Viewer', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 

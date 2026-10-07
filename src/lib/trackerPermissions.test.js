@@ -256,6 +256,7 @@ describe('scoped store integration', () => {
   });
   it('invites through the tracker role group and preserves one direct-page email request', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
+    store.listApi = vi.fn(async key => `/_api/web/lists/getbytitle('${key}')`);
     store.permissions.syncGroups = vi.fn(async () => ({ Id: 2, Title: 'Tracker Project Engineers' }));
     store.get = vi.fn(async path => {
       if (path.includes('sitegroups(2)/users')) return { value: [{ LoginName: person.loginName }] };
