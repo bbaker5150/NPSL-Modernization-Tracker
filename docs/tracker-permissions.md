@@ -22,7 +22,7 @@ Opening Tracker with Read access does not require site-wide Edit. Startup checks
 
 If a reader encounters an unavailable-schema message, an owner should first check that person's Read access to Projects, Tasks, Updates, Risks, Users, Acronyms, and Reference Documents, and confirm the configured site and list names. Open the app as an authorized site administrator only after confirming whether schema setup is actually needed. Do not grant viewers site-wide Edit to suppress an error.
 
-This startup guard does not change role groups, list ACLs, or invitation checks. Scoped invitations verify the target page, seven lists, and configured assets instead of site-level View Items. Resource-only access still requires tenant testing. The historical full permission setup UI described below is no longer exposed in the current app; do not assume its button is available.
+This startup guard does not change role groups, list ACLs, or invitation checks. Scoped invitations verify the target page, seven lists, and configured assets instead of site-level View Items. Resource-only access still requires tenant testing. The shared-baseline repair update restores the explicit Tracker permissions panel under Users and managers.
 
 ## Manager and engineer permission checklist
 
@@ -31,7 +31,7 @@ This startup guard does not change role groups, list ACLs, or invitation checks.
 3. Create or verify **Tracker Project Access Manager** by copying Contribute and adding Manage Permissions (plus dependencies SharePoint selects). Assign this custom level only on Projects, Tasks, Updates, and Risks, never to Tracker Managers across the whole site. This intentionally delegates permissions administration on these lists to trusted managers.
 4. On all seven lists, establish unique permissions if needed, preserve Owners, and grant Metrology App User and Project Engineers Read. Grant Managers the custom level on the four project-content lists and standard Contribute on Users, Acronyms, and Reference Documents. Never grant the engineers group list-wide Contribute/Edit.
 5. Give Metrology App User and both elevated-role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Verify access to these resources before removing site grants. Retain SharePoint-generated Limited Access.
-6. Use Tracker's normal Users and managers workflow to assign roles, then assign an engineer to a project. The app synchronizes direct Contribute on that project and its task/update/risk scopes. Existing deployments need their project folders/ACLs intact; report incomplete-setup errors rather than broadening engineer access. The legacy setup control is absent from the current UI.
+6. Use Tracker's normal Users and managers workflow to assign roles, then assign an engineer to a project. The app synchronizes direct Contribute on that project and its task/update/risk scopes. Existing deployments need their project folders/ACLs intact; report incomplete-setup errors rather than broadening engineer access. Use the restored Tracker permissions panel after deploying the shared-baseline repair update.
 7. Audit existing unique project/child scopes and other user memberships. Copied broad grants survive removal at a parent list. Preserve intended individual engineer grants while reviewing unwanted access.
 8. Test as non-owner Viewer, Engineer A, Engineer B, and Manager. Verify Read, assigned-project changes and attachment operations, denial of edits to another engineer's project, role/assignment changes, and revocation after reassignment. Invitations require group-management, permission-inspection, and page-sharing rights. If a manager cannot inspect or share a resource, a site owner must complete the invitation; the app does not broaden permissions. A successful UI test does not prove the direct REST permissions: verify those too.
 
@@ -124,3 +124,22 @@ Before retiring the old group:
 4. Once shared access is verified, remove the obsolete Tracker Viewers grants and optionally delete that group. The code does not delete the group or migrate its membership or ACLs automatically. Older deployed HTML still requires it, so update all active copies first.
 
 Explicit invitations verify existing page, list, and asset access before requesting their email. They do not enroll users in Metrology App User. A Viewer invitation works without Tracker Viewers when the recipient already has baseline access. Role changes and setup do not send email.
+
+## Repairing owner-only projects with shared baseline access
+
+The permission repair now resolves and verifies these existing groups and permission levels before changing project access:
+
+| Principal | Project, Tasks/Updates/Risks project folders, and uniquely secured child items |
+| --- | --- |
+| Metrology App User | Read |
+| Tracker Project Engineers | Read |
+| Tracker Managers | Tracker Project Access Manager (Contribute plus Manage Permissions) |
+| Assigned project engineer | Direct Contribute on active assigned projects |
+
+Owners and unrelated grants are preserved. Missing baseline bindings are added, not substituted for existing bindings. Existing direct-user Contribute remains reserved for the assigned engineer; former engineer grants are reconciled as before. Task attachments inherit their task item's access. Archived scopes also receive baseline grants, while archived projects do not receive an assigned-engineer grant.
+
+Deploy the updated single-file HTML, open Tracker as a site owner, then open **Users and managers → Tracker permissions → Apply tracker permissions**. Wait for the verified completion message. If interrupted, rerun the action; live ACLs are reread and an item is skipped only when both its baseline grants and engineer permissions match. Missing groups or an invalid custom manager permission level stop the repair with an error. No groups are created, shared-group memberships changed, or invitation emails sent.
+
+The same baseline is applied when creating/saving a project or reconciling an assignment. Future child records created in a repaired project folder inherit its grants. Existing legacy items outside those folders receive explicit repairs. This does not reset inheritance across the site or modify list-level/page/asset permissions. Keep Read on the seven lists and deployed pages/assets configured separately; keep manager list-level permissions and group ownership configured as above.
+
+After completion, test an App User, a manager, and two engineers. The App User should see all active projects and tasks; managers should manage the projects; each engineer should edit only their assigned project's content. Check a previously owner-only project and task in SharePoint to confirm the three baseline group grants. Tenant validation is still required; repository tests use mocked SharePoint responses.
