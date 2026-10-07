@@ -292,10 +292,10 @@ function describeFailure(context, status, detail) {
   const because = reason ? ` SharePoint said: ${reason}` : '';
 
   if (status === 403) {
-    return `${context} was denied (403). You need Edit permission on this site; ask a site owner.${because}`;
+    return `${context} was denied (403). Your account is not allowed to perform this operation on the requested resource. Ask a site owner to check the resource permissions.${because}`;
   }
   if (status === 404) {
-    return `${context} was not found (404). The lists may not have been created yet — run setup from the tool's Storage panel.${because}`;
+    return `${context} was not found (404). The resource may be missing or unavailable to your account. Ask a site owner to verify the configured site, resource, and your access.${because}`;
   }
   if (status === 401) {
     return `${context} was rejected as unauthenticated (401). Reload the page to sign in again.${because}`;
