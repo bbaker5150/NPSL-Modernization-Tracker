@@ -28,17 +28,32 @@ function fixture() {
 const person = { id: 'u1', loginName: 'i:0#.f|membership|engineer@example.com', title: 'Engineer', role: 'Project Engineer' };
 
 describe('tracker group permissions', () => {
+  it('defaults a shared app member to Viewer without a Tracker Viewers group', async () => {
+    const { permissions, store } = fixture();
+    store.get.mockImplementation(async path => path.includes('/groups') ? { value: [{ Title: 'Metrology App User' }] } : { Low: '0', High: '0' });
+    expect(await permissions.currentRole({})).toEqual({ siteOwner: false, role: 'Viewer' });
+  });
+  it.each(['Viewer', null])('preserves shared membership for %s and never requires the retired group', async role => {
+    const { permissions, groups, calls } = fixture();
+    groups.push({ Id: 99, Title: 'Metrology App User', members: [{ Id: 11, LoginName: person.loginName }] });
+    groups[0].members = [{ Id: 11, LoginName: person.loginName }];
+    expect(await permissions.syncGroups(person, role)).toBeNull();
+    expect(groups[0].members).toEqual([]);
+    expect(groups[2].members).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toMatch(/Tracker%20Viewers|Metrology%20App%20User|sitegroups\(99\)/);
+  });
+
   it('replaces tracker role membership, verifies it, and never touches site Members', async () => {
     const { permissions, groups, calls } = fixture();
-    groups[0].members = [{ Id: 11, LoginName: person.loginName }];
+    groups[1].members = [{ Id: 11, LoginName: person.loginName }];
     const group = await permissions.syncGroups(person, 'Project Engineer');
     expect(group.Title).toBe('Tracker Project Engineers');
-    expect(groups[0].members).toEqual([]);
-    expect(groups[1].members).toHaveLength(1);
+    expect(groups[1].members).toEqual([]);
+    expect(groups[0].members).toHaveLength(1);
     expect(JSON.stringify(calls)).not.toContain('associatedmembergroup');
     const writes = calls.filter(([method]) => method === 'POST');
     expect(writes[0][1]).toContain('removebyid');
-    expect(writes[1][1]).toContain('sitegroups(2)/users');
+    expect(writes[1][1]).toContain('sitegroups(1)/users');
   });
   it('requires the Manager group owner for promotions and does not pretend they succeeded', async () => {
     const { permissions, store } = fixture();
@@ -47,7 +62,7 @@ describe('tracker group permissions', () => {
   });
   it('does not grant a replacement role if removing the previous role fails', async () => {
     const { permissions, groups, store } = fixture();
-    groups[2].members = [{ Id: 11, LoginName: person.loginName }];
+    groups[1].members = [{ Id: 11, LoginName: person.loginName }];
     store.post.mockRejectedValue(new Error('403 Forbidden'));
     await expect(permissions.syncGroups(person, 'Viewer')).rejects.toThrow('Could not remove membership');
     expect(store.post).toHaveBeenCalledTimes(1);
@@ -443,7 +458,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     [null, 'Project Engineer', 'Manager', true],
   ])('preserves role transition behavior: saved %s, live %s, requested %s, cleanup %s', async (savedRole, liveRole, requested, cleanup) => {
     const backing = fixture();
-    if (liveRole) backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
+    if (liveRole && liveRole !== 'Viewer') backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
     store.get = backing.store.get; store.post = backing.store.post;
     const projects = [{ spId: 5, projectKey: 'assigned', ownerKey: person.loginName }, { spId: 6, projectKey: 'former', ownerKey: 'someone-else' }];
@@ -454,7 +469,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     await store.syncUserAccess(person, requested, savedRole ? [{ ...person, role: savedRole }] : []);
     expect(store.permissionProjects).not.toHaveBeenCalled();
     expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledTimes(cleanup ? 1 : 0);
-    if (requested) expect(backing.groups.find(group => group.role === requested).members).toHaveLength(1);
+    if (requested && requested !== 'Viewer') expect(backing.groups.find(group => group.role === requested).members).toHaveLength(1);
     else expect(backing.groups.every(group => group.members.length === 0)).toBe(true);
   });
   it('stops promotion before group changes or directory persistence when engineer cleanup fails', async () => {
@@ -484,7 +499,6 @@ describe('Manager promotion with scoped project cleanup', () => {
   });
   it('grants Project Engineer access only to assigned projects after verifying group membership', async () => {
     const backing = fixture();
-    backing.groups.find(group => group.role === 'Viewer').members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
     store.get = backing.store.get; store.post = backing.store.post;
     store.permissionProjects = vi.fn(async () => [{ spId: 5, ownerKey: person.loginName }, { spId: 6, ownerKey: 'someone-else' }]);
@@ -500,7 +514,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     ['Viewer', 'Project Engineer', true],
   ])('saves %s → Manager with live %s membership (targeted cleanup: %s)', async (oldRole, liveRole, cleanup) => {
     const backing = fixture();
-    backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
+    if (liveRole !== 'Viewer') backing.groups.find(group => group.role === liveRole).members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
     const previous = { ...person, role: oldRole, spId: 7 };
     let savedUser;
@@ -516,7 +530,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledTimes(cleanup ? 1 : 0);
     expect(store.permissionProjects).not.toHaveBeenCalled();
     expect(store.permissions.syncProject).not.toHaveBeenCalled();
-    expect(store.post.mock.calls).toHaveLength(2);
+    expect(store.post.mock.calls).toHaveLength(liveRole === 'Viewer' ? 1 : 2);
     expect(store.post.mock.calls.every(([path]) => path.includes('/sitegroups('))).toBe(true);
     expect(backing.groups.find(group => group.role === 'Manager').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
     expect(backing.groups.filter(group => group.role !== 'Manager').every(group => group.members.length === 0)).toBe(true);

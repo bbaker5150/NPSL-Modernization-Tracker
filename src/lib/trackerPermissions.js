@@ -1,7 +1,6 @@
 import { isOwnedByUser } from './identity';
 
 export const TRACKER_GROUPS = {
-  Viewer: 'Tracker Viewers',
   'Project Engineer': 'Tracker Project Engineers',
   Manager: 'Tracker Managers',
 };
@@ -61,7 +60,7 @@ export class TrackerPermissions {
       state.push({ name, group, member: await this.membership(group, person.loginName) });
     }
     const target = state.find(entry => entry.name === role);
-    if (role && !target) throw new Error('Select a valid tracker role.');
+    if (role && role !== 'Viewer' && !target) throw new Error('Select a valid tracker role.');
     // Let role changes revoke engineer grants using the live memberships we
     // just read, before removing groups or granting the replacement role.
     if (beforeChange) await beforeChange(state);
@@ -77,7 +76,7 @@ export class TrackerPermissions {
       catch (error) { throw new Error(`Could not add membership in ${target.group.Title}. Ask its group owner or a site owner. ${error.message}`); }
     }
     if (target && !(await this.membership(target.group, person.loginName))) throw new Error(`SharePoint did not verify ${target.group.Title} membership. Retry the role change.`);
-    return target?.group;
+    return target?.group || null;
   }
   async revokeEngineerAccess(person, memberships = []) {
     if (!person.loginName) throw new Error('Select a resolved SharePoint identity.');

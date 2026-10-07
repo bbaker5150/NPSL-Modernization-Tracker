@@ -7,7 +7,7 @@ const asset = `${webUrl}/SiteAssets/Tracker/tracker.html`;
 const person = { loginName: 'claims|viewer' };
 function setup({ deny = '', low = '0', assets = [asset] } = {}) {
   const store = new SharePointStore({ webUrl, scopedAccess: true, invitationAssetUrls: assets });
-  store.permissions.syncGroups = vi.fn(async () => ({ Id: 2, Title: 'Tracker Viewers' }));
+  store.permissions.syncGroups = vi.fn(async () => null);
   store.listApi = vi.fn(async key => `/_api/web/lists/getbytitle('${key}')`);
   store.get = vi.fn(async path => {
     if (path.startsWith('/_api/web/getusereffectivepermissions')) throw new Error('Site-wide access must not be required');
