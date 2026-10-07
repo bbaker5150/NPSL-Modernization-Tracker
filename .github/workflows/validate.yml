@@ -20,7 +20,13 @@ jobs:
       - run: npm run build:singlefile
       - run: npm run verify:singlefile
       - name: Install smoke-test browser
+        timeout-minutes: 5
         run: |
+          # Avoid the hosted runner's Azure HTTP mirror, which can stall apt.
+          # Keep browser dependencies and smoke tests required.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
           npm install --no-save playwright
           npx playwright install --with-deps chromium
       - run: npm run smoke:singlefile
