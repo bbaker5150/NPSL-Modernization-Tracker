@@ -303,7 +303,7 @@ describe('page-targeted invitations', () => {
   });
   it('never sends an invitation when page access verification fails and reports invitation failures', async () => {
     const store = setup(7, 0);
-    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('tracker page access could not be verified');
+    await expect(store.shareSiteAccess({ loginName: 'claims|person' }, 'Viewer', pageUrl)).rejects.toThrow('Tracker access could not be verified for the published Tracker page');
     expect(store.post.mock.calls.some(([path]) => path.includes('ShareObject'))).toBe(false);
     const emailFailure = setup();
     const post = emailFailure.post.getMockImplementation();

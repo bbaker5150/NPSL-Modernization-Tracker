@@ -1,6 +1,6 @@
 import { TrackerLists, displayListTitle, legacyListTitle } from './trackerLists';
 import { normalizeDirectory } from './identity';
-import { trackerPageUrl, parsePeopleResults } from './peoplePicker';
+import { trackerPageUrl, normalizeInvitationUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment, validateAttachmentName } from './taskAttachments';
 import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations, ROLES } from '../data/workflow';
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
@@ -162,7 +162,7 @@ const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
 export class SharePointStore {
-  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, scopedAccess = false }) {
+  constructor({ webUrl, prefix = 'Modernization', fetchImpl = fetch, scopedAccess = false, invitationAssetUrls = [], invitationAssetFolders = [] }) {
     this.webUrl = String(webUrl || '').replace(/\/+$/, '');
     this.prefix = prefix;
     this.fetchImpl = !scopedAccess ? fetchImpl : async (url, options = {}) => {
@@ -182,6 +182,8 @@ export class SharePointStore {
     this.lists = new TrackerLists(prefix, path => spGet(this.webUrl, path, this.fetchImpl), (path, options) => spPost(this.webUrl, path, options, this.fetchImpl));
     this.userPromise = null;
     this.scopedAccess = scopedAccess;
+    this.invitationAssetUrls = invitationAssetUrls;
+    this.invitationAssetFolders = invitationAssetFolders;
     this.permissions = scopedAccess ? new TrackerPermissions(this) : null;
     this.trackerAccessJob = scopedAccess ? new TrackerAccessJob(this) : null;
   }
@@ -437,6 +439,18 @@ export class SharePointStore {
     return response.blob();
   }
 
+  async verifyInvitationRead(scope, loginName, required, label) {
+    try {
+      const response = await this.get(`${scope}/getusereffectivepermissions(@u)?@u='${escapeOData(loginName)}'`);
+      const permissions = response?.d?.GetUserEffectivePermissions || response?.GetUserEffectivePermissions || response?.d || response;
+      const raw = permissions?.Low;
+      const low = (typeof raw === 'string' && /^\d+$/.test(raw)) || typeof raw === 'number' ? Number(raw) : NaN;
+      if (!Number.isInteger(low) || low < 0 || low > 0xffffffff || (low & required) !== required) throw new Error('Required Read access was not confirmed.');
+    } catch (error) {
+      throw new Error(`Tracker access could not be verified for ${label}. Group membership may already be saved. Ask a site owner to check this resource's permissions. No invitation email was requested. ${error.message}`);
+    }
+  }
+
   async shareSiteAccess(person, role, appUrl) {
     if (!ROLES.includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
     const link = new URL(trackerPageUrl(appUrl, this.webUrl));
@@ -464,13 +478,28 @@ export class SharePointStore {
     const readDefinitions = await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
     const readRole = (readDefinitions.value || readDefinitions.d?.results || []).find((entry) => entry.RoleTypeKind === 2);
     if (!readRole?.Id) throw new Error('The Read permission level is unavailable. Ask a site owner.');
-    const permissions = await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
-    const effective = permissions?.d?.GetUserEffectivePermissions || permissions?.GetUserEffectivePermissions || permissions?.d || permissions;
-    const required = 1;
-    if (!Number.isFinite(Number(effective?.Low)) || (Number(effective.Low) & required) !== required) throw new Error('Sharing was accepted, but site access could not be verified. Ask a site owner to check permissions before retrying.');
-    const pagePermissions = await this.get(`${fileApi}/ListItemAllFields/getusereffectivepermissions(@u)?@u='${escapeOData(person.loginName)}'`);
-    const pageEffective = pagePermissions?.d?.GetUserEffectivePermissions || pagePermissions?.GetUserEffectivePermissions || pagePermissions?.d || pagePermissions;
-    if (!Number.isFinite(Number(pageEffective?.Low)) || (Number(pageEffective.Low) & 33) !== 33) throw new Error('Site access was granted, but tracker page access could not be verified. No invitation email was requested. Ask a site owner to check the page permissions.');
+    if (!this.permissions) {
+      // Retain the legacy deployment's Members-based invitation behavior.
+      await this.verifyInvitationRead('/_api/web', person.loginName, 1, 'the legacy site');
+    }
+    await this.verifyInvitationRead(`${fileApi}/ListItemAllFields`, person.loginName, 33, 'the published Tracker page');
+    if (this.permissions) {
+      for (const container of CONTAINERS) {
+        await this.verifyInvitationRead(await this.listApi(container.key), person.loginName, 1, displayListTitle(this.prefix, container.key));
+      }
+      if (!Array.isArray(this.invitationAssetFolders)) throw new Error('Configure invitationAssetFolders as an array of Tracker folder URLs. No invitation email was requested.');
+      for (const value of [...new Set(this.invitationAssetFolders)]) {
+        const folder = new URL(normalizeInvitationUrl(value, this.webUrl));
+        const path = `/_api/web/GetFolderByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(folder.pathname).replace(/\/$/, ''))}')/ListItemAllFields`;
+        await this.verifyInvitationRead(path, person.loginName, 33, `Tracker assets folder ${folder.pathname}`);
+      }
+      if (!Array.isArray(this.invitationAssetUrls)) throw new Error('Configure invitationAssetUrls as an array of Tracker file URLs. No invitation email was requested.');
+      for (const value of [...new Set(this.invitationAssetUrls)]) {
+        const asset = new URL(normalizeInvitationUrl(value, this.webUrl));
+        const path = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(asset.pathname))}')/ListItemAllFields`;
+        await this.verifyInvitationRead(path, person.loginName, 33, `Tracker asset ${asset.pathname}`);
+      }
+    }
     // Flank Speed has retired SP.Utilities.Utility.SendEmail. Make exactly one
     // page-targeted ShareObject request after membership and access pass.
     // ShareObject renders this field as plain text in Flank Speed invitation

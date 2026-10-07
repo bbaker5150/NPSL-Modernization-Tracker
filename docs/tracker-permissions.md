@@ -4,7 +4,7 @@ Scoped access is enabled automatically for `/sites/metsoft`. Other deployments c
 
 ## Site configuration
 
-Use these exact SharePoint group names. All three groups need **Read** on the site, the published ASPX page, and the HTML/assets it loads.
+Use these exact SharePoint group names. All three groups need **Read** on the published ASPX page and the HTML/assets it loads, plus the list permissions below. Scoped invitations no longer require site-wide Read; retain the Limited Access SharePoint creates for access to these resources.
 
 | Group | App role | Tracker list permissions |
 | --- | --- | --- |
@@ -22,7 +22,7 @@ Opening Tracker with Read access does not require site-wide Edit. Startup checks
 
 If a reader encounters an unavailable-schema message, an owner should first check that person's Read access to Projects, Tasks, Updates, Risks, Users, Acronyms, and Reference Documents, and confirm the configured site and list names. Open the app as an authorized site administrator only after confirming whether schema setup is actually needed. Do not grant viewers site-wide Edit to suppress an error.
 
-This startup guard does not change role groups, list ACLs, or invitation checks. The existing invitation workflow still checks site-level View Items; migrating to page/folder/list-only access requires a separate change and tenant testing. The historical full permission setup UI described below is no longer exposed in the current app; do not assume its button is available.
+This startup guard does not change role groups, list ACLs, or invitation checks. Scoped invitations verify the target page, seven lists, and configured assets instead of site-level View Items. Resource-only access still requires tenant testing. The historical full permission setup UI described below is no longer exposed in the current app; do not assume its button is available.
 
 ## Manager and engineer permission checklist
 
@@ -30,10 +30,10 @@ This startup guard does not change role groups, list ACLs, or invitation checks.
 2. Keep the exact group names above. Set Tracker Managers as owner of Tracker Viewers and Tracker Project Engineers. A site owner controls Tracker Managers. Restrict membership editing to group owners, disable join/leave requests, and ensure authorized managers can read the memberships needed by role synchronization.
 3. Create or verify **Tracker Project Access Manager** by copying Contribute and adding Manage Permissions (plus dependencies SharePoint selects). Assign this custom level only on Projects, Tasks, Updates, and Risks, never to Tracker Managers across the whole site. This intentionally delegates permissions administration on these lists to trusted managers.
 4. On all seven lists, establish unique permissions if needed, preserve Owners, and grant Viewers and Project Engineers Read. Grant Managers the custom level on the four project-content lists and standard Contribute on Users, Acronyms, and Reference Documents. Never grant the engineers group list-wide Contribute/Edit.
-5. Give all three role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Keep the existing site-access dependency in mind before removing site grants.
+5. Give all three role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Verify access to these resources before removing site grants. Retain SharePoint-generated Limited Access.
 6. Use Tracker's normal Users and managers workflow to assign roles, then assign an engineer to a project. The app synchronizes direct Contribute on that project and its task/update/risk scopes. Existing deployments need their project folders/ACLs intact; report incomplete-setup errors rather than broadening engineer access. The legacy setup control is absent from the current UI.
 7. Audit existing unique project/child scopes and other user memberships. Copied broad grants survive removal at a parent list. Preserve intended individual engineer grants while reviewing unwanted access.
-8. Test as non-owner Viewer, Engineer A, Engineer B, and Manager. Verify Read, assigned-project changes and attachment operations, denial of edits to another engineer's project, role/assignment changes, and revocation after reassignment. Invitations require group-management and page-sharing rights and the existing site-level check. A successful UI test does not prove the direct REST permissions: verify those too.
+8. Test as non-owner Viewer, Engineer A, Engineer B, and Manager. Verify Read, assigned-project changes and attachment operations, denial of edits to another engineer's project, role/assignment changes, and revocation after reassignment. Invitations require group-management, permission-inspection, and page-sharing rights. If a manager cannot inspect or share a resource, a site owner must complete the invitation; the app does not broaden permissions. A successful UI test does not prove the direct REST permissions: verify those too.
 
 Engineers still have baseline Read across all Tracker data; assigned-only visibility is an app filter. SharePoint Contribute allows modification of all fields of permitted records. This model does not hide permitted HTML files or list data from direct access.
 
@@ -56,6 +56,16 @@ Setup preserves existing group grants, Read, Full Control, and other manually as
 - The current user's effective app role comes from their tracker group membership (or site-owner permissions), not a writable AppRole string alone. Read-only users don't write to the Users list at startup. Testing password promotion is disabled in scoped mode, including direct calls to its handler.
 - Engineers can delete tasks/content but project deletion is manager-only in scoped mode because it revokes engineer ACLs. Engineers cannot change engineer assignment through the app. Project deadlines and other manager-only fields retain application restrictions. **SharePoint item permissions do not provide column-level security**: Contribute can edit the whole assigned record through SharePoint APIs. A trusted backend or separately secured records would be needed to enforce field-level restrictions outside the app.
 - Reference documents remain readable/downloadable for all roles and writable by managers.
+
+## Resource-scoped invitation checks
+
+On metsoft/scoped deployments, explicit invitations verify Read access to the published page, all seven Tracker lists, and configured asset folders/files. They do not check or grant site-wide Read/Edit or add site Members. The legacy non-scoped deployment retains its prior site/Members checks.
+
+For `https://flankspeed.sharepoint-mil.us/sites/metsoft`, the owner-confirmed default folder is `/sites/metsoft/SiteAssets/Modernization Tracker`. Keep the HTML and required files inheriting from this folder. A folder check does not prove access to children that have unique permissions. Use `MOD_TRACKER_CONFIG.invitationAssetUrls` to include any such file URLs, and `invitationAssetFolders` to override the default folder. Both accept arrays of same-site resource URLs; pass direct folder/file paths, not `Forms/AllItems.aspx` library-view links. Other deployments have no inferred asset paths and should configure their dependencies explicitly.
+
+These checks inspect access; they do not repair ACLs, change inheritance, or grant permissions to the entire Site Assets library. Missing, denied, or malformed permission responses stop the invitation before email and identify the affected resource. Tracker role membership may already have been saved; repair the resource grant and retry the explicit invitation. List-level Read does not guarantee every uniquely secured item is readable; project scopes must retain their intended baseline reader grants.
+
+Role saves and assignment changes do not call ShareObject or send mail. Only the explicit invitation/retry requests the existing single page-targeted ShareObject email after verification. Managers need authority to inspect the target user's resource permissions and share the page; otherwise an owner must complete the invitation. Live tenant behavior has not been verified by mocked tests.
 
 ## Email and final verification
 

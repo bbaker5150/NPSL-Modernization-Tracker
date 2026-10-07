@@ -36,6 +36,17 @@ describe('repository selection and SharePoint identity', () => {
     expect(createRepository().store.scopedAccess).toBe(false);
   });
 
+  it('uses the confirmed metsoft assets folder and respects deployment overrides', () => {
+    window.MOD_TRACKER_CONFIG = { webUrl: 'https://flankspeed.sharepoint-mil.us/sites/metsoft' };
+    expect(createRepository().store.invitationAssetFolders).toEqual(['/sites/metsoft/SiteAssets/Modernization Tracker']);
+    window.MOD_TRACKER_CONFIG.invitationAssetFolders = ['/sites/metsoft/SiteAssets/Other'];
+    window.MOD_TRACKER_CONFIG.invitationAssetUrls = ['/sites/metsoft/SiteAssets/Other/app.html'];
+    expect(createRepository().store.invitationAssetFolders).toEqual(window.MOD_TRACKER_CONFIG.invitationAssetFolders);
+    expect(createRepository().store.invitationAssetUrls).toEqual(window.MOD_TRACKER_CONFIG.invitationAssetUrls);
+    window.MOD_TRACKER_CONFIG = { webUrl: 'https://tenant.sharepoint.com/sites/metsoft' };
+    expect(createRepository().store.invitationAssetFolders).toEqual([]);
+  });
+
   it('keys My Work to the signed-in SharePoint login with legacy email fallback', () => {
     const user = { id: 17, loginName: 'i:0#.f|membership|engineer@example.invalid', email: 'engineer@example.invalid' };
     expect(userIdentityKey(user)).toBe('i:0#.f|membership|engineer@example.invalid');
