@@ -43,7 +43,7 @@ describe('SharePoint store', () => {
   it('creates visible, app-prefixed lists without follow-up MERGE operations', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.listExists = async () => false;
-    store.get = vi.fn(async () => ({ value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }));
+    store.get = vi.fn(async path => path === '/_api/web/EffectiveBasePermissions' ? { Low: String(2048 | 33554432) } : ({ value: CONTAINERS[0].fields.map((field) => ({ InternalName: field.name })) }));
     store.post = vi.fn(async () => ({}));
 
     await store.provision();

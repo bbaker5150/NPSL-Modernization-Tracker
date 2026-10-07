@@ -16,6 +16,27 @@ Tracker Managers owns the Viewers and Project Engineers groups. The site owner o
 
 Keep site Owners with Full Control. Do not give the entire engineers group list-wide Contribute.
 
+## Startup access errors and schema setup
+
+Opening Tracker with Read access does not require site-wide Edit. Startup checks the seven lists and their fields. A list omitted from the signed-in user's catalog can appear missing even when it exists. Before creating lists, adding columns, or seeding schema-related records, setup now verifies actual site-level **Manage Lists and Manage Permissions**. Tracker Manager membership or list-level permissions alone do not authorize schema setup. Permission-check failures stop setup without writes. Administrators with both site permissions retain automatic first-load setup.
+
+If a reader encounters an unavailable-schema message, an owner should first check that person's Read access to Projects, Tasks, Updates, Risks, Users, Acronyms, and Reference Documents, and confirm the configured site and list names. Open the app as an authorized site administrator only after confirming whether schema setup is actually needed. Do not grant viewers site-wide Edit to suppress an error.
+
+This startup guard does not change role groups, list ACLs, or invitation checks. The existing invitation workflow still checks site-level View Items; migrating to page/folder/list-only access requires a separate change and tenant testing. The historical full permission setup UI described below is no longer exposed in the current app; do not assume its button is available.
+
+## Manager and engineer permission checklist
+
+1. Retain Owners with Full Control. Keep standard Read and Contribute unchanged.
+2. Keep the exact group names above. Set Tracker Managers as owner of Tracker Viewers and Tracker Project Engineers. A site owner controls Tracker Managers. Restrict membership editing to group owners, disable join/leave requests, and ensure authorized managers can read the memberships needed by role synchronization.
+3. Create or verify **Tracker Project Access Manager** by copying Contribute and adding Manage Permissions (plus dependencies SharePoint selects). Assign this custom level only on Projects, Tasks, Updates, and Risks, never to Tracker Managers across the whole site. This intentionally delegates permissions administration on these lists to trusted managers.
+4. On all seven lists, establish unique permissions if needed, preserve Owners, and grant Viewers and Project Engineers Read. Grant Managers the custom level on the four project-content lists and standard Contribute on Users, Acronyms, and Reference Documents. Never grant the engineers group list-wide Contribute/Edit.
+5. Give all three role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Keep the existing site-access dependency in mind before removing site grants.
+6. Use Tracker's normal Users and managers workflow to assign roles, then assign an engineer to a project. The app synchronizes direct Contribute on that project and its task/update/risk scopes. Existing deployments need their project folders/ACLs intact; report incomplete-setup errors rather than broadening engineer access. The legacy setup control is absent from the current UI.
+7. Audit existing unique project/child scopes and other user memberships. Copied broad grants survive removal at a parent list. Preserve intended individual engineer grants while reviewing unwanted access.
+8. Test as non-owner Viewer, Engineer A, Engineer B, and Manager. Verify Read, assigned-project changes and attachment operations, denial of edits to another engineer's project, role/assignment changes, and revocation after reassignment. Invitations require group-management and page-sharing rights and the existing site-level check. A successful UI test does not prove the direct REST permissions: verify those too.
+
+Engineers still have baseline Read across all Tracker data; assigned-only visibility is an app filter. SharePoint Contribute allows modification of all fields of permitted records. This model does not hide permitted HTML files or list data from direct access.
+
 ## First deployment and imported records
 
 1. Deploy the new HTML and open the tracker as a site owner. Site owners are recognized through actual SharePoint site permissions and can administer the tracker without the testing password.

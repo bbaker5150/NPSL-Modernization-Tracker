@@ -210,6 +210,16 @@ export class SharePointStore {
   }
 
   async provision() {
+    // An unreadable/security-trimmed list can look missing to readiness().
+    // Never turn that into schema writes by a viewer, engineer, or list manager.
+    // Check actual site permissions, independently of the app/directory role.
+    const response = await this.get('/_api/web/EffectiveBasePermissions');
+    const permissions = response?.d || response;
+    const low = Number((permissions?.EffectiveBasePermissions || permissions)?.Low);
+    const setupPermissions = 2048 | 33554432; // Manage Lists + Manage Permissions
+    if (!Number.isInteger(low) || low < 0 || low > 0xffffffff || (low & setupPermissions) !== setupPermissions) {
+      throw new Error('Tracker lists or required fields are unavailable to your account. Ask a site owner to check your Read access to all seven Tracker lists and confirm the configured site and list names. If setup is needed, an administrator with site-level Manage Lists and Manage Permissions must open the app. No setup changes were made; ordinary users do not need site-wide Edit.');
+    }
     const steps = [];
     for (const container of CONTAINERS) {
       if (!(await this.listExists(container.key))) {
