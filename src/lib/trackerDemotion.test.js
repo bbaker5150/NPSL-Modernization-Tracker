@@ -51,21 +51,21 @@ function fixture(withGrants = true) {
 }
 
 describe('targeted demotion cleanup', () => {
-  it('demotes a manager with no direct engineer grants using only the two group writes', async () => {
+  it('demotes a manager with no direct engineer grants using only the elevated-group removal', async () => {
     const { store, groups, acl } = fixture(false), before = structuredClone([...acl]);
     await store.syncUserAccess(person, 'Viewer', [person]);
-    expect(store.post.mock.calls).toHaveLength(2);
+    expect(store.post.mock.calls).toHaveLength(1);
     expect(store.post.mock.calls.every(([path]) => path.includes('/sitegroups('))).toBe(true);
     expect([...acl]).toEqual(before);
     expect(groups.find(group => group.role === 'Manager').members).toEqual([]);
-    expect(groups.find(group => group.role === 'Viewer').members).toHaveLength(1);
+    expect(groups.every(group => group.members.length === 0)).toBe(true);
     expect(store.permissionProjects).not.toHaveBeenCalled();
   });
   it('removes only existing target-user Contribute grants, preserving other engineers, owners and groups', async () => {
     const { store, acl } = fixture();
     await store.syncUserAccess(person, 'Viewer', [person]);
     const writes = store.post.mock.calls.map(([path]) => path);
-    expect(writes).toHaveLength(5); // 3 real grants + 2 group changes
+    expect(writes).toHaveLength(4); // 3 real grants + manager membership removal
     expect(writes.slice(0, 3).every(path => path.includes('removeroleassignment(principalid=77,roledefid=3)'))).toBe(true);
     expect(writes.join(' ')).not.toMatch(/breakroleinheritance|addroleassignment|AddValidate|resetroleinheritance/);
     for (const entries of acl.values()) {
@@ -85,7 +85,7 @@ describe('targeted demotion cleanup', () => {
     expect(groups.find(group => group.role === 'Manager').members).toHaveLength(1);
     failWrite(''); store.post.mockClear();
     await store.syncUserAccess(person, 'Viewer', [person]);
-    expect(store.post.mock.calls).toHaveLength(4);
+    expect(store.post.mock.calls).toHaveLength(3);
     expect(store.post.mock.calls.some(([path]) => path.includes('/items(10)'))).toBe(false);
   });
   it('does not write anything if any ACL preflight or scope inventory is incomplete', async () => {

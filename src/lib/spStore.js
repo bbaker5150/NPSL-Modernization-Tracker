@@ -460,20 +460,26 @@ export class SharePointStore {
     catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
     if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
     if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
-    const groupResponse = this.permissions ? await this.permissions.syncGroups(person, role) : await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
-    const group = groupResponse.d || groupResponse;
-    if (!Number.isInteger(group.Id) || group.Id <= 0) throw new Error('The site Members group is unavailable. Ask a site owner to configure it.');
-    const membersApi = `/_api/web/sitegroups(${group.Id})/users`;
-    const membershipUrl = `${membersApi}?$select=Id,LoginName&$filter=LoginName eq '${escapeOData(person.loginName)}'`;
-    const isMember = async () => {
-      const response = await this.get(membershipUrl);
-      return (response.value || response.d?.results || []).some((user) => user.LoginName?.toLowerCase() === person.loginName.toLowerCase());
-    };
-    try {
-      if (!(await isMember())) await this.post(membersApi, { body: { LoginName: person.loginName } });
-      if (!(await isMember())) throw new Error('SharePoint did not confirm group membership.');
-    } catch (error) {
-      throw new Error(`Could not verify membership in ${group.Title || 'the site Members group'}. The inviting account must be allowed to manage this group. No invitation email was requested. ${error.message}`);
+    // Baseline app membership is managed outside Tracker. Viewer has no role group.
+    let group;
+    if (this.permissions) {
+      group = await this.permissions.syncGroups(person, role);
+    } else {
+      const groupResponse = await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
+      group = groupResponse.d || groupResponse;
+      if (!Number.isInteger(group.Id) || group.Id <= 0) throw new Error('The site Members group is unavailable. Ask a site owner to configure it.');
+      const membersApi = `/_api/web/sitegroups(${group.Id})/users`;
+      const membershipUrl = `${membersApi}?$select=Id,LoginName&$filter=LoginName eq '${escapeOData(person.loginName)}'`;
+      const isMember = async () => {
+        const response = await this.get(membershipUrl);
+        return (response.value || response.d?.results || []).some((user) => user.LoginName?.toLowerCase() === person.loginName.toLowerCase());
+      };
+      try {
+        if (!(await isMember())) await this.post(membersApi, { body: { LoginName: person.loginName } });
+        if (!(await isMember())) throw new Error('SharePoint did not confirm group membership.');
+      } catch (error) {
+        throw new Error(`Could not verify membership in ${group.Title || 'the site Members group'}. The inviting account must be allowed to manage this group. No invitation email was requested. ${error.message}`);
+      }
     }
     const readDefinitions = await this.get('/_api/web/roledefinitions?$select=Id,RoleTypeKind&$filter=RoleTypeKind eq 2');
     const readRole = (readDefinitions.value || readDefinitions.d?.results || []).find((entry) => entry.RoleTypeKind === 2);
@@ -522,7 +528,7 @@ export class SharePointStore {
     }
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
     if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm the invitation email request.');
-    return { access: group.Title || 'Site Members', emailRequested: true };
+    return { access: group?.Title || (this.permissions ? 'Viewer (existing app access)' : 'Site Members'), emailRequested: true };
   }
 
   async searchPeople(query) {
