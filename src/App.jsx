@@ -6,7 +6,7 @@ import { TrackerAccessSetup } from './components/TrackerAccessSetup';
 import { PeopleInvite } from './components/PeopleInvite';
 import { TaskDocuments } from './components/TaskDocuments';
 import { displayName } from './lib/displayName';
-import { ORGANIZATIONS, ROLES, normalizeOrganization, projectProgress } from './data/workflow';
+import { ORGANIZATIONS, ROLES, normalizeOrganization, organizationAttentionLabel, projectProgress } from './data/workflow';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { createRepository, createStarterTasks, isOwnedByUser, workflowData, userIdentityKey } from './lib/repository';
@@ -144,7 +144,7 @@ function Overview({ projects, tasks, onOpen, phaseFilter, setPhaseFilter, onAtte
     <section className="hero-row"><div><span className="section-kicker">Portfolio command center</span><h1>Modernization at a glance</h1><p>Measurement areas, milestones, and handoffs across the modernization pipeline.</p></div></section>
     <section className="kpi-grid">
       <KpiCard icon="projects" label="Active projects" value={active.length} detail={`${projects.length} total measurement areas`} onClick={onBoard} />
-      {ORGANIZATIONS.map((organization) => { const count = tasks.filter((task) => task.organization === organization && !isClosedTask(task)).length; return <KpiCard key={organization} icon="alert" label={`${organization} Needs Attention`} value={count} detail="Outstanding tasks" tone="amber" onClick={() => onAttention(organization)} />; })}
+      {ORGANIZATIONS.map((organization) => { const count = tasks.filter((task) => task.organization === organization && !isClosedTask(task)).length; return <KpiCard key={organization} icon="alert" label={organizationAttentionLabel(organization)} value={count} detail="Outstanding tasks" tone="amber" onClick={() => onAttention(organization)} />; })}
     </section>
     <section className="panel pipeline-panel"><div className="panel-heading"><h2>Projects by pipeline stage</h2>{phaseFilter.length > 0 && <button className="text-button" onClick={() => setPhaseFilter([])}>Clear filter</button>}</div><PipelineRail projects={projects} selected={phaseFilter} onSelect={setPhaseFilter} /></section>
     {projects.length > 0 && <ProjectsTable projects={filtered} onOpen={onOpen} register={register} setRegister={setRegister} />}

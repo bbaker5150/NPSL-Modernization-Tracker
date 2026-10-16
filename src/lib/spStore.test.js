@@ -80,7 +80,7 @@ describe('SharePoint store', () => {
     store.post = vi.fn(async () => ({ value: [] }));
     await store.saveProject({ spId: 4, id: 'p4', projectKey: 'p4', title: 'Modernize', organization: 'ISE', ownerCanEdit: true });
     const values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map((field) => [field.FieldName, field.FieldValue]));
-    expect(values).toMatchObject({ Organization: 'NPSL Metrology Engineering', OwnerCanEdit: '1' });
+    expect(values).toMatchObject({ Organization: 'NPSL Metrology Engineering Division', OwnerCanEdit: '1' });
   });
 
   it('creates acronyms in the shared SharePoint glossary list', async () => {
