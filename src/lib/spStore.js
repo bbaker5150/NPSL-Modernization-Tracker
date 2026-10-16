@@ -460,10 +460,13 @@ export class SharePointStore {
     catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
     if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
     if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
-    // Baseline app membership is managed outside Tracker. Viewer has no role group.
+    // Explicit invitations enroll all roles in the shared app baseline.
+    // Viewer still has no dedicated role group.
     let group;
     if (this.permissions) {
       group = await this.permissions.syncGroups(person, role);
+      const baseline = await this.permissions.ensureAppMembership(person);
+      group ||= baseline;
     } else {
       const groupResponse = await this.get('/_api/web/associatedmembergroup?$select=Id,Title');
       group = groupResponse.d || groupResponse;
