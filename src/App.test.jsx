@@ -212,7 +212,7 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.project-table-row:not(.table-header)')).toHaveLength(8);
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Metrology Calibration')).click());
     expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
@@ -339,7 +339,7 @@ describe('application shell', () => {
     expect(rows()[0]).toContain('Alpha project');
     await act(async () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.includes('Project')).click());
     expect(rows()[0]).toContain('Zulu project');
-    await act(async () => changeValue(document.querySelector('[aria-label="Filter by organization"]'), 'NPSL Metrology Engineering'));
+    await act(async () => changeValue(document.querySelector('[aria-label="Filter by organization"]'), 'NPSL Metrology Engineering Division'));
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toContain('Alpha project');
     expect(rows()[0]).toContain('NPSL Metrology Engineering');
@@ -371,9 +371,9 @@ describe('application shell', () => {
     }
     await renderApp();
     expect(document.querySelector('.kpi-grid').textContent).not.toContain('Portfolio Progress');
-    for (const organization of ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering']) {
-      await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(`${organization} Needs Attention`)).click());
-      expect(document.querySelector('h1').textContent).toBe(`${organization} Needs Attention`);
+    for (const [organization, label] of [['CHENG Team', 'CHENG Team Needs Attention'], ['NPSL', 'NPSL Metrology Calibration'], ['NPSL Metrology Engineering', 'NPSL Metrology Engineering Division']]) {
+      await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(label)).click());
+      expect(document.querySelector('h1').textContent).toBe(label);
       expect(document.querySelector('.attention-groups').textContent).toContain(`${organization} project`);
       for (const other of ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering'].filter((value) => value !== organization)) expect(document.querySelector('.attention-groups').textContent).not.toContain(`${other} project`);
       await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Portfolio').click());
@@ -457,7 +457,7 @@ describe('application shell', () => {
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     expect(document.querySelector('.drawer-header-actions .project-menu-popover').textContent).toBe('Edit projectDelete project');
     await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Needs Attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Metrology Calibration')).click());
     expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
     expect(document.querySelector('.attention-section summary').textContent).toContain('In Progress');
     expect(document.querySelector('.attention-section').textContent).not.toContain('skip task');
@@ -532,7 +532,7 @@ describe('application shell', () => {
       await raw.saveTask({ id: `${id}-task`, projectKey: id, title: `${id} work`, phaseKey: 'requirement', status: 'In Progress' });
     }
     await renderApp();
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Needs Attention')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Metrology Calibration')).click());
     await act(async () => [...document.querySelectorAll('.attention-group-toggle button')].find((button) => button.textContent === 'By project').click());
     const groups = document.querySelectorAll('.attention-section');
     expect(groups).toHaveLength(2);

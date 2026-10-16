@@ -6,8 +6,9 @@ export const normalizePhaseKey = (key) => ({
   'production-procurement': 'procurement', 'operation-sustainment': 'deployment',
 }[key] || key || 'requirement');
 
-export const ORGANIZATIONS = ['CHENG Team', 'NPSL', 'NPSL Metrology Engineering'];
-export const normalizeOrganization = (value) => ({ 'Program Office': 'CHENG Team', ISE: 'NPSL Metrology Engineering' }[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL'));
+export const ORGANIZATIONS = ['CHENG Team', 'NPSL Metrology Calibration', 'NPSL Metrology Engineering Division'];
+export const normalizeOrganization = (value) => ({ 'Program Office': 'CHENG Team', NPSL: 'NPSL Metrology Calibration', ISE: 'NPSL Metrology Engineering Division', 'NPSL Metrology Engineering': 'NPSL Metrology Engineering Division' }[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL Metrology Calibration'));
+export const organizationAttentionLabel = (value) => value === 'CHENG Team' ? 'CHENG Team Needs Attention' : normalizeOrganization(value);
 export const ROLES = ['Viewer', 'Project Engineer', 'Manager'];
 export const normalizeRole = (value) => ROLES.includes(value) ? value : 'Viewer';
 export function normalizeTaskOrganizations(tasks, projects) {

@@ -29,7 +29,7 @@ try {
     localStorage.setItem('modernization-project-tracker:v2', JSON.stringify({ projects, tasks, updates: [], risks: [], users: [{ id: 'local', title: 'Local Engineer', loginName: 'local', email: 'local.engineer@example.invalid', role: 'Manager' }, { id: 'other', title: 'Other Engineer', loginName: 'other', email: 'other@example.test', role: 'Project Engineer' }], glossary: [], references: [], recycleBin: [] }));
   });
   await boot();
-  await frame.locator('.kpi-card').filter({ hasText: 'NPSL Needs Attention' }).click();
+  await frame.locator('.kpi-card').filter({ hasText: 'NPSL Metrology Calibration' }).click();
   assert.equal(await frame.locator('.attention-task-card').count(), 4);
   assert.equal(await frame.locator('.attention-summary strong').first().innerText(), '4');
   assert.equal(await frame.locator('.attention-task-details[open]').count(), 0);
@@ -93,7 +93,7 @@ try {
   await frame.getByText('requirements.txt', { exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
-  await frame.locator('.kpi-card').filter({ hasText: 'NPSL Needs Attention' }).click();
+  await frame.locator('.kpi-card').filter({ hasText: 'NPSL Metrology Calibration' }).click();
   const documentCard = frame.locator('.attention-task-card').filter({ hasText: 'New task with documents' });
   assert.equal(await documentCard.getByText('Original due', { exact: true }).count(), 0);
   assert.equal(await documentCard.getByText('Est. hours', { exact: true }).count(), 0);
