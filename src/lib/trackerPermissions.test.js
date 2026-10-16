@@ -275,6 +275,7 @@ describe('scoped store integration', () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
     store.listApi = vi.fn(async key => `/_api/web/lists/getbytitle('${key}')`);
     store.permissions.syncGroups = vi.fn(async () => ({ Id: 2, Title: 'Tracker Project Engineers' }));
+    store.permissions.ensureAppMembership = vi.fn(async () => ({ Id: 99, Title: 'Metrology App User' }));
     store.get = vi.fn(async path => {
       if (path.includes('sitegroups(2)/users')) return { value: [{ LoginName: person.loginName }] };
       if (path.includes('getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: '33' } };
@@ -285,6 +286,7 @@ describe('scoped store integration', () => {
     store.post = vi.fn(async () => ({ StatusCode: 0 }));
     const page = `${store.webUrl}/SitePages/Modernization-Tracker.aspx`;
     expect(await store.shareSiteAccess(person, 'Project Engineer', page)).toEqual({ access: 'Tracker Project Engineers', emailRequested: true });
+    expect(store.permissions.ensureAppMembership).toHaveBeenCalledWith(person);
     expect(store.get.mock.calls.some(([path]) => path.includes('associatedmembergroup'))).toBe(false);
     expect(store.post).toHaveBeenCalledTimes(1);
     expect(store.post.mock.calls[0]).toEqual(['/_api/SP.Web.ShareObject', { body: expect.objectContaining({ url: page, sendEmail: true, propagateAcl: false }) }]);

@@ -43,13 +43,15 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
   }
   return <section className="panel people-invite" aria-label="Invite people">
     <h2>Invite people</h2><p>Find a person, choose their role, then verify their Tracker access and send an invitation email.</p>
+    {!localPreview && store.scopedAccess && <p>Inviting someone adds them to Metrology App User for basic app access. Their selected Tracker role controls what they can do in Tracker.</p>}
     {localPreview && <p>Preview mode searches saved tracker users. Organization search is available in SharePoint.</p>}
     <label className="field"><span>Find a person</span><input type="search" autoComplete="off" value={query} disabled={busy} placeholder="Name or email (at least 2 characters)" onChange={(event) => { setQuery(event.target.value); setSelected(null); setAdded(null); setAccess(null); setError(''); }} /></label>
     {searching && <p role="status">Searching people…</p>}
     {!selected && query.trim().length >= 2 && !searching && !error && !results.length && <p>No people found. Try a full name or email address.</p>}
     {!!results.length && <ul className="people-results" aria-label="Matching people">{results.map((person) => <li key={person.loginName}><button type="button" onClick={() => { setSelected(person); setRole('Viewer'); setResults([]); setQuery(person.title); setAdded(null); setAccess(null); }}><strong>{person.title}</strong><span>{person.email || person.loginName}</span>{person.detail && <small>{person.detail}</small>}</button></li>)}</ul>}
     {selected && <div className="selected-person"><strong>{selected.title}</strong><span>{selected.email || selected.loginName}</span></div>}
-    <div className="invite-actions"><label className="field"><span>Invitation role</span><select aria-label="Invitation role" value={role} disabled={busy || !!added} onChange={(event) => setRole(event.target.value)}>{ROLES.map((role) => <option key={role}>{role}</option>)}</select></label><button type="button" className="button primary" disabled={!selected || busy || !!access || (localPreview && !!added)} onClick={add}>{busy ? 'Saving and granting access…' : localPreview ? 'Add to tracker' : added ? 'Retry invitation' : 'Invite and grant access'}</button></div>
+    <div className="invite-actions"><label className="field"><span>Invitation role</span><select aria-label="Invitation role" value={role} disabled={busy || !!added} onChange={(event) => setRole(event.target.value)}>{ROLES.map((role) => <option key={role}>{role}</option>)}</select></label><button type="button" className="button primary" disabled={!selected || busy || !!access || (localPreview && !!added)} onClick={add}>{busy ? 'Saving and granting access…' : localPreview ? 'Add to tracker' : access?.emailRequested ? 'Invitation requested' : added ? 'Retry invitation' : 'Invite and grant access'}</button></div>
     {error && <p className="inline-error" role="alert">{error}</p>}
+    {access?.emailRequested && <p role="status">Access verified. SharePoint accepted the invitation email request for {added?.title || selected?.title}.</p>}
   </section>;
 }
