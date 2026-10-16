@@ -525,7 +525,7 @@ describe('application shell', () => {
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
   });
 
-  it('collapses projects independently within a status and saves the assigned date', async () => {
+  it('collapses project groups independently and saves the assigned date', async () => {
     const raw = createRepository().store;
     for (const id of ['alpha', 'beta']) {
       await raw.saveProject({ id, projectKey: id, title: id, ownerName: 'Engineer' });
@@ -533,7 +533,7 @@ describe('application shell', () => {
     }
     await renderApp();
     await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Metrology Calibration')).click());
-    await act(async () => [...document.querySelectorAll('.attention-group-toggle button')].find((button) => button.textContent === 'By project').click());
+    await act(async () => [...document.querySelectorAll('.attention-group-toggle button')].find((button) => button.textContent === 'Projects').click());
     const groups = document.querySelectorAll('.attention-section');
     expect(groups).toHaveLength(2);
     groups[0].open = false;

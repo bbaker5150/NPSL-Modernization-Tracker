@@ -2,9 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { TaskDocuments } from './TaskDocuments';
 import { displayName } from '../lib/displayName';
 import { organizationAttentionLabel, workflowData } from '../data/workflow';
+import { Icon } from './Icon';
 
 const statusOrder = ['Blocked', 'In Progress', 'Not Started'];
 const closed = new Set(['Complete', 'Not Required', 'Not Applicable']);
+const effectiveDue = (task) => task.deferredDate || task.dueDate || '';
+const formatHours = (hours) => hours.toLocaleString(undefined, { maximumFractionDigits: 2 });
 const date = (value) => value ? new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not set';
 const overdue = (task) => !!(task.deferredDate || task.dueDate) && (task.deferredDate || task.dueDate) < new Date().toLocaleDateString('en-CA');
 const compareMeasurementArea = (a, b) => {
@@ -18,10 +21,34 @@ export function attentionRows(projects, organization = '', search = '', sort = '
     .filter(({ project, task }) => !query || [project.title, task.title, task.ownerName, displayName(task.ownerName), task.organization].join(' ').toLowerCase().includes(query))
     .sort((a, b) => {
       if (sort === 'measurement-area') return compareMeasurementArea(a.project, b.project) || a.project.title.localeCompare(b.project.title) || a.task.title.localeCompare(b.task.title);
-      const value = ({ task }) => sort === 'hours' ? -(Number(task.estimatedHours) || 0) : sort === 'owner' ? displayName(task.ownerName || '') : (task.deferredDate || task.dueDate || '9999');
+      const value = ({ task }) => sort === 'title' ? task.title : sort === 'hours' ? -(Number(task.estimatedHours) || 0) : sort === 'owner' ? displayName(task.ownerName || '') || '\uffff' : (effectiveDue(task) || '9999');
       const x = value(a), y = value(b);
       return (typeof x === 'number' ? x - y : x.localeCompare(y)) || a.project.title.localeCompare(b.project.title) || a.task.title.localeCompare(b.task.title);
     });
+}
+
+export function attentionGroups(rows, groupBy, sort) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = groupBy === 'project' ? row.project.projectKey : row.task.status;
+    if (!groups.has(key)) groups.set(key, { key, project: row.project, items: [], hours: 0, overdueCount: 0, nextDue: '', firstOwner: '\uffff' });
+    const group = groups.get(key);
+    group.items.push(row);
+    group.hours += Number(row.task.estimatedHours) || 0;
+    group.overdueCount += overdue(row.task) ? 1 : 0;
+    const due = effectiveDue(row.task);
+    if (due && (!group.nextDue || due < group.nextDue)) group.nextDue = due;
+    const owner = displayName(row.task.ownerName || '') || '\uffff';
+    if (owner.localeCompare(group.firstOwner) < 0) group.firstOwner = owner;
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (groupBy !== 'project') return statusOrder.indexOf(a.key) - statusOrder.indexOf(b.key);
+    const order = sort === 'hours' ? b.hours - a.hours
+      : sort === 'measurement-area' ? compareMeasurementArea(a.project, b.project)
+      : sort === 'owner' ? a.firstOwner.localeCompare(b.firstOwner)
+      : sort === 'title' ? 0 : (a.nextDue || '9999').localeCompare(b.nextDue || '9999');
+    return order || a.project.title.localeCompare(b.project.title) || String(a.key).localeCompare(String(b.key));
+  });
 }
 
 const filled = (value) => value != null && String(value).trim() !== '';
@@ -52,20 +79,27 @@ function TaskDetails({ task, store, refreshKey }) {
 
 export function Attention({ projects, organization, onOpen, onTask, controls, onControls, store, refreshKey }) {
   const { groupBy, search, sort } = controls;
+  const byProject = groupBy === 'project';
   const rows = useMemo(() => attentionRows(projects, organization, search, sort), [projects, organization, search, sort]);
-  const groups = new Map();
-  for (const row of rows) {
-    const key = groupBy === 'project' ? row.project.projectKey : row.task.status;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(row);
-  }
-  const ordered = [...groups].sort(([a, x], [b, y]) => groupBy === 'project' ? (sort === 'measurement-area' ? compareMeasurementArea(x[0].project, y[0].project) : 0) || x[0].project.title.localeCompare(y[0].project.title) : statusOrder.indexOf(a) - statusOrder.indexOf(b));
+  const ordered = useMemo(() => attentionGroups(rows, groupBy, sort), [rows, groupBy, sort]);
   const hours = rows.reduce((sum, { task }) => sum + (Number(task.estimatedHours) || 0), 0);
+  const projectSortHint = { due: 'Projects ordered by next task due date.', title: 'Projects ordered by name.', owner: 'Projects ordered by first assignee A–Z.', 'measurement-area': 'Projects ordered by measurement area.', hours: 'Projects ordered by total estimated hours.' }[sort];
   return <div className="page-stack attention-page">
     <section className="page-heading"><span className="section-kicker">Outstanding tasking</span><h1>{organization ? organizationAttentionLabel(organization) : 'Needs Attention'}</h1><p>Assignments, deadlines and workload across your projects.</p></section>
     <section className="attention-summary" aria-label="Outstanding task summary"><div><strong>{rows.length}</strong><span>Open tasks</span></div><div><strong>{new Set(rows.map(({ project }) => project.id)).size}</strong><span>Projects</span></div><div className={rows.some(({ task }) => overdue(task)) ? 'attention-overdue' : ''}><strong>{rows.filter(({ task }) => overdue(task)).length}</strong><span>Overdue</span></div><div><strong>{hours.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong><span>Estimated hours</span></div></section>
-    <section className="attention-toolbar"><label className="search-box"><input type="search" aria-label="Search attention tasks" placeholder="Search tasks, projects or people…" value={search} onChange={(event) => onControls({ ...controls, search: event.target.value })} /></label><div className="attention-group-toggle" aria-label="Group tasks">{['status', 'project'].map((group) => <button key={group} type="button" aria-pressed={groupBy === group} onClick={() => onControls({ ...controls, groupBy: group })}>By {group}</button>)}</div><label className="select-wrap"><select aria-label="Sort attention tasks" value={sort} onChange={(event) => onControls({ ...controls, sort: event.target.value })}><option value="due">Due soonest</option><option value="owner">Assignee A–Z</option><option value="measurement-area">Measurement Area A–Z</option><option value="hours">Hours high–low</option></select></label></section>
-    <div className={`attention-groups attention-groups-${groupBy}`} role="region" aria-label={groupBy === 'status' ? 'Tasks by status' : 'Tasks by project'} tabIndex={groupBy === 'status' ? 0 : undefined}>{ordered.map(([key, items]) => <details className="panel attention-section" key={`${groupBy}-${key}`} open><summary><span className={`attention-dot status-${items[0].task.status.toLowerCase().replaceAll(' ', '-')}`} aria-hidden="true" /><strong>{groupBy === 'project' ? items[0].project.title : key}</strong><span className="attention-count">{items.length} {items.length === 1 ? 'task' : 'tasks'}</span></summary><div className="attention-task-list">{items.map(({ project, task }) => <article className="attention-task-card" key={task.id}>
+    <section className="attention-view-controls" aria-label="Attention view controls">
+      <div className="attention-toolbar">
+        <div className="attention-group-toggle" role="group" aria-label="View by">
+          {[['status', 'Tasks', 'tasks'], ['project', 'Projects', 'folder']].map(([group, label, icon]) => <button key={group} type="button" aria-pressed={groupBy === group} aria-controls="attention-results" onClick={() => onControls({ ...controls, groupBy: group })}><Icon name={icon} size={16} />{label}</button>)}
+        </div>
+        <label className="search-box"><Icon name="search" size={16} /><input type="search" aria-label="Search attention tasks" placeholder="Search tasks, projects or people…" value={search} onChange={(event) => onControls({ ...controls, search: event.target.value })} /></label>
+        <label className="select-wrap attention-sort"><span>Sort</span><select aria-label={byProject ? 'Sort attention projects' : 'Sort attention tasks'} value={sort} onChange={(event) => onControls({ ...controls, sort: event.target.value })}><option value="due">{byProject ? 'Next due soonest' : 'Due soonest'}</option><option value="title">{byProject ? 'Project name A–Z' : 'Task name A–Z'}</option><option value="owner">{byProject ? 'First assignee A–Z' : 'Assignee A–Z'}</option><option value="measurement-area">Measurement Area A–Z</option><option value="hours">{byProject ? 'Total hours high–low' : 'Hours high–low'}</option></select></label>
+      </div>
+      <p className="attention-view-hint">{byProject ? `${projectSortHint} Totals reflect the tasks shown.` : 'Tasks grouped by status, with your chosen sort applied within each group.'}</p>
+    </section>
+    <div id="attention-results" className={`attention-groups attention-groups-${groupBy}`} role="region" aria-label={byProject ? 'Tasks by project' : 'Tasks by status'} tabIndex={byProject ? undefined : 0}>{ordered.map(({ key, items, project, hours, overdueCount, nextDue }) => <details className="panel attention-section" key={`${groupBy}-${key}`} open><summary>
+      {byProject ? <><span className="attention-project-icon"><Icon name="folder" size={19} /></span><span className="attention-project-heading"><strong>{project.title}</strong><span className="attention-project-stats"><span className="attention-count">{items.length} open {items.length === 1 ? 'task' : 'tasks'}</span>{overdueCount > 0 && <span className="attention-overdue">{overdueCount} overdue</span>}<span>{formatHours(hours)} est. hours</span>{nextDue && <span>Next due {date(nextDue)}</span>}</span></span></> : <><span className={`attention-dot status-${key.toLowerCase().replaceAll(' ', '-')}`} aria-hidden="true" /><strong>{key}</strong><span className="attention-count">{items.length} {items.length === 1 ? 'task' : 'tasks'}</span></>}
+    </summary><div className="attention-task-list">{items.map(({ project, task }) => <article className="attention-task-card" key={task.id}>
       <div className="attention-task-heading"><div><button className="attention-project-link" onClick={() => onOpen(project)}>{project.title}</button><button className="attention-task-title" onClick={() => onTask(task)}>{task.title}</button></div><span className={`attention-status status-${task.status.toLowerCase().replaceAll(' ', '-')}`}>{task.status}</span></div>
       <div className="attention-task-meta">{filled(task.organization) && <span>{task.organization}</span>}{filled(project.measurementArea) && <span>{project.measurementArea}</span>}{workflowData.phases.some((phase) => phase.key === task.phaseKey) && <span>{workflowData.phases.find((phase) => phase.key === task.phaseKey).name}</span>}</div>
       <TaskFacts task={task} />
