@@ -37,8 +37,13 @@ export function invitationUrl(config = {}, win = window) {
   // Keep explicit configuration authoritative; sharing still checks the file.
   try {
     const site = new URL(config.webUrl);
-    if (site.origin === 'https://flankspeed.sharepoint-mil.us' && site.pathname.replace(/\/$/, '').toLowerCase() === '/sites/iseameteng') {
-      candidates.push(`${site.origin}${site.pathname.replace(/\/$/, '')}/SitePages/Modernization%20Tracker.aspx`);
+    const knownPages = {
+      '/sites/iseameteng': 'Modernization%20Tracker.aspx',
+      '/sites/metsoft': 'Modernization-Tracker.aspx',
+    };
+    const page = knownPages[site.pathname.replace(/\/$/, '').toLowerCase()];
+    if (site.origin === 'https://flankspeed.sharepoint-mil.us' && page) {
+      candidates.push(`${site.origin}${site.pathname.replace(/\/$/, '')}/SitePages/${page}`);
     }
   } catch { /* no recognized deployment */ }
   try { if (win.parent !== win) candidates.push(win.parent.location.href); } catch { /* cross-origin host */ }
