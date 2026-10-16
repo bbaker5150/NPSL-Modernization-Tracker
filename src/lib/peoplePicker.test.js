@@ -26,3 +26,14 @@ describe('embedded invitation URLs', () => {
     for (const url of ['', 'https://elsewhere.example/app', 'javascript:alert(1)', 'https://tenant.sharepoint-mil.us/sites/other/app']) expect(() => normalizeInvitationUrl(url, webUrl)).toThrow('Enter the full published tracker page URL');
   });
 });
+
+it('resolves metsoft invitations when the embedded host hides its page address', () => {
+  const site = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
+  const win = { location: { href: 'about:srcdoc' }, document: { referrer: `${site}/SitePages/Forms/AllItems.aspx` } };
+  Object.defineProperty(win, 'parent', { get() { throw new Error('cross origin'); } });
+  expect(invitationUrl({ webUrl: site }, win)).toBe(`${site}/SitePages/Modernization-Tracker.aspx`);
+  expect(invitationUrl({ webUrl: `${site}/` }, win)).toBe(`${site}/SitePages/Modernization-Tracker.aspx`);
+  expect(invitationUrl({ webUrl: site, appUrl: 'SitePages/Custom.aspx' }, win)).toBe(`${site}/SitePages/Custom.aspx`);
+  expect(invitationUrl({ webUrl: `${site}-other` }, win)).toBe('');
+  expect(invitationUrl({ webUrl: 'https://other.sharepoint-mil.us/sites/metsoft' }, win)).toBe('');
+});
