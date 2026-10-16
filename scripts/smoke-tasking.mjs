@@ -51,6 +51,15 @@ try {
       assert.ok(await frame.locator('.attention-task-card').evaluateAll(cards => cards.every(card => card.scrollWidth <= card.clientWidth + 1)), 'Task card content must fit');
       assert.notEqual(await frame.getByLabel('Search attention tasks').evaluate(el => getComputedStyle(el, '::placeholder').color), 'rgba(0, 0, 0, 0)');
       await page.screenshot({ path: `test-artifacts/attention-${width}-${theme}.png`, fullPage: true });
+      const projectsView = frame.getByRole('button', { name: 'Projects', exact: true });
+      await projectsView.focus();
+      await projectsView.press('Enter');
+      assert.equal(await projectsView.getAttribute('aria-pressed'), 'true');
+      assert.equal(await frame.locator('.attention-groups-project > .attention-section').count(), 2);
+      assert.ok(await frame.locator('.attention-page').evaluate(el => el.scrollWidth <= el.clientWidth + 1), `Project view overflow at ${width}px/${theme}`);
+      assert.ok(await frame.locator('.attention-task-card, .attention-section > summary, .attention-toolbar').evaluateAll(elements => elements.every(el => el.scrollWidth <= el.clientWidth + 1)), 'Project cards, summaries and controls must fit');
+      await page.screenshot({ path: `test-artifacts/attention-projects-${width}-${theme}.png`, fullPage: true });
+      await frame.getByRole('button', { name: 'Tasks', exact: true }).click();
     }
   }
   await page.setViewportSize({ width: 1440, height: 1050 });
@@ -58,11 +67,21 @@ try {
   assert.equal(await frame.locator('.attention-groups-status > .attention-section[open]').count(), 2);
   await frame.locator('.attention-groups-status > .attention-section > summary').first().click();
   assert.equal(await frame.locator('.attention-groups-status > .attention-section[open]').count(), 3);
-  await frame.getByRole('button', { name: 'By project', exact: true }).click();
+  await frame.getByRole('button', { name: 'Projects', exact: true }).click();
   assert.equal(await frame.locator('.attention-section').count(), 2);
+  await frame.getByLabel('Sort attention projects').selectOption('hours');
+  assert.equal(await frame.locator('.attention-project-heading > strong').first().innerText(), 'Pressure modernization');
+  assert.ok((await frame.locator('.attention-project-stats').first().innerText()).includes('12 est. hours'));
   await frame.locator('.attention-section > summary').first().click();
   assert.equal(await frame.locator('.attention-section[open]').count(), 1);
   await frame.getByLabel('Search attention tasks').fill('funding');
+  assert.equal(await frame.locator('.attention-task-card').count(), 1);
+  await frame.getByRole('button', { name: 'Tasks', exact: true }).click();
+  assert.equal(await frame.getByLabel('Search attention tasks').inputValue(), 'funding');
+  assert.equal(await frame.getByLabel('Sort attention tasks').inputValue(), 'hours');
+  assert.equal(await frame.locator('.attention-task-card').count(), 1);
+  await frame.getByRole('button', { name: 'Projects', exact: true }).click();
+  assert.equal(await frame.getByLabel('Sort attention projects').inputValue(), 'hours');
   assert.equal(await frame.locator('.attention-task-card').count(), 1);
   await role('Project Engineer');
   assert.equal(await frame.locator('.project-table-row:not(.table-header)').count(), 1);
