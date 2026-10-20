@@ -21,6 +21,17 @@ async function role(value) {
   await page.evaluate(value => { const key = 'modernization-project-tracker:v2'; const data = JSON.parse(localStorage.getItem(key)); data.users[0].role = value; localStorage.setItem(key, JSON.stringify(data)); }, value);
   await boot();
 }
+async function assertNotesFit(label) {
+  const layout = await frame.getByLabel('Notes', { exact: true }).evaluate(el => ({
+    content: el.scrollHeight, visible: el.clientHeight, height: el.offsetHeight,
+    resize: getComputedStyle(el).resize, overflow: getComputedStyle(el).overflowY,
+  }));
+  assert.ok(layout.content <= layout.visible + 1, `Notes must fit completely: ${label}`);
+  assert.equal(layout.resize, 'none');
+  assert.equal(layout.overflow, 'hidden');
+  return layout.height;
+}
+const longNotes = 'Review the attached requirements before proceeding.\n\n' + Array.from({ length: 20 }, (_, i) => `Note ${i + 1}: Confirm calibration requirements, review supporting measurements, and record the decisions and follow-up actions with the project team.`).join('\n\n');
 try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(() => {
@@ -95,7 +106,14 @@ try {
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.getByRole('button', { name: /Add task to/ }).first().click();
   await frame.getByLabel('Task name', { exact: true }).fill('New task with documents');
-  await frame.getByLabel('Notes', { exact: true }).fill('Review the attached requirements before proceeding.');
+  const notesField = frame.getByLabel('Notes', { exact: true });
+  const emptyHeight = await assertNotesFit('empty task');
+  await notesField.fill(longNotes);
+  const expandedHeight = await assertNotesFit('entered notes');
+  assert.ok(expandedHeight > emptyHeight + 300);
+  await notesField.fill('Short note.');
+  assert.ok(await assertNotesFit('shortened notes') < expandedHeight);
+  await notesField.fill(longNotes);
   assert.ok(await frame.getByLabel('Original due date').isDisabled());
   assert.equal(await frame.getByLabel('Pipeline stage', { exact: true }).count(), 0);
   await frame.getByRole('combobox', { name: 'Task owner', exact: true }).fill('Other');
@@ -108,7 +126,24 @@ try {
   assert.equal(saved.ownerKey, 'other');
   assert.equal(saved.phaseKey, 'requirement');
   assert.equal(saved.dueDate, '');
+  assert.equal(saved.notes, longNotes);
+  await boot();
+  await frame.locator('.project-table-row:not(.table-header)').first().click();
+  await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.getByText('New task with documents', { exact: true }).click();
+  assert.equal(await notesField.inputValue(), longNotes);
+  const reopenedHeight = await assertNotesFit('saved task reopened after reload');
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1050 });
+    await page.waitForTimeout(100); // Allow the width observer to remeasure wrapping.
+    const height = await assertNotesFit(`reopened at ${width}px`);
+    if (width === 390) assert.ok(height > reopenedHeight, 'Narrower notes must grow for additional wrapping');
+  }
+  await notesField.fill('');
+  assert.ok(await assertNotesFit('cleared notes') < reopenedHeight);
+  await notesField.fill(longNotes);
+  await notesField.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'test-artifacts/task-notes-expanded.png' });
   await frame.getByText('requirements.txt', { exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
   await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
@@ -142,9 +177,13 @@ try {
   assert.equal(await frame.locator('.project-table-row:not(.table-header)').count(), 2);
   await frame.locator('.project-table-row:not(.table-header)').first().click();
   assert.equal(await frame.getByRole('button', { name: 'Project settings', exact: true }).count(), 0);
-  await frame.locator('.upcoming-list > button').first().click();
+  await frame.getByRole('button', { name: /Work breakdown/ }).click();
+  await frame.getByText('New task with documents', { exact: true }).click();
   assert.equal(await frame.getByRole('button', { name: 'Save task', exact: true }).count(), 0);
   assert.ok(await frame.getByLabel('Task name', { exact: true }).isDisabled());
+  assert.ok(await notesField.isDisabled());
+  assert.equal(await notesField.inputValue(), longNotes);
+  await assertNotesFit('read-only saved notes');
   assert.deepEqual(errors, []);
   console.log('Tasking smoke passed: responsive attention, project grouping, role scope, locked deadlines, owner autocomplete and pre-save document persistence.');
 } catch (error) {

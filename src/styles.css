@@ -455,6 +455,7 @@ p { color: var(--muted); line-height: 1.65; }
 .owner-edit-option { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 8px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer; }
 .owner-edit-option input[type='checkbox'] { appearance: auto; width: 13px; height: 13px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 2px; box-shadow: none; accent-color: var(--blue); cursor: pointer; }
 .field textarea { resize: vertical; line-height: 1.5; }
+.field textarea.auto-size-textarea { box-sizing: border-box; resize: none; overflow: hidden; max-height: none; transition-property: border-color, box-shadow, background-color, color; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 10%, transparent); }
 .field input:disabled { color: var(--faint); background: var(--surface-2); cursor: not-allowed; }
 .field-hint { margin-top: -2px; color: var(--muted); font-size: 8px; line-height: 1.35; }
