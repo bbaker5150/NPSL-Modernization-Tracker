@@ -1,4 +1,5 @@
 import { SavedUserPicker } from './components/SavedUserPicker';
+import { AutoSizeTextarea } from './components/AutoSizeTextarea';
 import { Attention, attentionRows } from './components/Attention';
 import { validateAttachment } from './lib/taskAttachments';
 import { ReferenceDocuments } from './components/ReferenceDocuments';
@@ -281,7 +282,7 @@ function TaskEditor({ task, manager, canSetDeadlines = manager, canDeleteDocumen
       <Field label="Deferral justification" wide><textarea value={draft.deferredJustification || ''} onChange={set('deferredJustification')} /></Field>
       {status === 'Not Required' && <Field label="Not required justification" wide><textarea value={draft.notRequiredJustification || ''} onChange={set('notRequiredJustification')} /></Field>}
       {status === 'Blocked' && <Field label="Blocked reason" wide><textarea value={draft.blockedReason || ''} onChange={set('blockedReason')} /></Field>}
-      <Field label="Notes" wide><textarea value={draft.notes || ''} onChange={set('notes')} /></Field>
+      <Field label="Notes" wide><AutoSizeTextarea aria-label="Notes" value={draft.notes || ''} onChange={set('notes')} /></Field>
     </fieldset>
     {persisted && store && <TaskDocuments taskId={draft.id} store={store} readOnly={readOnly || saving || pendingFiles.length > 0} canDelete={canDeleteDocuments && !saving} refreshKey={saving} />}
     {!readOnly && (!persisted || pendingFiles.length > 0) && <section className="task-documents queued-documents"><h3>Documents</h3><label className="field"><span>Attach documents (up to 50 MB each)</span><input aria-label="Attach documents" className="document-upload" type="file" multiple disabled={saving} onChange={queueFiles} /></label><ul className="document-list">{pendingFiles.map((file) => <li key={file.name}><div className="document-name"><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Uploads when you save</small></div><button type="button" className="text-button" disabled={saving} onClick={() => setPendingFiles((rows) => rows.filter((row) => row !== file))}>Remove</button></li>)}</ul><p className="field-hint">Documents are uploaded with this task when you save.</p></section>}

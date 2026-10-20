@@ -15,7 +15,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 
 ## Tasking and roles
 
-- Portfolio projects uses a searchable register. Needs Attention counts outstanding tasks by CHENG Team, NPSL, and NPSL Metrology Engineering. Organization is a task field; older tasks inherit their project's previous organization until edited.
+- Portfolio projects uses a searchable register. Needs Attention counts outstanding tasks by PMA 260B, NPSL (Calibration Lab), and NPSL Metrology Engineering Division. Organization is a task field; older tasks inherit their project's previous organization until edited.
 - Managers have full project/task access and maintain users, roles, assignments, and original deadlines.
 - Project Engineers read and edit only their assigned projects and related tasks, including documents, estimates, status, deferrals, and justifications. Project target completion and original task deadlines remain manager-only. The previous owner editing checkbox is retired.
 - Viewers read all projects and documents without editing. Task assignment alone does not grant Project Engineer project access.
