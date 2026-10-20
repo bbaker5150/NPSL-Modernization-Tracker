@@ -594,7 +594,8 @@ describe('application shell', () => {
     expect(store.shareSiteAccess).toHaveBeenCalledTimes(2);
     expect(document.querySelector('.invitation-result')).toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
-    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry invitation').disabled).toBe(true);
+    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Invitation requested').disabled).toBe(true);
+    expect(document.querySelector('[role="status"]').textContent).toContain('SharePoint accepted the invitation email request for Invite Engineer');
     expect(store.shareSiteAccess).toHaveBeenLastCalledWith(expect.objectContaining({ loginName: person.loginName }), 'Viewer', 'https://tenant.sharepoint.com/sites/mod/app.aspx');
   });
 
