@@ -6,9 +6,19 @@ export const normalizePhaseKey = (key) => ({
   'production-procurement': 'procurement', 'operation-sustainment': 'deployment',
 }[key] || key || 'requirement');
 
-export const ORGANIZATIONS = ['CHENG Team', 'NPSL Metrology Calibration', 'NPSL Metrology Engineering Division'];
-export const normalizeOrganization = (value) => ({ 'Program Office': 'CHENG Team', NPSL: 'NPSL Metrology Calibration', ISE: 'NPSL Metrology Engineering Division', 'NPSL Metrology Engineering': 'NPSL Metrology Engineering Division' }[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL Metrology Calibration'));
-export const organizationAttentionLabel = (value) => value === 'CHENG Team' ? 'CHENG Team Needs Attention' : normalizeOrganization(value);
+export const ORGANIZATIONS = ['PMA 260B', 'NPSL (Calibration Lab)', 'NPSL Metrology Engineering Division'];
+export const normalizeOrganization = (value) => ({
+  'Program Office': 'PMA 260B',
+  'CHENG Team': 'PMA 260B',
+  NPSL: 'NPSL (Calibration Lab)',
+  'NPSL Metrology Calibration': 'NPSL (Calibration Lab)',
+  ISE: 'NPSL Metrology Engineering Division',
+  'NPSL Metrology Engineering': 'NPSL Metrology Engineering Division',
+}[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL (Calibration Lab)'));
+export const organizationAttentionLabel = (value) => {
+  const organization = normalizeOrganization(value);
+  return organization === 'PMA 260B' ? `${organization} Needs Attention` : organization;
+};
 export const ROLES = ['Viewer', 'Project Engineer', 'Manager'];
 export const normalizeRole = (value) => ROLES.includes(value) ? value : 'Viewer';
 export function normalizeTaskOrganizations(tasks, projects) {

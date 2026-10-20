@@ -212,7 +212,7 @@ describe('application shell', () => {
     expect(document.querySelectorAll('.project-table-row:not(.table-header)')).toHaveLength(8);
     expect(document.querySelector('.attention-panel')).toBeNull();
     expect(document.body.textContent).not.toContain('All projects');
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Metrology Calibration')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL (Calibration Lab)')).click());
     expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
     expect(document.body.textContent).toContain('Overdue');
     expect(document.body.textContent).toContain('Parts delayed');
@@ -354,7 +354,7 @@ describe('application shell', () => {
     await raw.saveTask({ id: 'zn', projectKey: 'z', title: 'Zulu milestone', phaseKey: 'requirement', status: 'Not Started' });
     await renderApp();
     const first = () => document.querySelector('.project-table-row:not(.table-header) > span > strong').textContent;
-    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Alpha'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
+    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Zulu'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
       const heading = () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.startsWith(label));
       await act(async () => heading().click());
       expect(first(), `${label} ascending`).toBe(ascending);
@@ -367,11 +367,11 @@ describe('application shell', () => {
     const raw = createRepository().store;
     for (const [id, organization] of [['p', 'CHENG Team'], ['n', 'NPSL'], ['i', 'NPSL Metrology Engineering']]) {
       await raw.saveProject({ id, projectKey: id, title: `${organization} project`, organization, currentStageKey: 'requirement' });
-      await raw.saveTask({ id: `${id}-t`, projectKey: id, title: `${organization} task`, phaseKey: 'requirement', status: 'Not Started' });
+      await raw.saveTask({ id: `${id}-t`, projectKey: id, title: `${organization} task`, phaseKey: 'requirement', status: 'Not Started', ...(id === 'n' ? { organization: 'NPSL Metrology Calibration' } : {}) });
     }
     await renderApp();
     expect(document.querySelector('.kpi-grid').textContent).not.toContain('Portfolio Progress');
-    for (const [organization, label] of [['CHENG Team', 'CHENG Team Needs Attention'], ['NPSL', 'NPSL Metrology Calibration'], ['NPSL Metrology Engineering', 'NPSL Metrology Engineering Division']]) {
+    for (const [organization, label] of [['CHENG Team', 'PMA 260B Needs Attention'], ['NPSL', 'NPSL (Calibration Lab)'], ['NPSL Metrology Engineering', 'NPSL Metrology Engineering Division']]) {
       await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(label)).click());
       expect(document.querySelector('h1').textContent).toBe(label);
       expect(document.querySelector('.attention-groups').textContent).toContain(`${organization} project`);
@@ -380,7 +380,7 @@ describe('application shell', () => {
     }
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Pipeline board').click());
     await act(async () => changeValue(document.querySelector('[aria-label="Sort pipeline projects"]'), 'organization'));
-    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['CHENG Team project', 'NPSL project', 'NPSL Metrology Engineering project']);
+    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['NPSL project', 'NPSL Metrology Engineering project', 'CHENG Team project']);
   });
 
   it('places project documents after upcoming work and names files in the phase indicator', async () => {
@@ -457,7 +457,7 @@ describe('application shell', () => {
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     expect(document.querySelector('.drawer-header-actions .project-menu-popover').textContent).toBe('Edit projectDelete project');
     await act(async () => document.querySelector('.project-drawer [aria-label="Close"]').click());
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL Metrology Calibration')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes('NPSL (Calibration Lab)')).click());
     expect(document.querySelectorAll('.attention-section')).toHaveLength(1);
     expect(document.querySelector('.attention-section summary').textContent).toContain('In Progress');
     expect(document.querySelector('.attention-section').textContent).not.toContain('skip task');
@@ -532,7 +532,7 @@ describe('application shell', () => {
       await raw.saveTask({ id: `${id}-task`, projectKey: id, title: `${id} work`, phaseKey: 'requirement', status: 'In Progress' });
     }
     await renderApp();
-    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL Metrology Calibration')).click());
+    await act(async () => [...document.querySelectorAll('.kpi-card')].find((row) => row.textContent.includes('NPSL (Calibration Lab)')).click());
     await act(async () => [...document.querySelectorAll('.attention-group-toggle button')].find((button) => button.textContent === 'Projects').click());
     const groups = document.querySelectorAll('.attention-section');
     expect(groups).toHaveLength(2);

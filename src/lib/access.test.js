@@ -39,7 +39,7 @@ describe('three-role access model', () => {
   it('lets engineers edit task content and deferrals while preserving original deadlines and record identity', async () => {
     const { store, raw } = fixture('Project Engineer');
     const saved = await store.saveTask({ ...task, spId: 12, projectKey: 'other', title: 'Revised', status: 'Blocked', dueDate: '2099-01-01', deferredDate: '2026-10-01', deferredJustification: 'Parts delayed', organization: 'CHENG Team', estimatedHours: 2.5, notes: 'New notes' });
-    expect(saved).toMatchObject({ spId: 11, projectKey: 'own', title: 'Revised', status: 'Blocked', dueDate: '2026-09-01', deferredDate: '2026-10-01', organization: 'CHENG Team', estimatedHours: 2.5 });
+    expect(saved).toMatchObject({ spId: 11, projectKey: 'own', title: 'Revised', status: 'Blocked', dueDate: '2026-09-01', deferredDate: '2026-10-01', organization: 'PMA 260B', estimatedHours: 2.5 });
     const added = await store.saveTask({ ...task, id: 'new', spId: 12, dueDate: '2099-01-01' });
     expect(added).toMatchObject({ dueDate: '', spId: undefined });
     await store.recycle('tasks', 12, 't1');

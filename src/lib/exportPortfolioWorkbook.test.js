@@ -7,10 +7,10 @@ describe('portfolio Excel export', () => {
   it('counts outstanding tasks by organization and exports only attention matches with typed dates and hours', () => {
     const projects = [{ projectKey: 'p', title: 'Shared project', ownerName: 'Project Engineer' }];
     const tasks = [
-      { id: 'a', projectKey: 'p', title: 'Matching task', status: 'Blocked', organization: 'CHENG Team', dueDate: '2026-09-01', deferredDate: '2026-10-01', assignedDate: '2026-08-01', estimatedHours: 2.5, deferredJustification: 'Parts delayed', notes: 'Review next week' },
-      { id: 'b', projectKey: 'p', title: 'Other organization', status: 'In Progress', organization: 'NPSL', estimatedHours: 5 },
-      { id: 'c', projectKey: 'p', title: 'Complete task', status: 'Complete', organization: 'CHENG Team', estimatedHours: 7 },
-      { id: 'd', projectKey: 'p', title: 'Not required task', status: 'Not Required', organization: 'CHENG Team', estimatedHours: 9 },
+      { id: 'a', projectKey: 'p', title: 'Matching task', status: 'Blocked', organization: 'PMA 260B', dueDate: '2026-09-01', deferredDate: '2026-10-01', assignedDate: '2026-08-01', estimatedHours: 2.5, deferredJustification: 'Parts delayed', notes: 'Review next week' },
+      { id: 'b', projectKey: 'p', title: 'Other organization', status: 'In Progress', organization: 'NPSL (Calibration Lab)', estimatedHours: 5 },
+      { id: 'c', projectKey: 'p', title: 'Complete task', status: 'Complete', organization: 'PMA 260B', estimatedHours: 7 },
+      { id: 'd', projectKey: 'p', title: 'Not required task', status: 'Not Required', organization: 'PMA 260B', estimatedHours: 9 },
     ];
     const args = { projects, tasks, risks: [], updates: [], phases: workflowData.phases };
     const all = createPortfolioWorkbook(args);
@@ -19,7 +19,7 @@ describe('portfolio Excel export', () => {
     const filtered = createPortfolioWorkbook({ ...args, attentionTaskIds: new Set(['a']) });
     const attention = filtered.getWorksheet('Needs Attention');
     expect(attention.rowCount).toBe(2);
-    expect(attention.getCell('D2').value).toBe('CHENG Team');
+    expect(attention.getCell('D2').value).toBe('PMA 260B');
     expect(attention.getCell('H2').value).toBeInstanceOf(Date);
     expect(attention.getCell('I2').value).toBeInstanceOf(Date);
     expect(attention.getCell('J2').value).toBe(2.5);

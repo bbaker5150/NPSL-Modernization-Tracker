@@ -1,20 +1,20 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { attentionGroups, attentionRows } from './Attention';
 
-const task = (id, values = {}) => ({ id, title: id, status: 'In Progress', organization: 'NPSL Metrology Calibration', ...values });
+const task = (id, values = {}) => ({ id, title: id, status: 'In Progress', organization: 'NPSL (Calibration Lab)', ...values });
 const projects = [
   { id: 'a', projectKey: 'a', title: 'Alpha', measurementArea: 'Pressure', tasks: [
     task('Zulu work', { dueDate: '2026-01-01', deferredDate: '2027-03-01', estimatedHours: 8, ownerName: 'Zoe' }),
     task('Alpha work', { dueDate: '2027-04-01', estimatedHours: 8, ownerName: 'Zoe' }),
     task('Completed work', { status: 'Complete', dueDate: '2020-01-01', estimatedHours: 999 }),
-    task('Other organization', { organization: 'CHENG Team', estimatedHours: 999 }),
+    task('Other organization', { organization: 'PMA 260B', estimatedHours: 999 }),
   ] },
   { id: 'b', projectKey: 'b', title: 'Beta', measurementArea: 'AC Voltage', tasks: [
     task('Beta work', { dueDate: '2026-10-01', estimatedHours: 12, ownerName: 'Alex', status: 'Blocked' }),
   ] },
   { id: 'c', projectKey: 'c', title: 'No deadline', tasks: [task('Undated work')] },
 ];
-const rows = (sort = 'due', search = '') => attentionRows(projects, 'NPSL Metrology Calibration', search, sort);
+const rows = (sort = 'due', search = '') => attentionRows(projects, 'NPSL (Calibration Lab)', search, sort);
 
 afterEach(() => vi.useRealTimers());
 
