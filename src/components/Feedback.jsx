@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import { createFeedback } from '../lib/feedback';
 
@@ -28,7 +29,7 @@ export function Feedback({ store }) {
   }
   return <>
     <button ref={trigger} className="icon-button" aria-label="Report a bug or request a feature" title="Report a bug or request a feature" onClick={() => { setOpen(true); setTab('submit'); setError(''); setSent(false); }}><Icon name="bug" /></button>
-    {open && <dialog ref={dialog} className="modal feedback-dialog" aria-labelledby="feedback-title" onCancel={event => { if (busy) event.preventDefault(); else setOpen(false); }} onClose={() => setOpen(false)}>
+    {open && createPortal(<dialog ref={dialog} className="modal feedback-dialog" aria-labelledby="feedback-title" onCancel={event => { if (busy) event.preventDefault(); else setOpen(false); }} onClose={() => setOpen(false)}>
       <header><div><h2 id="feedback-title">Help improve the tracker</h2><p>Report an issue or share an idea for what comes next.</p></div><button className="icon-button" aria-label="Close feedback" disabled={busy} onClick={() => setOpen(false)}><Icon name="close" /></button></header>
       <div className="modal-body feedback-body">
         <p className="feedback-privacy"><Icon name="shield" size={16} /> {api.local ? 'Local preview · submissions disappear when the page reloads.' : 'Private feedback · only site owners can read submissions.'}</p>
@@ -41,6 +42,6 @@ export function Feedback({ store }) {
           <div className="feedback-submit"><small>Please don’t include passwords or sensitive information.</small><button className="button primary" disabled={busy || !title.trim() || !details.trim()}>{busy ? 'Sending…' : 'Send feedback'}</button></div>
         </form> : <section aria-label="Feedback submissions" aria-busy={busy}>{busy ? <p role="status">Loading submissions…</p> : items?.length === 0 ? <div className="feedback-success"><Icon name="note" size={32} /><h3>No feedback yet</h3><p>Bug reports and feature requests will appear here.</p></div> : items?.map(item => <article key={item.id} className="feedback-item"><div><span className="feedback-kind"><Icon name={item.kind === 'Bug' ? 'bug' : 'idea'} size={15} />{item.kind === 'Bug' ? 'Bug report' : 'Feature request'}</span><time dateTime={item.created}>{new Date(item.created).toLocaleString()}</time></div><h3>{item.title}</h3><small>{item.author}</small><p>{item.details}</p></article>)}</section>}
       </div>
-    </dialog>}
+    </dialog>, document.body)}
   </>;
 }
