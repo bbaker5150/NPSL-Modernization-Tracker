@@ -37,6 +37,8 @@ $list.Update()
 $ctx.ExecuteQuery()
 Add-PnPField -List $title -InternalName FeedbackKind -DisplayName 'Feedback kind' -Type Choice -Choices 'Bug','Feature' -Required | Out-Null
 Add-PnPField -List $title -InternalName FeedbackDetails -DisplayName 'Feedback details' -Type Note -Required | Out-Null
+Add-PnPField -List $title -InternalName FeedbackStatus -DisplayName 'Feedback status' -Type Choice -Choices 'New','In progress','Resolved','Closed' | Out-Null
+Set-PnPField -List $title -Identity FeedbackStatus -Values @{DefaultValue='New'} | Out-Null
 # Exact permission mask. Do not clone Contribute: it includes ViewListItems.
 $roleName = "${namespace}Feedback Submit Only"
 $roles = $web.RoleDefinitions

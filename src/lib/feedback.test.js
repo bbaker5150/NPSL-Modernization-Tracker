@@ -111,3 +111,56 @@ it('preserves feedback received after the owner loaded the inbox', async () => {
   await api.clearInbox(snapshot.map(item => item.id));
   expect((await api.list()).map(item => item.title)).toEqual(['New arrival']);
 });
+
+const validUpdate = { kind: 'Feature', title: 'Updated', details: 'Updated details', status: 'In progress' };
+const statusField = { InternalName: 'FeedbackStatus', TypeAsString: 'Choice', Choices: ['New', 'In progress', 'Resolved', 'Closed'] };
+const updatingStore = () => {
+  const raw = store(true);
+  raw.get.mockImplementation(async path => path.includes('/fields?') ? { value: [statusField] } : feedbackList);
+  return raw;
+};
+it.each(['Viewer', 'Project Engineer', 'Manager'])('rejects updates by non-owner %s before writes', async role => {
+  const raw = store(); raw.currentUser.mockResolvedValue({ role });
+  await expect(createFeedback(raw).update(1, validUpdate, '"2"')).rejects.toThrow('Only site owners');
+  expect(raw.post).not.toHaveBeenCalled();
+});
+it('updates only the selected record with the reviewed version and editable fields', async () => {
+  const raw = updatingStore();
+  await createFeedback(raw).update(2, { ...validUpdate, AuthorId: 99, Created: 'changed' }, '"3"');
+  expect(raw.post).toHaveBeenCalledExactlyOnceWith("/_api/web/lists(guid'11111111-1111-1111-1111-111111111111')/items(2)", {
+    body: { Title: 'Updated', FeedbackKind: 'Feature', FeedbackDetails: 'Updated details', FeedbackStatus: 'In progress' },
+    headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '"3"' },
+  });
+});
+it.each([
+  [0, validUpdate, '"1"'], ['1', validUpdate, '"1"'], [1, { ...validUpdate, title: '' }, '"1"'],
+  [1, { ...validUpdate, status: 'Invalid' }, '"1"'], [1, validUpdate, undefined], [1, validUpdate, '*'],
+])('rejects invalid update inputs before writes (%j)', async (id, value, etag) => {
+  const raw = updatingStore(); await expect(createFeedback(raw).update(id, value, etag)).rejects.toThrow();
+  expect(raw.post).not.toHaveBeenCalled();
+});
+it.each([[412, 'Another owner updated'], [404, 'was deleted'], [403, 'Denied'], [503, 'Denied']])('does not retry an update rejected with %s', async (status, message) => {
+  const raw = updatingStore(); raw.post.mockRejectedValue(Object.assign(new Error('Denied'), { status }));
+  await expect(createFeedback(raw).update(1, validUpdate, '"1"')).rejects.toThrow(message);
+  expect(raw.post).toHaveBeenCalledTimes(1);
+});
+it('keeps old lists readable, requests version metadata, and defaults legacy status to New', async () => {
+  const raw = store(true);
+  raw.get.mockResolvedValueOnce(feedbackList).mockResolvedValueOnce({ value: [{ Id: 1, Title: 'Legacy', 'odata.etag': '"2"' }, { Id: 2, FeedbackStatus: 'Resolved', __metadata: { etag: '"4"' } }] });
+  const result = await createFeedback(raw).list();
+  expect(result[0]).toMatchObject({ status: 'New', etag: '"2"' });
+  expect(result[1]).toMatchObject({ status: 'Resolved', etag: '"4"' });
+  expect(raw.get).toHaveBeenLastCalledWith(expect.stringContaining('$select=*,Author/Title'), { Accept: 'application/json;odata=minimalmetadata' });
+});
+it('updates and deletes one preview record while preserving other submissions and rejecting stale versions', async () => {
+  const api = createFeedback({ currentUser: async () => ({ isSiteAdmin: true }) });
+  await api.submit({ kind: 'Bug', title: 'Keep me', details: 'Original' });
+  await api.submit({ kind: 'Bug', title: 'Edit me', details: 'Original' });
+  const [selected, kept] = await api.list();
+  await api.update(selected.id, validUpdate, selected.etag);
+  await expect(api.update(selected.id, validUpdate, selected.etag)).rejects.toThrow('changed');
+  expect((await api.list())[1]).toEqual(kept);
+  expect((await api.list())[0]).toMatchObject(validUpdate);
+  await api.clearInbox([selected.id]);
+  expect(await api.list()).toEqual([kept]);
+});

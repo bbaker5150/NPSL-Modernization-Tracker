@@ -117,3 +117,70 @@ it('hides the inbox navigation inside the inbox and confirms or cancels clearing
     expect(button('Owner inbox')).toBeDefined();
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
+
+it('edits, cancels and deletes individual reports while preserving other submissions under host click cancellation', async () => {
+  const store = { currentUser: async () => ({ isSiteAdmin: true }) };
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  const button = (label, scope = document) => [...scope.querySelectorAll('button')].find(button => button.textContent === label);
+  const cancelNative = event => { if (event.target.closest('.feedback-dialog button')) event.preventDefault(); };
+  document.addEventListener('click', cancelNative, true);
+  try {
+    await act(async () => root.render(<Feedback store={store} />));
+    await act(async () => node.querySelector('button').click());
+    for (const title of ['Keep me', 'Edit me']) {
+      await act(async () => { change(document.querySelector('input[maxlength]'), title); change(document.querySelector('textarea'), 'Original details'); });
+      await act(async () => button('Send feedback').click());
+      if (title === 'Keep me') await act(async () => button('Send another').click());
+    }
+    await act(async () => button('Owner inbox').click());
+    const selected = () => document.querySelectorAll('article')[0];
+    await act(async () => button('Edit', selected()).click());
+    await act(async () => change(document.querySelector('input[maxlength]'), 'Discard this'));
+    await act(async () => button('Cancel edit').click());
+    expect(selected().querySelector('h3').textContent).toBe('Edit me');
+    await act(async () => button('Edit', selected()).click());
+    await act(async () => {
+      change(document.querySelector('input[maxlength]'), 'Updated report');
+      change(document.querySelector('textarea'), 'Updated details');
+      const status = document.querySelectorAll('.feedback-edit select')[1];
+      status.value = 'Resolved'; status.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => button('Save changes').click());
+    expect(selected().textContent).toContain('Updated report');
+    expect(selected().textContent).toContain('Updated details');
+    expect(selected().querySelector('.feedback-status').textContent).toBe('Resolved');
+    expect(document.querySelectorAll('article')[1].textContent).toContain('Keep me');
+    await act(async () => button('Delete', selected()).click());
+    expect(document.querySelector('.feedback-clear-confirm').textContent).toContain('Updated report');
+    await act(async () => button('Cancel').click());
+    expect(document.querySelectorAll('article')).toHaveLength(2);
+    await act(async () => button('Delete', selected()).click());
+    await act(async () => button('Confirm delete').click());
+    expect(document.querySelectorAll('article')).toHaveLength(1);
+    expect(document.querySelector('article').textContent).toContain('Keep me');
+    expect(document.body.textContent).toContain('Submission deleted.');
+  } finally { document.removeEventListener('click', cancelNative, true); await act(async () => root.unmount()); node.remove(); }
+});
+
+it('keeps the owner edit draft and original record on a failed save', async () => {
+  const store = { webUrl: 'https://example.test', currentUser: async () => ({ isSiteAdmin: true }), post: vi.fn().mockRejectedValue(new Error('Access denied')), get: vi.fn(async path => {
+    if (path.includes('/lists?')) return { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] };
+    if (path.includes('/fields?$filter')) return { value: [{ InternalName: 'FeedbackStatus', TypeAsString: 'Choice', Choices: ['New', 'In progress', 'Resolved', 'Closed'] }] };
+    if (path.includes('/items?')) return { value: [{ Id: 1, Title: 'Original report', FeedbackKind: 'Bug', FeedbackDetails: 'Details', 'odata.etag': '"2"', Created: '2026-10-30T00:00:00Z' }] };
+    return { Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] };
+  }) };
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  const button = label => [...document.querySelectorAll('button')].find(button => button.textContent === label);
+  try {
+    await act(async () => root.render(<Feedback store={store} />));
+    await act(async () => node.querySelector('button').click());
+    await act(async () => button('Owner inbox').click());
+    await act(async () => button('Edit').click());
+    await act(async () => change(document.querySelector('input[maxlength]'), 'My draft'));
+    await act(async () => button('Save changes').click());
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Access denied');
+    expect(document.querySelector('input[maxlength]').value).toBe('My draft');
+    expect(document.querySelector('article h3').textContent).toBe('Original report');
+    expect(store.post).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); node.remove(); }
+});
