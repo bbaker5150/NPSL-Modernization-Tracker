@@ -19,10 +19,23 @@ export function createFeedback(store) {
     const user = await store.currentUser();
     if (user.isSiteAdmin) return true;
     if (local) return false;
+    // Match the tracker's site-owner definition: Manage Permissions on the WEB.
+    // Effective permissions include direct grants and security-group membership;
+    // currentuser/groups alone can omit these. List/project permissions and app
+    // Manager roles must never qualify a user as a site owner.
+    let permissionError;
+    try {
+      const response = unwrap(await store.get('/_api/web/effectivebasepermissions'));
+      const bits = response?.EffectiveBasePermissions || response;
+      if ((BigInt(bits?.Low || 0) & 33554432n) !== 0n) return true;
+    } catch (error) { permissionError = error; }
     const group = unwrap(await store.get('/_api/web/associatedownergroup?$select=Id'));
-    if (!Number.isInteger(group?.Id)) return false;
-    const groups = rows(await store.get('/_api/web/currentuser/groups?$select=Id&$top=5000'));
-    return groups.some(entry => entry.Id === group.Id);
+    if (Number.isInteger(group?.Id)) {
+      const groups = rows(await store.get('/_api/web/currentuser/groups?$select=Id&$top=5000'));
+      if (groups.some(entry => entry.Id === group.Id)) return true;
+    }
+    if (permissionError) throw permissionError;
+    return false;
   }
   return {
     local,
