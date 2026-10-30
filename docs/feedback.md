@@ -33,3 +33,9 @@ Local preview uses disposable module memory, labels submissions accordingly, and
 Send feedback uses a direct click handler, like the directory’s Save action, so embedded hosts that cancel native form activation do not swallow the send operation. Empty fields show validation errors, pending setup shows a status message, and failed writes keep the draft.
 
 The list uses the same App name - Content convention as the other tracker lists. Opening feedback as an owner with Manage Lists renames an existing `ModernizationFeedback` or `NPSL Tracker - Feedback` list in place by GUID after privacy checks. It preserves records, URLs and permissions. Duplicate aliases stop resolution instead of creating a replacement. Add-only users submit by display title with a legacy fallback only on a definitive 404; they do not read the list catalog. Feedback remains excluded from shared portfolio loading and permission repair.
+
+## Clearing the owner inbox
+
+Inside the inbox, the redundant Owner inbox navigation button is hidden. **Clear inbox** opens an in-app confirmation for the submissions currently loaded. It clears the shared inbox for all owners by moving those list items to the SharePoint recycle bin; it does not delete the list or change its permissions. New submissions received after the inbox was loaded are not included. Site owners can restore recycled items through SharePoint’s normal recycle-bin controls.
+
+Owner permission is rechecked when clearing begins. Ordinary users and non-owner tracker Managers cannot clear submissions. A partial failure stops the operation and reports how many items were cleared; uncertain writes are not automatically retried. Reopen the inbox to see the current state before retrying.

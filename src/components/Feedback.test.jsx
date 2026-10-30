@@ -91,3 +91,29 @@ it('shows validation feedback when Send is clicked with empty fields', async () 
     expect(document.querySelector('[role="alert"]').textContent).toContain('Enter a summary');
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
+
+it('hides the inbox navigation inside the inbox and confirms or cancels clearing', async () => {
+  const store = { currentUser: async () => ({ isSiteAdmin: true }) };
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  const button = label => [...document.querySelectorAll('button')].find(button => button.textContent === label);
+  try {
+    await act(async () => root.render(<Feedback store={store} />));
+    await act(async () => node.querySelector('button').click());
+    await act(async () => { change(document.querySelector('input[maxlength]'), 'Review me'); change(document.querySelector('textarea'), 'Details'); });
+    await act(async () => button('Send feedback').click());
+    await act(async () => button('Owner inbox').click());
+    expect(button('Owner inbox')).toBeUndefined();
+    expect(document.querySelector('#feedback-title').textContent).toBe('Owner inbox');
+    await act(async () => button('Clear inbox').click());
+    expect(document.querySelector('.feedback-clear-confirm').textContent).toContain('all site owners');
+    await act(async () => button('Cancel').click());
+    expect(document.querySelector('.feedback-item').textContent).toContain('Review me');
+    await act(async () => button('Clear inbox').click());
+    await act(async () => button('Confirm clear').click());
+    expect(document.querySelector('.feedback-item')).toBeNull();
+    expect(document.body.textContent).toContain('1 submission cleared');
+    expect(button('Clear inbox').disabled).toBe(true);
+    await act(async () => button('Back to feedback').click());
+    expect(button('Owner inbox')).toBeDefined();
+  } finally { await act(async () => root.unmount()); node.remove(); }
+});

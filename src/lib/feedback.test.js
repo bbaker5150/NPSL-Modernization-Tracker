@@ -74,3 +74,40 @@ it('supports the old list title for add-only users without reading the catalog',
   expect(raw.post.mock.calls.map(([path]) => path)).toEqual(["/_api/web/lists/getbytitle('Modernization-Tracker%20-%20Feedback')/items", "/_api/web/lists/getbytitle('ModernizationFeedback')/items"]);
   expect(raw.get).not.toHaveBeenCalled();
 });
+
+const feedbackList = { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] };
+it.each(['Viewer', 'Project Engineer', 'Manager'])('rejects clearing by a non-owner %s before writes', async role => {
+  const raw = store(); raw.currentUser.mockResolvedValue({ role });
+  await expect(createFeedback(raw).clearInbox([1])).rejects.toThrow('Only site owners');
+  expect(raw.post).not.toHaveBeenCalled();
+});
+it('recycles only the reviewed IDs, deduplicates them, and reports progress', async () => {
+  const raw = store(true); raw.get.mockResolvedValue(feedbackList); const progress = vi.fn();
+  expect(await createFeedback(raw).clearInbox([1, 2, 1], progress)).toEqual({ clearedIds: [1, 2] });
+  expect(raw.post.mock.calls.map(([path]) => path)).toEqual([1, 2].map(id => `/_api/web/lists(guid'11111111-1111-1111-1111-111111111111')/items(${id})/recycle()`));
+  expect(progress).toHaveBeenLastCalledWith({ cleared: 2, total: 2 });
+  expect(raw.get.mock.calls.some(([path]) => path.includes('/items'))).toBe(false);
+});
+it.each([[0], [1, -2], ['1'], [1, '2)/recycle()'], []].map(ids => [ids]))('rejects invalid clear IDs %j before any writes', async ids => {
+  const raw = store(true); await expect(createFeedback(raw).clearInbox(ids)).rejects.toThrow('valid feedback');
+  expect(raw.post).not.toHaveBeenCalled();
+});
+it('reports partial failure and stops instead of retrying uncertain writes', async () => {
+  const raw = store(true); raw.get.mockResolvedValue(feedbackList);
+  raw.post.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Timeout'));
+  await expect(createFeedback(raw).clearInbox([1, 2, 3])).rejects.toMatchObject({ clearedIds: [1], message: expect.stringContaining('Cleared 1 of 3') });
+  expect(raw.post).toHaveBeenCalledTimes(2);
+});
+it('tolerates a reviewed submission already removed by another owner', async () => {
+  const raw = store(true); raw.get.mockResolvedValue(feedbackList);
+  raw.post.mockRejectedValueOnce(Object.assign(new Error('Missing'), { status: 404 })).mockResolvedValueOnce({});
+  expect(await createFeedback(raw).clearInbox([1, 2])).toEqual({ clearedIds: [1, 2] });
+});
+it('preserves feedback received after the owner loaded the inbox', async () => {
+  const api = createFeedback({ currentUser: async () => ({ isSiteAdmin: true }) });
+  await api.submit({ kind: 'Bug', title: 'Reviewed', details: 'Details' });
+  const snapshot = await api.list();
+  await api.submit({ kind: 'Feature', title: 'New arrival', details: 'Details' });
+  await api.clearInbox(snapshot.map(item => item.id));
+  expect((await api.list()).map(item => item.title)).toEqual(['New arrival']);
+});

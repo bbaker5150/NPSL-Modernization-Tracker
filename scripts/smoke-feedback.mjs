@@ -30,6 +30,16 @@ try {
   await app.getByRole('heading', { name: 'Thank you for the feedback' }).waitFor();
   await app.getByRole('button', { name: 'Owner inbox' }).click();
   await app.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
+  assert.equal(await app.getByRole('button', { name: 'Owner inbox', exact: true }).count(), 0);
+  await app.getByRole('button', { name: 'Clear inbox', exact: true }).click();
+  await app.getByRole('heading', { name: 'Clear 1 submission?' }).waitFor();
+  await page.screenshot({ path: 'test-artifacts/feedback-clear-confirm.png' });
+  await app.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await app.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
+  await app.getByRole('button', { name: 'Clear inbox', exact: true }).click();
+  await app.getByRole('button', { name: 'Confirm clear', exact: true }).click();
+  await app.getByRole('heading', { name: 'No feedback yet' }).waitFor();
+  assert.equal(await app.getByRole('button', { name: 'Clear inbox', exact: true }).isDisabled(), true);
   await page.keyboard.press('Escape');
   assert.equal(await trigger.evaluate(el => document.activeElement === el), true);
   await app.getByRole('button', { name: 'Switch to dark mode' }).click();
@@ -48,5 +58,5 @@ try {
   await app.getByRole('button', { name: 'Back to feedback' }).click();
   assert.equal(await app.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('Feedback smoke passed: placement, submit, owner inbox, focus return, dark mobile layout.');
+  console.log('Feedback smoke passed: placement, submit, owner inbox, confirmed/canceled clearing, focus return, dark mobile layout.');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

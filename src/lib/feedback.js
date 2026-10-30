@@ -57,6 +57,31 @@ export function createFeedback(store) {
       }
       throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
     },
+    async clearInbox(ids, onProgress = () => {}) {
+      if (!await isOwner()) throw new Error('Only site owners can clear submissions.');
+      if (!Array.isArray(ids) || !ids.length || ids.some(id => local ? typeof id !== 'string' || !id : !Number.isSafeInteger(id) || id <= 0)) throw new Error('Select valid feedback submissions to clear.');
+      // Clear the reviewed snapshot only. Never query and delete new arrivals.
+      const selected = [...new Set(ids)], clearedIds = [];
+      const path = local ? null : await catalog.path('feedback');
+      for (const id of selected) {
+        try {
+          if (local) {
+            const index = preview.findIndex(item => item.id === id);
+            if (index !== -1) preview.splice(index, 1);
+          } else {
+            try { await store.post(`${path}/items(${id})/recycle()`); }
+            catch (error) { if (error.status !== 404) throw error; }
+          }
+          clearedIds.push(id);
+          onProgress({ cleared: clearedIds.length, total: selected.length });
+        } catch (cause) {
+          const error = new Error(`Cleared ${clearedIds.length} of ${selected.length} submissions. ${cause.message} Reopen the inbox to check its current contents before retrying.`);
+          error.clearedIds = [...clearedIds];
+          throw error;
+        }
+      }
+      return { clearedIds };
+    },
     async list() {
       if (!await isOwner()) throw new Error('Only site owners can view submissions.');
       if (local) return [...preview];
