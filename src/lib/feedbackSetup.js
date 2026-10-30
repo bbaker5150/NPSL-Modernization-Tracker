@@ -1,3 +1,4 @@
+import { TrackerLists, displayListTitle } from './trackerLists';
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(value.replace(/'/g, "''"));
 const id = value => Number.isInteger(Number(value)) && Number(value) > 0;
@@ -7,8 +8,10 @@ const READY = 'Private bug reports and feature requests. Managed by NPSL Tracker
 export const SUBMIT_PERMISSIONS = { Low: '200706', High: '32' };
 const sameMask = bits => String(bits?.Low) === SUBMIT_PERMISSIONS.Low && String(bits?.High) === SUBMIT_PERMISSIONS.High;
 
-export function feedbackSetup(store, title, isOwner) {
-  const path = `/_api/web/lists/getbytitle('${quote(title)}')`;
+export function feedbackSetup(store, legacyTitle, isOwner) {
+  const title = displayListTitle(store.prefix, 'feedback');
+  const catalog = new TrackerLists(store.prefix, path => store.get(path), (path, options) => store.post(path, options));
+  let path;
   const merge = body => store.post(path, { body, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' } });
   async function requireOwner() {
     if (!await isOwner()) throw new Error('Only site owners can set up private feedback.');
@@ -29,7 +32,7 @@ export function feedbackSetup(store, title, isOwner) {
     return result;
   }
   async function metadata() {
-    try { return unwrap(await store.get(`${path}?$select=Id,Title,Description,ItemCount,HasUniqueRoleAssignments,BaseTemplate`)); }
+    try { path = await catalog.path('feedback'); return unwrap(await store.get(`${path}?$select=Id,Title,Description,ItemCount,HasUniqueRoleAssignments,BaseTemplate,Hidden`)); }
     catch (error) { if (error.status === 404) return null; throw error; }
   }
   return {
@@ -49,6 +52,15 @@ export function feedbackSetup(store, title, isOwner) {
         if (!Array.isArray(roles)) return true;
         return roles.some(role => role.BasePermissions?.Low == null || (assignment.PrincipalId !== owners.Id && (BigInt(role.BasePermissions.Low) & 1n) !== 0n));
       })) throw new Error('The feedback list grants reading access outside the site Owners group, or its permissions could not be verified. Ask a site administrator to review it.');
+      // Rename the existing list by GUID; never replace records or ACLs.
+      if (list.Title !== title || list.Hidden) {
+        const permissions = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));
+        if ((BigInt((permissions.EffectiveBasePermissions || permissions).Low || 0) & 2048n) !== 0n) {
+          await merge({ Title: title, Hidden: false });
+          const verified = await metadata();
+          if (verified.Id !== list.Id || verified.Title !== title || verified.Hidden !== false) throw new Error('Could not verify the feedback list name. Reopen feedback to retry.');
+        }
+      }
       return { ready: true, title };
     },
     async options() {
@@ -77,7 +89,7 @@ export function feedbackSetup(store, title, isOwner) {
       const roles = await pages('/_api/web/roledefinitions?$select=Id,Name,RoleTypeKind,BasePermissions&$top=500');
       const full = roles.find(role => role.RoleTypeKind === 5);
       if (!id(full?.Id)) throw new Error('The Full Control permission level is unavailable.');
-      const roleName = `${title} Submit Only`;
+      const roleName = `${legacyTitle} Submit Only`;
       let submitRole = roles.find(role => role.Name === roleName);
       if (submitRole && !sameMask(submitRole.BasePermissions)) throw new Error('The existing submission permission level is not add-only. No list changes were made; have a site administrator review it.');
       let list = await metadata();
@@ -116,7 +128,7 @@ export function feedbackSetup(store, title, isOwner) {
       const bindings = assignment => assignment.RoleDefinitionBindings?.results || assignment.RoleDefinitionBindings || [];
       const expected = new Map([[owners.Id, full.Id], [user.id, full.Id], ...selected.map(principal => [principal, submitRole.Id])]);
       if (assignments.some(assignment => !expected.has(assignment.PrincipalId) || bindings(assignment).some(role => role.Id !== expected.get(assignment.PrincipalId))) || ![owners.Id, ...selected].every(principal => assignments.some(assignment => assignment.PrincipalId === principal && bindings(assignment).some(role => role.Id === expected.get(principal))))) throw new Error('Could not verify the feedback permission assignments. Ask a site administrator to review this list before accepting submissions.');
-      await merge({ Description: READY });
+      await merge({ Description: READY, Title: title, Hidden: false });
       // Remove the automatic creator grant. Only Owners retain reading access.
       if (assignments.some(assignment => assignment.PrincipalId === user.id)) await store.post(`${path}/roleassignments/getbyprincipalid(${user.id})`, { headers: { 'X-HTTP-Method': 'DELETE' } });
       return { ready: true, title };

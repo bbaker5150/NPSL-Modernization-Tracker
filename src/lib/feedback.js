@@ -1,3 +1,4 @@
+import { TrackerLists, legacyListTitle, listTitleAliases } from './trackerLists';
 import { feedbackSetup } from './feedbackSetup';
 // Feedback is deliberately separate from shared tracker data and exports.
 const unwrap = value => value?.d || value;
@@ -11,8 +12,8 @@ export function validateFeedback(input) {
   return { kind: input.kind, title, details };
 }
 export function createFeedback(store) {
-  const title = `${String(store.prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '')}Feedback`;
-  const path = `/_api/web/lists/getbytitle('${title}')`;
+  const title = legacyListTitle(store.prefix, 'feedback');
+  const catalog = new TrackerLists(store.prefix, path => store.get(path), (path, options) => store.post(path, options));
   // Local mode is a disposable demonstration, never a private data store.
   const preview = [];
   const local = !store.webUrl;
@@ -46,15 +47,20 @@ export function createFeedback(store) {
       const value = validateFeedback(input);
       if (local) { preview.unshift({ ...value, id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
       // No read-before-write or return-body display: submitters have Add Items only.
-      try { await store.post(`${path}/items`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details } }); }
-      catch (error) {
-        if (error.status === 404) throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
-        throw error;
+      // Add-only users cannot resolve the list catalog. Try the current display
+      // title first, falling back only after a definitive 404 (never a timeout).
+      const aliases = listTitleAliases(store.prefix, 'feedback');
+      for (const name of [aliases[1], aliases[0], ...aliases.slice(2)]) {
+        const path = `/_api/web/lists/getbytitle('${encodeURIComponent(name.replace(/'/g, "''"))}')`;
+        try { await store.post(`${path}/items`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details } }); return; }
+        catch (error) { if (error.status !== 404) throw error; }
       }
+      throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
     },
     async list() {
       if (!await isOwner()) throw new Error('Only site owners can view submissions.');
       if (local) return [...preview];
+      const path = await catalog.path('feedback');
       const result = []; let next = `${path}/items?$select=Id,Title,FeedbackKind,FeedbackDetails,Created,Author/Title&$expand=Author&$orderby=Created desc&$top=100`;
       while (next) {
         const body = await store.get(next);

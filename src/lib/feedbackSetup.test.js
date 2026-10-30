@@ -5,6 +5,7 @@ export function setupFixture() {
   const state = { list: null, fields: [], roles: [{ Id: 1, RoleTypeKind: 5, BasePermissions: { Low: '4294967295', High: '2147483647' } }], assignments: [], failField: false };
   const raw = { webUrl: 'https://example.test/sites/tracker', scopedAccess: true, currentUser: async () => ({ id: 8, isSiteAdmin: true }) };
   raw.get = vi.fn(async path => {
+    if (path.includes('/lists?')) return { value: state.list ? [structuredClone(state.list)] : [] };
     if (path.includes('/EffectiveBasePermissions')) return { Low: '4294967295' };
     if (path.includes('/associatedownergroup')) return { Id: 10, Title: 'Site Owners' };
     if (path.includes('/sitegroups?')) return { value: [{ Id: 10, Title: 'Site Owners' }, { Id: 20, Title: 'Metrology App User' }, { Id: 21, Title: 'Tracker Project Engineers' }, { Id: 22, Title: 'Tracker Managers' }] };
@@ -16,7 +17,7 @@ export function setupFixture() {
     return structuredClone(state.list);
   });
   raw.post = vi.fn(async (path, options = {}) => {
-    if (path === '/_api/web/lists') state.list = { Id: 'list', ...options.body, ItemCount: 0, HasUniqueRoleAssignments: false };
+    if (path === '/_api/web/lists') state.list = { Id: '11111111-1111-1111-1111-111111111111', ...options.body, ItemCount: 0, HasUniqueRoleAssignments: false };
     else if (path.includes('/breakroleinheritance')) { state.list.HasUniqueRoleAssignments = true; if (!state.assignments.length) state.assignments = [{ PrincipalId: 8, RoleDefinitionBindings: [{ Id: 1 }] }]; }
     else if (path.includes('/fields/createfieldasxml')) { if (state.failField) throw new Error('Field creation failed'); state.fields.push({ InternalName: options.body.parameters.SchemaXml.match(/ Name="([^"]+)"/)[1] }); }
     else if (path === '/_api/web/roledefinitions') state.roles.push({ Id: 2, ...options.body });
@@ -30,7 +31,7 @@ export function setupFixture() {
 describe('private feedback setup', () => {
   it('reports missing storage and discovers existing groups without writes', async () => {
     const { raw, setup } = setupFixture();
-    expect(await setup.status()).toMatchObject({ ready: false, title: 'ModernizationFeedback' });
+    expect(await setup.status()).toMatchObject({ ready: false, title: 'Modernization-Tracker - Feedback' });
     expect((await setup.options()).selected).toEqual([20, 21, 22]);
     expect(raw.post).not.toHaveBeenCalled();
   });
@@ -60,7 +61,7 @@ describe('private feedback setup', () => {
     await expect(setup.provision([20])).rejects.toThrow('not add-only'); expect(raw.post).not.toHaveBeenCalled();
   });
   it('does not overwrite an existing list', async () => {
-    const { raw, state, setup } = setupFixture(); state.list = { Description: 'Other list', ItemCount: 1 };
+    const { raw, state, setup } = setupFixture(); state.list = { Id: '11111111-1111-1111-1111-111111111111', Title: 'ModernizationFeedback', BaseTemplate: 100, Description: 'Other list', ItemCount: 1 };
     await expect(setup.provision([20])).rejects.toThrow('already exists'); expect(raw.post).not.toHaveBeenCalled();
   });
   it('keeps an interrupted setup private and resumes an empty app-created list', async () => {
@@ -80,4 +81,23 @@ describe('private feedback setup', () => {
   it('refuses unknown group IDs', async () => {
     const { raw, setup } = setupFixture(); await expect(setup.provision([999])).rejects.toThrow('Select the existing'); expect(raw.post).not.toHaveBeenCalled();
   });
+});
+
+it('renames legacy feedback in place without changing records or permissions', async () => {
+  const { raw, state, setup } = setupFixture(); await setup.provision([20]);
+  state.list.Title = 'ModernizationFeedback'; state.list.ItemCount = 3;
+  const originalId = state.list.Id, originalAcl = structuredClone(state.assignments);
+  raw.post.mockClear();
+  await feedbackSetup(raw, 'ModernizationFeedback', async () => true).status();
+  expect(state.list).toMatchObject({ Id: originalId, Title: 'Modernization-Tracker - Feedback', ItemCount: 3, Hidden: false });
+  expect(state.assignments).toEqual(originalAcl);
+  expect(raw.post).toHaveBeenCalledExactlyOnceWith(`/_api/web/lists(guid'${originalId}')`, { body: { Title: 'Modernization-Tracker - Feedback', Hidden: false }, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' } });
+});
+
+it('refuses ambiguous feedback aliases before renaming or provisioning', async () => {
+  const { raw, state, setup } = setupFixture(); await setup.provision([20]);
+  raw.post.mockClear(); const get = raw.get.getMockImplementation();
+  raw.get.mockImplementation(path => path.includes('/lists?') ? { value: [state.list, { ...state.list, Id: '22222222-2222-2222-2222-222222222222', Title: 'ModernizationFeedback' }] } : get(path));
+  await expect(feedbackSetup(raw, 'ModernizationFeedback', async () => true).status()).rejects.toThrow('Multiple tracker list aliases');
+  expect(raw.post).not.toHaveBeenCalled();
 });

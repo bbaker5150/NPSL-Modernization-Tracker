@@ -2,7 +2,7 @@
 
 The bug icon immediately left of the theme control opens feedback for every tracker role. The bottom action row contains one **Send feedback** button, with **Owner inbox** immediately to its left for verified site owners. Site administrators, users with effective site-level Manage Permissions (the tracker’s existing owner definition), and members of the site's associated Owners group qualify. Owner access is rechecked whenever the dialog opens; verification failures are shown and can be retried by reopening it. Tracker Manager status alone does not grant access.
 
-Feedback uses a dedicated `<listPrefix>Feedback` SharePoint list (default `ModernizationFeedback`), separate from portfolio loads, exports, and migration backups. The HTML deployment cannot write to SharePoint until a signed-in owner performs setup.
+Feedback uses a dedicated `Modernization-Tracker - Feedback` SharePoint list (or `<customPrefix> Tracker - Feedback` for a custom namespace), separate from portfolio loads, exports, and migration backups. The HTML deployment cannot write to SharePoint until a signed-in owner performs setup.
 
 ## Set up from the application
 
@@ -27,3 +27,9 @@ Using separate Viewer, Project Engineer, and non-owner Manager accounts, verify 
 Automated tests exercise provisioning and permission checks against a simulated SharePoint API; they do not establish live tenant behavior. If the tenant rejects add-only submission, keep the list private and use a server-side submission endpoint instead of granting read access.
 
 Local preview uses disposable module memory, labels submissions accordingly, and does not provision SharePoint storage. Reloading clears preview submissions.
+
+## Embedded-host submission and list naming
+
+Send feedback uses a direct click handler, like the directory’s Save action, so embedded hosts that cancel native form activation do not swallow the send operation. Empty fields show validation errors, pending setup shows a status message, and failed writes keep the draft.
+
+The list uses the same App name - Content convention as the other tracker lists. Opening feedback as an owner with Manage Lists renames an existing `ModernizationFeedback` or `NPSL Tracker - Feedback` list in place by GUID after privacy checks. It preserves records, URLs and permissions. Duplicate aliases stop resolution instead of creating a replacement. Add-only users submit by display title with a legacy fallback only on a definitive 404; they do not read the list catalog. Feedback remains excluded from shared portfolio loading and permission repair.

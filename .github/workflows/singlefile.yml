@@ -63,7 +63,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Smoke test the final file inside an iframe srcdoc
-        run: node scripts/smoke-forge-srcdoc.mjs
+        run: node scripts/smoke-forge-srcdoc.mjs && node scripts/smoke-feedback.mjs
 
       - name: Generate checksum
         id: checksum

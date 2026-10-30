@@ -10,7 +10,7 @@ describe('private feedback', () => {
     const raw = store(); raw.currentUser.mockResolvedValue({ role });
     await createFeedback(raw).submit({ kind: 'Feature', title: 'Idea', details: 'Details', AuthorId: 99 });
     expect(raw.get).not.toHaveBeenCalled();
-    expect(raw.post).toHaveBeenCalledWith("/_api/web/lists/getbytitle('ModernizationFeedback')/items", { body: { Title: 'Idea', FeedbackKind: 'Feature', FeedbackDetails: 'Details' } });
+    expect(raw.post).toHaveBeenCalledWith("/_api/web/lists/getbytitle('Modernization-Tracker%20-%20Feedback')/items", { body: { Title: 'Idea', FeedbackKind: 'Feature', FeedbackDetails: 'Details' } });
   });
   it('blocks non-owner managers before fetching submission contents', async () => {
     const raw = store(); raw.currentUser.mockResolvedValue({ role: 'Manager' });
@@ -56,7 +56,7 @@ describe('private feedback', () => {
   });
   it('loads paginated submissions for owners', async () => {
     const raw = store(true);
-    raw.get.mockResolvedValueOnce({ value: [{ Id: 1, Title: 'Bug', FeedbackKind: 'Bug', FeedbackDetails: 'Steps', Author: { Title: 'User' } }], 'odata.nextLink': `${raw.webUrl}/_api/next` }).mockResolvedValueOnce({ value: [{ Id: 2, Title: 'Idea' }] });
+    raw.get.mockResolvedValueOnce({ value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] }).mockResolvedValueOnce({ value: [{ Id: 1, Title: 'Bug', FeedbackKind: 'Bug', FeedbackDetails: 'Steps', Author: { Title: 'User' } }], 'odata.nextLink': `${raw.webUrl}/_api/next` }).mockResolvedValueOnce({ value: [{ Id: 2, Title: 'Idea' }] });
     const items = await createFeedback(raw).list();
     expect(items).toHaveLength(2); expect(items[0]).toMatchObject({ title: 'Bug', author: 'User', details: 'Steps' });
   });
@@ -65,5 +65,12 @@ describe('private feedback', () => {
 it('explains missing storage to submitters without attempting provisioning', async () => {
   const raw = store(); raw.post.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
   await expect(createFeedback(raw).submit({ kind: 'Bug', title: 'Issue', details: 'Steps' })).rejects.toThrow('Set up private feedback');
-  expect(raw.post).toHaveBeenCalledOnce(); expect(raw.get).not.toHaveBeenCalled();
+  expect(raw.post).toHaveBeenCalledTimes(3); expect(raw.get).not.toHaveBeenCalled();
+});
+
+it('supports the old list title for add-only users without reading the catalog', async () => {
+  const raw = store(); raw.post.mockRejectedValueOnce(Object.assign(new Error('Missing current title'), { status: 404 })).mockResolvedValueOnce({});
+  await createFeedback(raw).submit({ kind: 'Bug', title: 'Issue', details: 'Steps' });
+  expect(raw.post.mock.calls.map(([path]) => path)).toEqual(["/_api/web/lists/getbytitle('Modernization-Tracker%20-%20Feedback')/items", "/_api/web/lists/getbytitle('ModernizationFeedback')/items"]);
+  expect(raw.get).not.toHaveBeenCalled();
 });
