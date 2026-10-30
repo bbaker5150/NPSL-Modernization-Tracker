@@ -13,6 +13,7 @@ try {
   const trigger = page.getByRole('button', { name: 'Report a bug or request a feature' });
   await trigger.click();
   assert.equal(await trigger.evaluate(el => el.nextElementSibling?.tagName === 'DIALOG' ? el.nextElementSibling.nextElementSibling?.getAttribute('aria-label') : el.nextElementSibling?.getAttribute('aria-label')), 'Switch to dark mode');
+  assert.equal(await page.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   await page.getByLabel('Summary', { exact: true }).fill('The project filter needs attention');
   await page.getByLabel('What happened?', { exact: true }).fill('Steps to reproduce\nSelect a project and change the filter.');
   await fs.mkdir('test-artifacts', { recursive: true });
@@ -33,6 +34,12 @@ try {
   await page.getByRole('dialog').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
   assert.equal(await page.getByRole('button', { name: 'Send feedback', exact: true }).last().isVisible(), true);
   await page.screenshot({ path: 'test-artifacts/feedback-dark-mobile.png' });
+  const inbox = await page.getByRole('button', { name: 'Owner inbox' }).boundingBox();
+  const send = await page.getByRole('button', { name: 'Send feedback', exact: true }).boundingBox();
+  assert.ok(inbox.x + inbox.width <= send.x && Math.abs(inbox.y - send.y) < 2, 'Inbox must sit to the left of Send feedback on mobile');
+  await page.getByRole('button', { name: 'Owner inbox' }).click();
+  await page.getByRole('button', { name: 'Back to feedback' }).click();
+  assert.equal(await page.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
   console.log('Feedback smoke passed: placement, submit, owner inbox, focus return, dark mobile layout.');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

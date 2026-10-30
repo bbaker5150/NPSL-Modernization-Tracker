@@ -22,6 +22,28 @@ describe('private feedback', () => {
     expect(await createFeedback(raw).isOwner()).toBe(true);
     expect(await createFeedback(store(true)).isOwner()).toBe(true);
   });
+  it.each([
+    { Low: '4294967295', High: '2147483647' },
+    { d: { EffectiveBasePermissions: { Low: '33554432', High: '0' } } },
+  ])('recognizes effective site owner permissions without direct Owners membership', async permissions => {
+    const raw = store(); raw.get.mockResolvedValue(permissions);
+    expect(await createFeedback(raw).isOwner()).toBe(true);
+    expect(raw.get).toHaveBeenCalledExactlyOnceWith('/_api/web/effectivebasepermissions');
+  });
+  it('does not treat ordinary site Edit or app Manager access as site ownership', async () => {
+    const raw = store(); raw.currentUser.mockResolvedValue({ role: 'Manager' });
+    raw.get.mockImplementation(async path => path.includes('effectivebasepermissions') ? { Low: '1011030767' } : path.includes('associatedownergroup') ? { Id: 7 } : { value: [{ Id: 9 }] });
+    expect(await createFeedback(raw).isOwner()).toBe(false);
+    await expect(createFeedback(raw).list()).rejects.toThrow('Only site owners');
+    expect(raw.get.mock.calls.some(([path]) => path.includes('/items'))).toBe(false);
+  });
+  it('allows verified Owners membership when effective permissions are unavailable', async () => {
+    const raw = store(); raw.get.mockImplementation(async path => {
+      if (path.includes('effectivebasepermissions')) throw new Error('Unavailable');
+      return path.includes('associatedownergroup') ? { Id: 7 } : { value: [{ Id: 7 }] };
+    });
+    expect(await createFeedback(raw).isOwner()).toBe(true);
+  });
   it('fails closed when owner verification fails', async () => {
     const raw = store(); raw.get.mockRejectedValue(new Error('Denied'));
     await expect(createFeedback(raw).list()).rejects.toThrow('Denied');

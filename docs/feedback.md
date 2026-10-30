@@ -1,6 +1,6 @@
 # Private bug reports and feature requests
 
-The bug icon immediately left of the theme control opens feedback for every tracker role. Site administrators and members of the site's associated Owners group also see **Owner inbox**. Tracker Manager status alone does not grant access. Feedback uses a separate `<listPrefix>Feedback` list, never the tracker data loader, Excel export, or migration backup.
+The bug icon immediately left of the theme control opens feedback for every tracker role. The bottom action row contains one **Send feedback** button, with **Owner inbox** immediately to its left for verified site owners. Site administrators, users with effective site-level Manage Permissions (the tracker’s existing owner definition), and members of the site's associated Owners group qualify. Owner access is rechecked whenever the dialog opens; verification failures are shown and can be retried by reopening it. Tracker Manager status alone does not grant access. The feedback list’s unique SharePoint ACL remains the security boundary: owners recognized through direct or security-group site permissions still need access to the private list (normally through the associated Owners group). Feedback uses a separate `<listPrefix>Feedback` list, never the tracker data loader, Excel export, or migration backup.
 
 ## SharePoint setup
 
