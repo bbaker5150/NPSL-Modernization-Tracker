@@ -61,3 +61,9 @@ describe('private feedback', () => {
     expect(items).toHaveLength(2); expect(items[0]).toMatchObject({ title: 'Bug', author: 'User', details: 'Steps' });
   });
 });
+
+it('explains missing storage to submitters without attempting provisioning', async () => {
+  const raw = store(); raw.post.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+  await expect(createFeedback(raw).submit({ kind: 'Bug', title: 'Issue', details: 'Steps' })).rejects.toThrow('Set up private feedback');
+  expect(raw.post).toHaveBeenCalledOnce(); expect(raw.get).not.toHaveBeenCalled();
+});

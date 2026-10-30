@@ -1,3 +1,4 @@
+import { feedbackSetup } from './feedbackSetup';
 // Feedback is deliberately separate from shared tracker data and exports.
 const unwrap = value => value?.d || value;
 const rows = value => value?.value || value?.d?.results || [];
@@ -40,11 +41,16 @@ export function createFeedback(store) {
   return {
     local,
     isOwner,
+    setup: feedbackSetup(store, title, isOwner),
     async submit(input) {
       const value = validateFeedback(input);
       if (local) { preview.unshift({ ...value, id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
       // No read-before-write or return-body display: submitters have Add Items only.
-      await store.post(`${path}/items`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details } });
+      try { await store.post(`${path}/items`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details } }); }
+      catch (error) {
+        if (error.status === 404) throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
+        throw error;
+      }
     },
     async list() {
       if (!await isOwner()) throw new Error('Only site owners can view submissions.');
