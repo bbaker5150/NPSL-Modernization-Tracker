@@ -1,5 +1,6 @@
 import { TrackerLists, legacyListTitle, listTitleAliases } from './trackerLists';
 import { feedbackSetup } from './feedbackSetup';
+import { ensureFeedbackStatus, FEEDBACK_STATUSES } from './feedbackFields';
 // Feedback is deliberately separate from shared tracker data and exports.
 const unwrap = value => value?.d || value;
 const rows = value => value?.value || value?.d?.results || [];
@@ -45,7 +46,7 @@ export function createFeedback(store) {
     setup: feedbackSetup(store, title, isOwner),
     async submit(input) {
       const value = validateFeedback(input);
-      if (local) { preview.unshift({ ...value, id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
+      if (local) { preview.unshift({ ...value, status: 'New', etag: '1', id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
       // No read-before-write or return-body display: submitters have Add Items only.
       // Add-only users cannot resolve the list catalog. Try the current display
       // title first, falling back only after a definitive 404 (never a timeout).
@@ -56,6 +57,29 @@ export function createFeedback(store) {
         catch (error) { if (error.status !== 404) throw error; }
       }
       throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
+    },
+    async update(id, input, etag) {
+      if (!await isOwner()) throw new Error('Only site owners can update submissions.');
+      if (local ? typeof id !== 'string' || !id : !Number.isSafeInteger(id) || id <= 0) throw new Error('Select a valid feedback submission to update.');
+      const value = validateFeedback(input);
+      if (!FEEDBACK_STATUSES.includes(input.status)) throw new Error('Choose a valid feedback status.');
+      if (typeof etag !== 'string' || !etag || etag === '*') throw new Error('Reopen the inbox to load the latest submission before editing.');
+      if (local) {
+        const index = preview.findIndex(item => item.id === id);
+        if (index < 0) throw new Error('This submission was deleted. Reopen the inbox.');
+        if (preview[index].etag !== etag) throw new Error('This submission changed. Reopen the inbox before editing again.');
+        preview[index] = { ...preview[index], ...value, status: input.status, etag: String(Number(etag) + 1) };
+        return;
+      }
+      const path = await catalog.path('feedback');
+      await ensureFeedbackStatus(store, path);
+      try {
+        await store.post(`${path}/items(${id})`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details, FeedbackStatus: input.status }, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': etag } });
+      } catch (error) {
+        if (error.status === 412) throw new Error('Another owner updated this submission. Your draft is still here; copy any changes and reopen the inbox to review the latest version.');
+        if (error.status === 404) throw new Error('This submission was deleted. Your draft is still here; reopen the inbox to refresh.');
+        throw error;
+      }
     },
     async clearInbox(ids, onProgress = () => {}) {
       if (!await isOwner()) throw new Error('Only site owners can clear submissions.');
@@ -84,12 +108,13 @@ export function createFeedback(store) {
     },
     async list() {
       if (!await isOwner()) throw new Error('Only site owners can view submissions.');
-      if (local) return [...preview];
+      if (local) return preview.map(item => ({ ...item }));
       const path = await catalog.path('feedback');
-      const result = []; let next = `${path}/items?$select=Id,Title,FeedbackKind,FeedbackDetails,Created,Author/Title&$expand=Author&$orderby=Created desc&$top=100`;
+      // Select * so older lists without FeedbackStatus remain readable before upgrade.
+      const result = []; let next = `${path}/items?$select=*,Author/Title&$expand=Author&$orderby=Created desc&$top=100`;
       while (next) {
-        const body = await store.get(next);
-        result.push(...rows(body).map(row => ({ id: row.Id, title: row.Title, kind: row.FeedbackKind, details: row.FeedbackDetails, created: row.Created, author: row.Author?.Title || 'Unknown' })));
+        const body = await store.get(next, { Accept: 'application/json;odata=minimalmetadata' });
+        result.push(...rows(body).map(row => ({ id: row.Id, title: row.Title, kind: row.FeedbackKind, details: row.FeedbackDetails, status: row.FeedbackStatus || 'New', etag: row['@odata.etag'] || row['odata.etag'] || row.__metadata?.etag, created: row.Created, author: row.Author?.Title || 'Unknown' })));
         const link = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
         if (!link) break;
         const url = new URL(link, `${store.webUrl}/`);
