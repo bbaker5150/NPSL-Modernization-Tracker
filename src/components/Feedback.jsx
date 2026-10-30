@@ -1,12 +1,11 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
-import { createFeedback } from '../lib/feedback';
+import { createFeedback, validateFeedback } from '../lib/feedback';
 import { FeedbackSetup } from './FeedbackSetup';
 
 export function Feedback({ store }) {
   const api = useMemo(() => createFeedback(store), [store]);
-  const formId = useId();
   const dialog = useRef(null), trigger = useRef(null), active = useRef(false);
   const [open, setOpen] = useState(false), [owner, setOwner] = useState(false), [tab, setTab] = useState('submit');
   const [kind, setKind] = useState('Bug'), [title, setTitle] = useState(''), [details, setDetails] = useState('');
@@ -35,9 +34,12 @@ export function Feedback({ store }) {
     return () => { dialog.current?.close(); trigger.current?.focus(); };
   }, [open]);
   async function submit(event) {
-    event.preventDefault(); if (active.current) return;
+    event.preventDefault(); if (active.current || busy || setupBlocked) return;
+    let report;
+    try { report = validateFeedback({ kind, title, details }); }
+    catch (caught) { setError(caught.message); return; }
     active.current = true; setBusy(true); setError('');
-    try { await api.submit({ kind, title, details }); setSent(true); setTitle(''); setDetails(''); }
+    try { await api.submit(report); setSent(true); setTitle(''); setDetails(''); }
     catch (caught) { setError(`${caught.message} Your draft is still here. If access is denied or the list is missing, ask a site owner to configure feedback. If the request timed out, check with an owner before retrying.`); }
     finally { active.current = false; setBusy(false); }
   }
@@ -53,12 +55,13 @@ export function Feedback({ store }) {
       <header><div><h2 id="feedback-title">Help improve the tracker</h2><p>Report an issue or share an idea for what comes next.</p></div><button className="icon-button" aria-label="Close feedback" disabled={busy} onClick={() => setOpen(false)}><Icon name="close" /></button></header>
       <div className="modal-body feedback-body">
         <p className="feedback-privacy"><Icon name="shield" size={16} /> {api.local ? 'Local preview · submissions disappear when the page reloads.' : 'Private feedback · only site owners can read submissions.'}</p>
+        {owner && !setupState && !setupError && <p role="status">Checking feedback storage and permissions…</p>}
         {ownerError && <p role="alert" className="inline-error">{ownerError}</p>}
         {setupMessage && <p role="status">{setupMessage}</p>}
         {setupError && <p role="alert" className="inline-error">Feedback setup could not be verified: {setupError}</p>}
         {owner && setupState && !setupState.ready && <FeedbackSetup setup={api.setup} state={setupState} busy={busy} onBusy={setBusy} onReady={state => { setSetupState(state); setError(''); setSetupMessage(`${state.title} is ready in Site Contents.`); }} />}
         {error && <p role="alert" className="inline-error">{error}</p>}
-        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in the owner inbox.' : 'Your submission has been sent privately to the site owners.'}</p></div> : <form id={formId} onSubmit={submit} className="feedback-form">
+        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in the owner inbox.' : 'Your submission has been sent privately to the site owners.'}</p></div> : <form noValidate onSubmit={submit} className="feedback-form">
           <fieldset disabled={busy}><legend>What would you like to share?</legend><div className="feedback-types">{[['Bug', 'bug', 'Report a bug', 'Something isn’t working as expected.'], ['Feature', 'idea', 'Request a feature', 'An idea to make your work easier.']].map(([value, icon, label, hint]) => <label key={value} className={kind === value ? 'selected' : ''}><input type="radio" name="feedback-kind" value={value} checked={kind === value} onChange={() => setKind(value)} /><Icon name={icon} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
           <label className="field">Summary<input autoFocus required maxLength={200} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} placeholder={kind === 'Bug' ? 'What went wrong?' : 'What would you like to do?'} /></label>
           <label className="field">{kind === 'Bug' ? 'What happened?' : 'Tell us about your idea'}<textarea required maxLength={10000} rows={7} value={details} disabled={busy} onChange={event => setDetails(event.target.value)} placeholder={kind === 'Bug' ? 'Include steps to reproduce, what you expected, and what happened instead.' : 'Describe the feature and how it would help your workflow.'} /></label>
@@ -69,7 +72,7 @@ export function Feedback({ store }) {
         {owner && <button type="button" className="button secondary" disabled={busy || setupBlocked} aria-pressed={tab === 'inbox'} onClick={inbox}><Icon name="note" size={16} />Owner inbox</button>}
         {tab === 'inbox' ? <button type="button" className="button primary" disabled={busy} onClick={() => { setTab('submit'); setSent(false); setError(''); }}>Back to feedback</button>
           : sent ? <button type="button" className="button primary" onClick={() => setSent(false)}>Send another</button>
-          : <button type="submit" form={formId} className="button primary" disabled={busy || setupBlocked || !title.trim() || !details.trim()}>{busy ? 'Sending…' : 'Send feedback'}</button>}
+          : <button type="button" onClick={submit} className="button primary" disabled={busy || setupBlocked}>{busy ? 'Sending…' : 'Send feedback'}</button>}
       </footer>
     </dialog>, document.body)}
   </>;

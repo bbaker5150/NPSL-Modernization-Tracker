@@ -8,7 +8,9 @@ export const TRACKER_LISTS = [
 ];
 const namespace = prefix => String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization';
 const definition = key => {
-  const entry = TRACKER_LISTS.find(([name]) => name === key);
+  // Private feedback shares naming helpers, but is excluded from shared-list
+  // loading, permission repair, and mandatory startup provisioning.
+  const entry = [...TRACKER_LISTS, ['feedback', 'Feedback', 'Feedback']].find(([name]) => name === key);
   if (!entry) throw new Error(`Unknown tracker list: ${key}`);
   return entry;
 };

@@ -19,9 +19,14 @@ if (-not $web.CurrentUser.IsSiteAdmin -and $web.CurrentUser.Id -notin $owners.Us
 # Resolve every intended group before making changes. Include every group through
 # which users access this deployment (including legacy Members, if applicable).
 $groups = @($SubmitterGroups | ForEach-Object { Get-PnPGroup -Identity $_ })
-$title = ($ListPrefix -replace '[^A-Za-z0-9]', '') + 'Feedback'
-$list = Get-PnPList -Identity $title -ErrorAction SilentlyContinue
-if ($list) { throw "List $title already exists. No changes made. Audit its permissions before reusing it; this script deliberately does not reset existing feedback." }
+$namespace = $ListPrefix -replace '[^A-Za-z0-9]', ''
+if (-not $namespace) { $namespace = 'Modernization' }
+$appName = if ($namespace -eq 'Modernization') { 'Modernization-Tracker' } else { "$namespace Tracker" }
+$title = "$appName - Feedback"
+$aliases = @($title, "${namespace}Feedback")
+if ($namespace -eq 'Modernization') { $aliases += 'NPSL Tracker - Feedback' }
+$list = @(Get-PnPList | Where-Object { $_.Title -in $aliases })
+if ($list.Count) { throw "List $title already exists. No changes made. Audit its permissions before reusing it; this script deliberately does not reset existing feedback." }
 New-PnPList -Title $title -Template GenericList -OnQuickLaunch:$false | Out-Null
 $list = Get-PnPList -Identity $title
 # Break inheritance BEFORE adding fields or granting submission access.
@@ -33,7 +38,7 @@ $ctx.ExecuteQuery()
 Add-PnPField -List $title -InternalName FeedbackKind -DisplayName 'Feedback kind' -Type Choice -Choices 'Bug','Feature' -Required | Out-Null
 Add-PnPField -List $title -InternalName FeedbackDetails -DisplayName 'Feedback details' -Type Note -Required | Out-Null
 # Exact permission mask. Do not clone Contribute: it includes ViewListItems.
-$roleName = "$title Submit Only"
+$roleName = "${namespace}Feedback Submit Only"
 $roles = $web.RoleDefinitions
 $ctx.Load($roles)
 $ctx.ExecuteQuery()

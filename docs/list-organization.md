@@ -11,6 +11,7 @@ Use **App name - Content** for each application's list titles. This tracker uses
 | ModernizationAcronyms | Modernization-Tracker - Acronyms |
 | ModernizationUsers | Modernization-Tracker - Users |
 | ModernizationReferenceDocuments | Modernization-Tracker - Reference Documents |
+| ModernizationFeedback | Modernization-Tracker - Feedback |
 
 ## Existing deployments
 
@@ -21,3 +22,5 @@ All seven lists are resolved before the first rename. The original internal name
 The Site Contents organization, Tracker permissions and Site owner tools panels are no longer shown in the app. Role changes and project-engineer changes still synchronize permissions through the existing app workflows. This release does not rerun the retired full permission setup.
 
 New lists use these names and are visible in Site Contents. Other applications and custom list namespaces are unchanged.
+
+The private Feedback list is optional and is created from its owner setup panel. Its title is maintained when an owner opens feedback, separately from the seven shared lists, so ordinary users never need read access to feedback. Existing submissions and unique permissions are preserved during a rename.
