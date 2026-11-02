@@ -237,8 +237,8 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
   });
   addDataSheet(workbook, {
     name: 'Needs Attention', tableName: 'AttentionTable', statusColumns: [1],
-    columns: [{ header: 'Status', width: 18 }, { header: 'Project', width: 32, wrap: true }, { header: 'Task', width: 44, wrap: true }, { header: 'Organization', width: 30, wrap: true }, { header: 'Assigned To', width: 24 }, { header: 'Project Engineer', width: 24 }, { header: 'Pipeline Stage', width: 26 }, { header: 'Due Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Deferred Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Est. Hours', width: 12, numFmt: '0.##' }, { header: 'Assigned / Creation Date', width: 22, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 40, wrap: true }, { header: 'Notes', width: 40, wrap: true }, { header: 'Blocked Reason', width: 40, wrap: true }],
-    rows: tasks.filter((task) => !isResolvedTask(task) && (!attentionTaskIds || attentionTaskIds.has(task.id))).sort((a, b) => ['Blocked', 'In Progress', 'Not Started'].indexOf(a.status) - ['Blocked', 'In Progress', 'Not Started'].indexOf(b.status) || a.projectKey.localeCompare(b.projectKey)).map((task) => { const project = projects.find((p) => p.projectKey === task.projectKey); return [task.status, project?.title || '', task.title, normalizeOrganization(task.organization), displayName(task.ownerName || 'Unassigned'), displayName(project?.ownerName || 'Unassigned'), phaseName(phases, task.phaseKey), toDate(task.dueDate), toDate(task.deferredDate), task.estimatedHours == null || task.estimatedHours === '' ? null : Number(task.estimatedHours), toDate(task.assignedDate), task.deferredJustification || '', task.notes || '', task.blockedReason || '']; }),
+    columns: [{ header: 'Status', width: 18 }, { header: 'Project', width: 32, wrap: true }, { header: 'Task', width: 44, wrap: true }, { header: 'Organization', width: 30, wrap: true }, { header: 'Assigned To', width: 24 }, { header: 'Project Engineer', width: 24 }, { header: 'Pipeline Stage', width: 26 }, { header: 'Due Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Deferred Date', width: 16, numFmt: 'mmm d, yyyy' }, { header: 'Est. Hours', width: 12, numFmt: '0.##' }, { header: 'Assigned / Creation Date', width: 22, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 40, wrap: true }, { header: 'Notes', width: 40, wrap: true }, { header: 'Blocked Reason', width: 40, wrap: true }, { header: 'METCAL Responsibility', width: 26 }],
+    rows: tasks.filter((task) => !isResolvedTask(task) && (!attentionTaskIds || attentionTaskIds.has(task.id))).sort((a, b) => ['Blocked', 'In Progress', 'Not Started'].indexOf(a.status) - ['Blocked', 'In Progress', 'Not Started'].indexOf(b.status) || a.projectKey.localeCompare(b.projectKey)).map((task) => { const project = projects.find((p) => p.projectKey === task.projectKey); return [task.status, project?.title || '', task.title, normalizeOrganization(task.organization), displayName(task.ownerName || 'Unassigned'), displayName(project?.ownerName || 'Unassigned'), phaseName(phases, task.phaseKey), toDate(task.dueDate), toDate(task.deferredDate), task.estimatedHours == null || task.estimatedHours === '' ? null : Number(task.estimatedHours), toDate(task.assignedDate), task.deferredJustification || '', task.notes || '', task.blockedReason || '', task.subAssignment || '']; }),
   });
   addDataSheet(workbook, {
     name: 'Tasks', tableName: 'TasksTable', statusColumns: [7],
@@ -249,12 +249,12 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
       { header: 'Est. Hours', width: 12, numFmt: '0.##' }, { header: 'Assigned / Creation Date', width: 22, numFmt: 'mmm d, yyyy' }, { header: 'Start Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Due Date', width: 15, numFmt: 'mmm d, yyyy' },
       { header: 'Finish Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Blocked Reason', width: 36, wrap: true },
       { header: 'Notes / Data Issue', width: 44, wrap: true },
-      { header: 'Deferred Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 44, wrap: true }, { header: 'Not Required Justification', width: 44, wrap: true }, { header: 'Organization', width: 30, wrap: true },
+      { header: 'Deferred Date', width: 15, numFmt: 'mmm d, yyyy' }, { header: 'Deferral Justification', width: 44, wrap: true }, { header: 'Not Required Justification', width: 44, wrap: true }, { header: 'Organization', width: 30, wrap: true }, { header: 'METCAL Responsibility', width: 26 },
     ],
     rows: tasks.map((task) => [
       task.id, task.projectKey, projects.find((project) => project.projectKey === task.projectKey)?.title || '', task.title,
       phaseName(phases, task.phaseKey), Number(task.order || 0), task.status, displayName(task.ownerName || 'Unassigned'), task.ownerEmail || '', task.ownerKey || '',
-      task.estimatedHours == null || task.estimatedHours === '' ? null : Number(task.estimatedHours), toDate(task.assignedDate), toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '', normalizeOrganization(task.organization),
+      task.estimatedHours == null || task.estimatedHours === '' ? null : Number(task.estimatedHours), toDate(task.assignedDate), toDate(task.startDate), toDate(task.dueDate), toDate(task.finishDate), task.blockedReason || '', [task.notes, task.dataIssue].filter(Boolean).join(' | '), toDate(task.deferredDate), task.deferredJustification || '', task.notRequiredJustification || '', normalizeOrganization(task.organization), task.subAssignment || '',
     ]),
   });
   addDataSheet(workbook, {
@@ -271,9 +271,9 @@ export function createPortfolioWorkbook({ projects, tasks, updates, risks, phase
     columns: [
       { header: 'Update ID', width: 22 }, { header: 'Project ID', width: 22 }, { header: 'Project', width: 30 }, { header: 'Date', width: 16, numFmt: 'mmm d, yyyy' },
       { header: 'Type', width: 14 }, { header: 'Author', width: 22 }, { header: 'Author Email', width: 30 }, { header: 'Author Identity Key', width: 36 },
-      { header: 'Summary', width: 64, wrap: true },
+      { header: 'Summary', width: 64, wrap: true }, { header: 'Posted At (UTC)', width: 26 }, { header: 'Referenced Task', width: 40 },
     ],
-    rows: updates.map((update) => [update.id, update.projectKey, projects.find((project) => project.projectKey === update.projectKey)?.title || '', toDate(update.entryDate), update.type, displayName(update.authorName), update.authorEmail, update.authorKey || '', update.summary]),
+    rows: updates.map((update) => [update.id, update.projectKey, projects.find((project) => project.projectKey === update.projectKey)?.title || '', toDate(update.entryDate), update.type, displayName(update.authorName), update.authorEmail, update.authorKey || '', update.summary, update.postedAt || '', update.taskTitle || '']),
   });
   addDataSheet(workbook, {
     name: 'Pipeline Reference', tableName: 'PipelineTable',

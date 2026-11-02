@@ -175,7 +175,7 @@ export async function previewMigration(source, target, onProgress = () => {}, { 
       if (candidates.length > 1 || (candidates[0] && matched.has(candidates[0].Id))) throw new Error(`${container.suffix}: ambiguous matching records for ${row.Title || row.RecordId}.`);
       const destination = byId.get(row.RecordId) || candidates[0];
       if (destination) matched.add(destination.Id);
-      const names = ['tasks', 'references'].includes(container.key) ? await source.attachments(container.key, row.Id) : [];
+      const names = ['tasks', 'updates', 'references'].includes(container.key) ? await source.attachments(container.key, row.Id) : [];
       entries.push({ source: row, destination, names, conflict: !!destination && !same(row, destination, fields) });
     }
     plan.lists.push({ key: container.key, title: container.suffix, fields, entries, extra: existing.filter(row => !matched.has(row.Id)).length });
@@ -236,7 +236,7 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
         { onProgress, wait, label: `${list.title}/${entry.source.RecordId}` },
       );
       entry.targetId = id;
-      const existingNames = ['tasks', 'references'].includes(list.key) ? await target.attachments(list.key, id) : [];
+      const existingNames = ['tasks', 'updates', 'references'].includes(list.key) ? await target.attachments(list.key, id) : [];
       for (const name of entry.names) {
         onProgress(`Copying ${list.title} document: ${name}…`);
         const bytes = await source.bytes(list.key, entry.source.Id, name), hash = await sha256(bytes);
@@ -273,7 +273,7 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
       const now = rows.find(row => row.RecordId === entry.source.RecordId);
       if (!now || now.Modified !== entry.source.Modified || !same(now, entry.source, list.fields)) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
       if (!same(await target.readItem(list.key, entry.targetId, list.fields), entry.source, list.fields)) throw new Error('Destination changed during verification. Refresh preview and review.');
-      if (['tasks', 'references'].includes(list.key)) {
+      if (['tasks', 'updates', 'references'].includes(list.key)) {
         const names = await source.attachments(list.key, entry.source.Id);
         if (JSON.stringify([...names].sort()) !== JSON.stringify([...entry.names].sort())) throw new Error('Source attachments changed during migration. Refresh preview and repeat.');
       }

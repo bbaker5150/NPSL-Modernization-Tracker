@@ -36,10 +36,10 @@ describe('three-role access model', () => {
     await expect(store.downloadTaskAttachment('t2', 'report.pdf')).rejects.toThrow('cannot access');
     await expect(store.saveProject({ id: 'new', projectKey: 'new', ownerEmail: user.email })).rejects.toThrow('assigned project engineers');
   });
-  it('lets engineers edit task content and deferrals while preserving original deadlines and record identity', async () => {
+  it('lets engineers edit content while preserving assignment dates, original deadlines and record identity', async () => {
     const { store, raw } = fixture('Project Engineer');
     const saved = await store.saveTask({ ...task, spId: 12, projectKey: 'other', title: 'Revised', status: 'Blocked', dueDate: '2099-01-01', deferredDate: '2026-10-01', deferredJustification: 'Parts delayed', organization: 'CHENG Team', estimatedHours: 2.5, notes: 'New notes' });
-    expect(saved).toMatchObject({ spId: 11, projectKey: 'own', title: 'Revised', status: 'Blocked', dueDate: '2026-09-01', deferredDate: '2026-10-01', organization: 'PMA 260B', estimatedHours: 2.5 });
+    expect(saved).toMatchObject({ spId: 11, projectKey: 'own', title: 'Revised', status: 'Blocked', dueDate: '2026-09-01', deferredDate: '2026-10-01', deferredJustification: 'Parts delayed', organization: 'NAVAIR METCAL 260B', estimatedHours: 2.5 });
     const added = await store.saveTask({ ...task, id: 'new', spId: 12, dueDate: '2099-01-01' });
     expect(added).toMatchObject({ dueDate: '', spId: undefined });
     await store.recycle('tasks', 12, 't1');
@@ -156,4 +156,42 @@ it('allows managers to delete persisted directory users but never themselves', a
   state.users[0].role = 'User';
   await expect(store.recycle('users', 2, 'other')).rejects.toThrow('Only managers');
   expect(raw.recycle).toHaveBeenCalledTimes(1);
+});
+
+it('preserves assignment and original due dates while allowing engineers to defer', async () => {
+  const { store, state } = fixture('Project Engineer');
+  Object.assign(state.tasks[0], { assignedDate: '2026-08-01', deferredDate: '2026-10-01', deferredJustification: 'Approved' });
+  const result = await store.saveTask({ ...state.tasks[0], assignedDate: '2099-01-01', deferredDate: '2026-11-01', deferredJustification: 'Updated reason' });
+  expect(result).toMatchObject({ assignedDate: '2026-08-01', dueDate: '2026-09-01', deferredDate: '2026-11-01', deferredJustification: 'Updated reason' });
+  const added = await store.saveTask({ ...task, id: 'new', assignedDate: '2099-01-01' });
+  expect(added.assignedDate).toBe(new Date().toISOString().slice(0, 10));
+});
+it('validates METCAL responsibilities and clears them when changing organization', async () => {
+  const { store } = fixture('Manager');
+  expect(await store.saveTask({ ...task, organization: 'PMA 260B', subAssignment: 'Team 2 Lead' })).toMatchObject({ organization: 'NAVAIR METCAL 260B', subAssignment: 'Team 2 Lead' });
+  await expect(store.saveTask({ ...task, organization: 'PMA 260B', subAssignment: 'Unknown' })).rejects.toThrow('METCAL');
+  expect(await store.saveTask({ ...task, organization: 'NPSL', subAssignment: 'Team 2 Lead' })).toMatchObject({ subAssignment: '' });
+});
+it('stamps updates with the signed-in identity and rejects task references from another project', async () => {
+  const { store, raw } = fixture('Project Engineer');
+  const saved = await store.saveUpdate({ id: 'new', projectKey: 'own', summary: ' Decision ', taskId: 't1', authorName: 'Forged', postedAt: '1900-01-01' });
+  expect(saved).toMatchObject({ summary: 'Decision', taskId: 't1', taskTitle: 'Review', authorName: user.email, authorKey: user.loginName });
+  expect(saved.postedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  await expect(store.saveUpdate({ id: 'new', projectKey: 'own', summary: 'Decision', taskId: 't2' })).rejects.toThrow('this project');
+  await store.saveUpdate({ id: 'none', projectKey: 'own', summary: 'No task required' });
+  expect(raw.saveUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: '' }));
+});
+it('checks update attachment scope and permissions independently of task documents', async () => {
+  const { store, state, raw } = fixture('Project Engineer');
+  state.updates.push({ id: 'u1', spId: 21, projectKey: 'own' });
+  raw.addUpdateAttachment = vi.fn(); raw.listUpdateAttachments = vi.fn(); raw.downloadUpdateAttachment = vi.fn();
+  const file = new File(['content'], 'decision.txt');
+  await store.addUpdateAttachment('u1', file);
+  expect(raw.addUpdateAttachment).toHaveBeenCalledWith(state.updates[1], file);
+  expect(raw.addTaskAttachment).not.toHaveBeenCalled();
+  await expect(store.addUpdateAttachment('u2', file)).rejects.toThrow('cannot access');
+  state.users = directory('Viewer');
+  await expect(store.addUpdateAttachment('u1', file)).rejects.toThrow('Only managers');
+  await store.downloadUpdateAttachment('u2', 'decision.txt');
+  expect(raw.downloadUpdateAttachment).toHaveBeenCalledWith(state.updates[0], 'decision.txt');
 });

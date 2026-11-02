@@ -775,3 +775,47 @@ button.brand { width: 100%; }
 .feedback-clear-confirm { padding: 18px 8px; }
 .feedback-clear-confirm > svg { color: var(--rose); }
 .feedback-clear-confirm p { color: var(--muted); line-height: 1.65; }
+
+.attention-responsibility { display: flex; gap: 9px; align-items: center; background: var(--blue-soft); color: var(--blue); padding: 10px 12px; border-radius: 9px; margin: 12px 0; }
+.attention-responsibility span { display: grid; gap: 3px; font-size: 10px; }
+.attention-responsibility strong { font-size: 13px; }
+.metcal-filters { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.metcal-filters button { border: 1px solid var(--line); border-radius: 20px; padding: 7px 12px; background: var(--surface); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.metcal-filters button[aria-pressed="true"] { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.project-updates { display: grid; gap: 22px; }
+.updates-intro h3 { margin: 0 0 6px; }
+.updates-intro p, .update-composer small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.updates-intro p { margin: 0; }
+.update-composer { display: grid; gap: 16px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+.update-options { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 14px; }
+.update-options .field { min-width: 0; }
+.update-options small { font-weight: 400; font-size: 10px; }
+.update-attachment-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 10px; font-size: 12px; }
+.update-attachment-picker span { flex: 1; }
+.update-attachment-picker small { display: block; }
+.update-attachment-picker input { width: 100%; min-width: 0; }
+.update-composer-footer { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.update-composer-footer > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.update-composer-footer > small { max-width: 250px; }
+.update-history { display: grid; gap: 16px; }
+.update-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; overflow-wrap: anywhere; }
+.update-card > header { display: flex; align-items: center; gap: 10px; }
+.update-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; background: var(--blue-soft); color: var(--blue); font-weight: 650; }
+.update-card > header > div { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.update-card time, .update-legacy { color: var(--muted); font-size: 11px; }
+.update-card header strong { font-size: 13px; }
+.update-kind { font-size: 11px; border-radius: 6px; padding: 5px 9px; background: var(--surface-3); color: var(--muted); }
+.update-risk { background: var(--amber-soft); color: var(--amber); }
+.update-summary { white-space: pre-wrap; line-height: 1.7; font-size: 13px; margin: 16px 0; }
+.update-task-reference { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; text-align: left; border: 1px solid var(--line); background: var(--surface-2); color: var(--blue); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 11px; margin-top: 14px; }
+button.update-task-reference { cursor: pointer; }
+.update-legacy { display: block; margin-top: 14px; }
+.update-documents { font-size: 12px; }
+.update-documents ul, .update-pending-files { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
+.update-documents li button { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.update-documents details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; color: var(--muted); }
+.update-documents summary { cursor: pointer; }
+.update-documents input { max-width: 100%; margin: 12px 0; }
+.update-documents small { display: block; }
+.update-pending-files li { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .update-options { grid-template-columns: 1fr; } .update-composer-footer { align-items: stretch; flex-direction: column; } .update-composer, .update-card { padding: 15px; } }

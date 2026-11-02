@@ -157,7 +157,7 @@ it('can export and import all six record lists without any attachment requests',
   expect(source.readRows.mock.calls.every(([, , attached]) => attached === false)).toBe(true);
   const report = await importTrackerBackup(backup, target, await previewTrackerImport(backup, target));
   expect(report.verified).toBe(true);
-  expect(report.manualTransfer).toEqual(['Reference Documents and folders', 'task attachments']);
+  expect(report.manualTransfer).toEqual(['Reference Documents and folders', 'task and update attachments']);
   expect(target.rows.tasks[0].ArchivedDocuments).toBe('["hidden.pdf"]');
   for (const site of [source, target]) for (const key of ['bytes', 'attachments', 'attach']) expect(site[key]).not.toHaveBeenCalled();
   await importTrackerBackup(backup, target, await previewTrackerImport(backup, target));
@@ -182,4 +182,16 @@ it('requires valid explicit scope and rejects task files declared excluded', asy
   await expect(validateTrackerBackup(backup)).rejects.toThrow('excluded by its scope');
   delete backup.payload.scope;
   await expect(validateTrackerBackup(backup)).rejects.toThrow('scope is missing');
+});
+
+it('preserves update-specific attachments and task links through backup and import', async () => {
+  const { source, target } = fixture(); batchTarget(target);
+  Object.assign(source.rows.updates[0], { TaskId: 't', TaskTitle: 'Review', PostedAt: '2026-11-02T18:01:23.456Z' });
+  source.files.set('updates/1/decision.txt', new Uint8Array([1, 2, 3]).buffer);
+  const backup = JSON.parse(await exportTrackerBackup(source));
+  expect(backup.payload.files.some(file => file.list === 'updates' && file.name === 'decision.txt')).toBe(true);
+  await importTrackerBackup(backup, target, await previewTrackerImport(backup, target));
+  expect(target.rows.updates[0]).toMatchObject({ TaskId: 't', PostedAt: '2026-11-02T18:01:23.456Z' });
+  expect(await target.attachments('updates', target.rows.updates[0].Id)).toEqual(['decision.txt']);
+  expect(await target.attachments('tasks', target.rows.tasks[0].Id)).toEqual(['hidden.pdf']);
 });

@@ -61,12 +61,12 @@ export function SiteMigration({ store }) {
       <p>{source ? 'Exports Projects, Tasks, Updates, Risks, Acronyms, and Users, including archived records, app roles, and assignments. Reference Documents and their folders are excluded; transfer them manually.' : 'Only the lists and files included in the package are imported. Existing Reference Documents stay in place when excluded from the package.'} Site permissions and version history are separate.</p>
       <label className="migration-check"><input type="checkbox" checked={paused} disabled={busy} onChange={event => setPaused(event.target.checked)} /><span>{source ? 'Edits in the old tracker are paused for this export.' : 'Edits in metsoft are paused for this import.'}</span></label>
       {source ? <>
-        <label className="migration-check"><input type="checkbox" checked={includeTaskAttachments} disabled={busy} onChange={event => setIncludeTaskAttachments(event.target.checked)} /><span>Include files attached to tasks</span></label>
-        <p><small>Task attachments are separate from Reference Documents. If a task file causes a timeout, uncheck this option to export records without downloading any files, then transfer task attachments manually too.</small></p>
+        <label className="migration-check"><input type="checkbox" checked={includeTaskAttachments} disabled={busy} onChange={event => setIncludeTaskAttachments(event.target.checked)} /><span>Include files attached to tasks and updates</span></label>
+        <p><small>Task and update attachments are separate from Reference Documents. If an attached file causes a timeout, uncheck this option to export records without downloading any files, then transfer task and update attachments manually too.</small></p>
         <button type="button" className="button primary" disabled={busy || !paused} onClick={() => perform(async progress => {
           const text = await exportTrackerBackup(site, progress, { includeReferences: false, includeTaskAttachments });
           download(text, `npsl-tracker-without-references-${new Date().toISOString().slice(0, 10)}.npsl-backup.json`);
-          setStatus(`Backup downloaded. Transfer Reference Documents and folders${includeTaskAttachments ? '' : ', plus task attachments,'} manually. Open the new tracker and choose Import tracker backup.`);
+          setStatus(`Backup downloaded. Transfer Reference Documents and folders${includeTaskAttachments ? '' : ', plus task and update attachments,'} manually. Open the new tracker and choose Import tracker backup.`);
         })}>Download backup</button>
       </> : <>
         <button type="button" className="button secondary" disabled={busy} onClick={() => fileInput.current?.click()}>Choose backup file</button>

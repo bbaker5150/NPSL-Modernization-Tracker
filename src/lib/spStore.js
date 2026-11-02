@@ -30,7 +30,7 @@ export const CONTAINERS = [
     key: 'tasks', suffix: 'Tasks', description: 'Pipeline tasks for every modernization project.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['ArchivedDocuments', 'Archived Documents', FIELD.NOTE], ['TaskTitle', 'Task', FIELD.TEXT], ['PhaseKey', 'Phase', FIELD.TEXT],
-      ['Organization', 'Organization', FIELD.TEXT], ['EstimatedHours', 'Est. Hours', FIELD.NUMBER], ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
+      ['Organization', 'Organization', FIELD.TEXT], ['SubAssignment', 'METCAL Responsibility', FIELD.TEXT], ['EstimatedHours', 'Est. Hours', FIELD.NUMBER], ['SortOrder', 'Sort Order', FIELD.NUMBER], ['TaskStatus', 'Status', FIELD.TEXT],
       ['AssignedDate', 'Assigned / Creation Date', FIELD.DATE], ['StartDate', 'Start Date', FIELD.DATE], ['FinishDate', 'Finish Date', FIELD.DATE], ['DueDate', 'Due Date', FIELD.DATE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true], ['Notes', 'Notes', FIELD.NOTE],
       ['BlockedReason', 'Blocked Reason', FIELD.NOTE], ['SourceStartLabel', 'Source Start Label', FIELD.TEXT],
@@ -41,6 +41,7 @@ export const CONTAINERS = [
   {
     key: 'updates', suffix: 'Updates', description: 'Project status updates and decisions.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
+      ['TaskId', 'Referenced Task ID', FIELD.TEXT], ['TaskTitle', 'Referenced Task', FIELD.TEXT], ['PostedAt', 'Posted At (UTC)', FIELD.TEXT],
       ['UpdateType', 'Update Type', FIELD.TEXT], ['Summary', 'Summary', FIELD.NOTE], ['EntryDate', 'Entry Date', FIELD.DATE],
       ['AuthorName', 'Author', FIELD.TEXT], ['AuthorEmail', 'Author Email', FIELD.TEXT], ['AuthorKey', 'Author Identity Key', FIELD.TEXT, true],
     ],
@@ -109,7 +110,7 @@ const projectFields = (row) => ({
 
 const taskFields = (row) => ({
   Title: row.title, RecordId: row.id, ProjectKey: row.projectKey,
-  Organization: normalizeOrganization(row.organization), TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
+  Organization: normalizeOrganization(row.organization), SubAssignment: row.subAssignment || '', TaskTitle: row.title, PhaseKey: row.phaseKey, SortOrder: row.order, TaskStatus: row.status,
   EstimatedHours: row.estimatedHours === '' || row.estimatedHours == null ? null : Number(row.estimatedHours), AssignedDate: sharePointDate(row.assignedDate), StartDate: sharePointDate(row.startDate), FinishDate: sharePointDate(row.finishDate), DueDate: sharePointDate(row.dueDate),
   OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '', Notes: row.notes, BlockedReason: row.blockedReason,
   SourceStartLabel: row.sourceStartLabel, DataIssue: row.dataIssue,
@@ -118,7 +119,7 @@ const taskFields = (row) => ({
 
 const updateFields = (row) => ({
   Title: `${row.projectKey} update`, RecordId: row.id, ProjectKey: row.projectKey, UpdateType: row.type,
-  Summary: row.summary, EntryDate: sharePointDate(row.entryDate), AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
+  TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', PostedAt: row.postedAt || '', Summary: row.summary, EntryDate: sharePointDate(row.entryDate), AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
 });
 
 const riskFields = (row) => ({
@@ -149,7 +150,7 @@ function fromTask(item) {
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.TaskTitle,
     organization: item.Organization || '', phaseKey: phaseKey(item.PhaseKey), order: Number(item.SortOrder || 0), status,
-    estimatedHours: item.EstimatedHours == null ? null : Number(item.EstimatedHours), assignedDate: dateOnly(item.AssignedDate), startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate), deferredDate: dateOnly(item.DeferredDate), deferredJustification: item.DeferredJustification || '', notRequiredJustification: item.NotRequiredJustification || '',
+    subAssignment: item.SubAssignment || '', estimatedHours: item.EstimatedHours == null ? null : Number(item.EstimatedHours), assignedDate: dateOnly(item.AssignedDate), startDate: dateOnly(item.StartDate), finishDate: dateOnly(item.FinishDate), dueDate: dateOnly(item.DueDate), deferredDate: dateOnly(item.DeferredDate), deferredJustification: item.DeferredJustification || '', notRequiredJustification: item.NotRequiredJustification || '',
     ownerName: item.OwnerName || 'Unassigned', ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '', notes: item.Notes || '',
     blockedReason: item.BlockedReason || '', sourceStartLabel: item.SourceStartLabel || '', dataIssue: item.DataIssue || '',
   };
@@ -157,7 +158,7 @@ function fromTask(item) {
 
 const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole || 'User' });
 
-const fromUpdate = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
+const fromUpdate = (item) => ({ taskId: item.TaskId || '', taskTitle: item.TaskTitle || '', postedAt: item.PostedAt || '', spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
@@ -225,12 +226,16 @@ export class SharePointStore {
     const steps = [];
     for (const container of CONTAINERS) {
       if (!(await this.listExists(container.key))) {
-        await this.post('/_api/web/lists', { body: { Title: displayListTitle(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(['tasks', 'references'].includes(container.key) ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: false } });
+        await this.post('/_api/web/lists', { body: { Title: displayListTitle(this.prefix, container.key), Description: container.description, BaseTemplate: 100, ...(['tasks', 'updates', 'references'].includes(container.key) ? { EnableAttachments: true } : {}), AllowContentTypes: false, ContentTypesEnabled: false, Hidden: false } });
         this.lists.cache.delete(container.key);
         steps.push(`Created ${displayListTitle(this.prefix, container.key)}`);
       }
       const body = await this.get(`${apiFor(this.prefix, container.key)}/fields?$select=InternalName&$top=500`);
       const existing = new Set((body.value || []).map((field) => field.InternalName));
+      if (container.key === 'updates') {
+        const settings = await this.get(`${apiFor(this.prefix, 'updates')}?$select=EnableAttachments`);
+        if ((settings.d || settings).EnableAttachments === false) await this.post(apiFor(this.prefix, 'updates'), { body: { EnableAttachments: true }, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' } });
+      }
       const seedMarker = container.key === 'acronyms' ? container.fields.find((field) => field.name === 'SeedVersion') : null;
       const addField = async (field) => {
         await this.post(`${apiFor(this.prefix, container.key)}/fields/createfieldasxml`, {
@@ -395,6 +400,30 @@ export class SharePointStore {
     await this.addTaskAttachment(task, new File([blob], cleanName, { type: blob.type, lastModified: Date.now() }));
     await this.deleteTaskAttachment(task, name);
     return this.listTaskAttachments(task);
+  }
+
+  async listUpdateAttachments(update) {
+    if (!Number.isInteger(update.spId) || update.spId <= 0) throw new Error('Post the update before attaching documents.');
+    const body = await this.get(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles?$select=FileName,ServerRelativeUrl`);
+    return (body.value || body.d?.results || []).map(file => {
+      const url = new URL(file.ServerRelativeUrl, this.webUrl);
+      if (url.origin !== new URL(this.webUrl).origin) throw new Error('Unexpected update attachment address.');
+      return { name: file.FileName, url: url.href };
+    });
+  }
+  async addUpdateAttachment(update, file) {
+    validateAttachment(file);
+    if ((await this.listUpdateAttachments(update)).some(item => item.name.toLowerCase() === file.name.toLowerCase())) throw new Error('A file with this name is already attached. Check it before retrying or rename the new file.');
+    const settings = await this.get(`${apiFor(this.prefix, 'updates')}?$select=EnableAttachments`);
+    if ((settings.d || settings).EnableAttachments === false) throw new Error('A site owner must enable attachments on the Updates list.');
+    await this.post(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles/add(FileName='${escapeOData(file.name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() });
+  }
+  async downloadUpdateAttachment(update, name) {
+    const file = (await this.listUpdateAttachments(update)).find(item => item.name === name);
+    if (!file) throw new Error('This update document is no longer available.');
+    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
+    return response.blob();
   }
 
   async listReferenceEntries() {
@@ -588,7 +617,12 @@ export class SharePointStore {
   }
   async saveTask(row) { return row.spId ? (await this.update('tasks', row.spId, taskFields(row)), row) : { ...row, spId: await this.create('tasks', taskFields(row)) }; }
   async saveTasks(rows) { return Promise.all(rows.map((row) => this.saveTask(row))); }
-  async saveUpdate(row) { return row.spId ? (await this.update('updates', row.spId, updateFields(row)), row) : { ...row, spId: await this.create('updates', updateFields(row)) }; }
+  async saveUpdate(row) {
+    if (row.spId) { await this.update('updates', row.spId, updateFields(row)); return row; }
+    const spId = await this.create('updates', updateFields(row));
+    if (!Number.isInteger(spId) || spId <= 0) throw new Error('SharePoint did not confirm the new update. Refresh history before retrying.');
+    return { ...row, spId };
+  }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
   async saveAcronym(row) { return row.spId ? (await this.update('acronyms', row.spId, acronymFields(row)), row) : { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }
 

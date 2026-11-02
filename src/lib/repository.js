@@ -49,6 +49,9 @@ class LocalStore {
     await localAttachments(task.id, undefined, name);
     return this.listTaskAttachments(task);
   }
+  async listUpdateAttachments(update) { return localAttachments(`updates/${update.id}`); }
+  async addUpdateAttachment(update, file) { validateAttachment(file); await localAttachments(`updates/${update.id}`, file); }
+  async downloadUpdateAttachment(update, name) { const file = (await this.listUpdateAttachments(update)).find(item => item.name === name); if (!file) throw new Error('This update document is unavailable.'); return file.blob; }
   async listReferenceEntries() { return clone(this.data.references); }
   async saveReferenceEntry(row, file) {
     const next = { ...row, id: row.id || uid('reference') };

@@ -6,10 +6,13 @@ export const normalizePhaseKey = (key) => ({
   'production-procurement': 'procurement', 'operation-sustainment': 'deployment',
 }[key] || key || 'requirement');
 
-export const ORGANIZATIONS = ['PMA 260B', 'NPSL (Calibration Lab)', 'NPSL Metrology Engineering Division'];
+export const METCAL_ORGANIZATION = 'NAVAIR METCAL 260B';
+export const METCAL_TEAMS = ['Chief Engineer Office', 'Team 2 Lead', 'Team 3 Lead'];
+export const ORGANIZATIONS = ['NAVAIR METCAL 260B', 'NPSL (Calibration Lab)', 'NPSL Metrology Engineering Division'];
 export const normalizeOrganization = (value) => ({
-  'Program Office': 'PMA 260B',
-  'CHENG Team': 'PMA 260B',
+  'PMA 260B': 'NAVAIR METCAL 260B',
+  'Program Office': 'NAVAIR METCAL 260B',
+  'CHENG Team': 'NAVAIR METCAL 260B',
   NPSL: 'NPSL (Calibration Lab)',
   'NPSL Metrology Calibration': 'NPSL (Calibration Lab)',
   ISE: 'NPSL Metrology Engineering Division',
@@ -17,13 +20,13 @@ export const normalizeOrganization = (value) => ({
 }[value] || (ORGANIZATIONS.includes(value) ? value : 'NPSL (Calibration Lab)'));
 export const organizationAttentionLabel = (value) => {
   const organization = normalizeOrganization(value);
-  return organization === 'PMA 260B' ? `${organization} Needs Attention` : organization;
+  return organization === 'NAVAIR METCAL 260B' ? `${organization} Needs Attention` : organization;
 };
 export const ROLES = ['Viewer', 'Project Engineer', 'Manager'];
 export const normalizeRole = (value) => ROLES.includes(value) ? value : 'Viewer';
 export function normalizeTaskOrganizations(tasks, projects) {
   const byKey = new Map(projects.map((project) => [project.projectKey, project]));
-  return tasks.map((task) => ({ ...task, organization: normalizeOrganization(task.organization || byKey.get(task.projectKey)?.organization) }));
+  return tasks.map((task) => ({ ...task, organization: normalizeOrganization(task.organization || byKey.get(task.projectKey)?.organization), subAssignment: normalizeOrganization(task.organization || byKey.get(task.projectKey)?.organization) === METCAL_ORGANIZATION ? task.subAssignment || '' : '' }));
 }
 export const normalizeTaskStatus = (value) => value === 'In Progress – At Program Office' ? 'In Progress' : (value || 'Not Started');
 

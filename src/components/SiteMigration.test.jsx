@@ -105,12 +105,12 @@ it('exports without references and lets the owner explicitly turn off task file 
 it('shows excluded content in the import preview and completion message', async () => {
   migrationSite.mockReturnValue({ canMigrate: async () => true });
   previewTrackerImport.mockResolvedValue({ lists: [] });
-  importTrackerBackup.mockResolvedValue({ verified: true, manualTransfer: ['Reference Documents and folders', 'task attachments'] });
+  importTrackerBackup.mockResolvedValue({ verified: true, manualTransfer: ['Reference Documents and folders', 'task and update attachments'] });
   await render();
   const input = document.querySelector('input[type="file"]');
   Object.defineProperty(input, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify({ version: 2, payload: { scope: { includeReferences: false, includeTaskAttachments: false }, lists: [], files: [] } }) }] });
   await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
-  expect(document.querySelector('[role="note"]').textContent).toContain('Reference Documents and folders; task attachments');
+  expect(document.querySelector('[role="note"]').textContent).toContain('Reference Documents and folders; task and update attachments');
   await act(async () => button('Preview import').click());
   await act(async () => document.querySelector('input[type="checkbox"]').click());
   await act(async () => button('Import and verify').click());
