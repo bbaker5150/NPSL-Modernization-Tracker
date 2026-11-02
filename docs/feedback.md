@@ -34,6 +34,16 @@ Send feedback uses a direct click handler, like the directory’s Save action, s
 
 The list uses the same App name - Content convention as the other tracker lists. Opening feedback as an owner with Manage Lists renames an existing `ModernizationFeedback` or `NPSL Tracker - Feedback` list in place by GUID after privacy checks. It preserves records, URLs and permissions. Duplicate aliases stop resolution instead of creating a replacement. Add-only users submit by display title with a legacy fallback only on a definitive 404; they do not read the list catalog. Feedback remains excluded from shared portfolio loading and permission repair.
 
+## Managing individual submissions
+
+Each report in the owner inbox has **Edit** and **Delete** controls. Edit changes the type, summary, details and status (**New**, **In progress**, **Resolved**, **Closed**). **Save changes** updates only that report; **Cancel edit** discards the draft. The original submitter and submission date are preserved. Status is private to owners and does not send a notification to the reporter.
+
+Existing lists remain readable without a schema migration: reports without a status display **New**. The first owner save adds and verifies an optional `FeedbackStatus` choice column in the existing Feedback list, requiring Manage Lists for that initial upgrade. New lists include it during setup. The upgrade preserves existing records, naming and permissions. It never recreates the list or resets its ACLs.
+
+Each update rechecks site ownership and uses the record's SharePoint ETag to prevent overwriting another owner's changes. Failed saves preserve the draft and display an error; stale versions must be reloaded before retrying. **Delete** confirms the selected report by title, then moves only that item to the SharePoint recycle bin. Other reports remain in the shared inbox. Non-owner users retain submission-only access.
+
+Verify in SharePoint that an owner can edit one report, reopen the inbox to see its saved status, cancel deletion without changes, and delete that report while another remains. Check that non-owner accounts cannot update or recycle items through direct REST calls. Automated tests cover these flows with simulated SharePoint responses and local browser previews; live tenant acceptance is still required.
+
 ## Clearing the owner inbox
 
 Inside the inbox, the redundant Owner inbox navigation button is hidden. **Clear inbox** opens an in-app confirmation for the submissions currently loaded. It clears the shared inbox for all owners by moving those list items to the SharePoint recycle bin; it does not delete the list or change its permissions. New submissions received after the inbox was loaded are not included. Site owners can restore recycled items through SharePoint’s normal recycle-bin controls.

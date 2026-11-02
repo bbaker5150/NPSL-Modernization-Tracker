@@ -7,6 +7,7 @@ const server = http.createServer((req, res) => { res.setHeader('Content-Type', '
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page.setDefaultTimeout(15000);
 const errors = []; page.on('pageerror', error => errors.push(error.message));
 try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -24,18 +25,55 @@ try {
   // SharePoint/Forge hosts can cancel native form-button activation.
   // A direct click handler must still send feedback exactly once.
   await app.locator('body').evaluate(body => body.ownerDocument.addEventListener('click', event => {
-    if (event.target.closest('.feedback-actions button')) event.preventDefault();
+    if (event.target.closest('.feedback-dialog button')) event.preventDefault();
   }, true));
+  await app.getByRole('button', { name: 'Send feedback', exact: true }).click();
+  await app.getByRole('heading', { name: 'Thank you for the feedback' }).waitFor();
+  await app.getByRole('button', { name: 'Send another', exact: true }).click();
+  await app.getByLabel('Summary', { exact: true }).fill('Keep this separate request');
+  await app.getByLabel('What happened?', { exact: true }).fill('This submission must survive editing and deleting the other one.');
   await app.getByRole('button', { name: 'Send feedback', exact: true }).click();
   await app.getByRole('heading', { name: 'Thank you for the feedback' }).waitFor();
   await app.getByRole('button', { name: 'Owner inbox' }).click();
   await app.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
   assert.equal(await app.getByRole('button', { name: 'Owner inbox', exact: true }).count(), 0);
+  let report = app.getByRole('article', { name: 'The project filter needs attention', exact: true });
+  await report.getByRole('button', { name: 'Edit', exact: true }).click();
+  await app.getByLabel('Summary', { exact: true }).fill('Discard this edit');
+  await app.getByRole('button', { name: 'Cancel edit', exact: true }).click();
+  await report.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
+  await report.getByRole('button', { name: 'Edit', exact: true }).click();
+  await app.getByLabel('Summary', { exact: true }).fill('Project filter reviewed');
+  await app.getByRole('textbox', { name: 'Details', exact: true }).fill('Confirmed and resolved the project filter issue.');
+  await app.getByRole('combobox', { name: 'Status', exact: true }).selectOption('Resolved');
+  await page.screenshot({ path: 'test-artifacts/feedback-edit.png' });
+  await app.getByRole('button', { name: 'Save changes', exact: true }).click();
+  report = app.getByRole('article', { name: 'Project filter reviewed', exact: true });
+  await report.getByText('Resolved', { exact: true }).waitFor();
+  await app.getByRole('button', { name: 'Back to feedback', exact: true }).click();
+  await app.getByRole('button', { name: 'Owner inbox', exact: true }).click();
+  await report.getByText('Resolved', { exact: true }).waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await report.getByRole('button', { name: 'Edit', exact: true }).click();
+  await app.getByRole('button', { name: 'Save changes', exact: true }).scrollIntoViewIfNeeded();
+  assert.equal(await app.locator('.feedback-body').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  await page.screenshot({ path: 'test-artifacts/feedback-edit-mobile.png' });
+  await app.getByRole('button', { name: 'Cancel edit', exact: true }).click();
+  await report.getByRole('button', { name: 'Delete', exact: true }).click();
+  await app.getByRole('heading', { name: 'Delete this submission?' }).waitFor();
+  await app.getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await app.getByRole('article').count(), 2);
+  await report.getByRole('button', { name: 'Delete', exact: true }).click();
+  await app.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await app.getByText('Submission deleted.', { exact: true }).waitFor();
+  assert.equal(await app.getByRole('article').count(), 1);
+  await app.getByRole('heading', { name: 'Keep this separate request' }).waitFor();
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await app.getByRole('button', { name: 'Clear inbox', exact: true }).click();
   await app.getByRole('heading', { name: 'Clear 1 submission?' }).waitFor();
   await page.screenshot({ path: 'test-artifacts/feedback-clear-confirm.png' });
   await app.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await app.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
+  await app.getByRole('heading', { name: 'Keep this separate request' }).waitFor();
   await app.getByRole('button', { name: 'Clear inbox', exact: true }).click();
   await app.getByRole('button', { name: 'Confirm clear', exact: true }).click();
   await app.getByRole('heading', { name: 'No feedback yet' }).waitFor();
@@ -58,5 +96,9 @@ try {
   await app.getByRole('button', { name: 'Back to feedback' }).click();
   assert.equal(await app.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('Feedback smoke passed: placement, submit, owner inbox, confirmed/canceled clearing, focus return, dark mobile layout.');
+  console.log('Feedback smoke passed: submit, individual editing/status persistence, canceled edits, single deletion preserving other reports, bulk clearing, focus return, mobile editing, dark mobile layout.');
+} catch (error) {
+  await page.screenshot({ path: 'test-artifacts/feedback-failure.png' }).catch(() => {});
+  console.error(await page.frameLocator('#app').getByRole('dialog').ariaSnapshot().catch(() => 'Dialog unavailable'));
+  throw error;
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

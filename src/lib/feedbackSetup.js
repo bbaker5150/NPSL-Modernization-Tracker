@@ -1,4 +1,5 @@
 import { TrackerLists, displayListTitle } from './trackerLists';
+import { FEEDBACK_STATUS_XML } from './feedbackFields';
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(value.replace(/'/g, "''"));
 const id = value => Number.isInteger(Number(value)) && Number(value) > 0;
@@ -113,6 +114,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       for (const [name, xml] of [
         ['FeedbackKind', '<Field Type="Choice" DisplayName="Feedback kind" Name="FeedbackKind" StaticName="FeedbackKind" Required="TRUE"><CHOICES><CHOICE>Bug</CHOICE><CHOICE>Feature</CHOICE></CHOICES></Field>'],
         ['FeedbackDetails', '<Field Type="Note" DisplayName="Feedback details" Name="FeedbackDetails" StaticName="FeedbackDetails" Required="TRUE" RichText="FALSE" />'],
+        ['FeedbackStatus', FEEDBACK_STATUS_XML],
       ]) if (!fields.some(field => field.InternalName === name)) await store.post(`${path}/fields/createfieldasxml`, { verbose: true, body: { parameters: { __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' }, SchemaXml: xml, Options: 24 } } });
       if (!submitRole) {
         await store.post('/_api/web/roledefinitions', { body: { Name: roleName, Description: 'Submit feedback without viewing, editing, or deleting submissions.', BasePermissions: SUBMIT_PERMISSIONS } });
@@ -121,7 +123,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       if (!id(submitRole?.Id) || !sameMask(submitRole.BasePermissions)) throw new Error('SharePoint did not confirm an add-only permission level. No submission access was granted.');
       const secured = await metadata();
       const verifiedFields = await pages(`${path}/fields?$select=InternalName&$top=500`);
-      if (!secured?.HasUniqueRoleAssignments || !['FeedbackKind', 'FeedbackDetails'].every(name => verifiedFields.some(field => field.InternalName === name))) throw new Error('The private list or its fields could not be verified. Submission access was not granted.');
+      if (!secured?.HasUniqueRoleAssignments || !['FeedbackKind', 'FeedbackDetails', 'FeedbackStatus'].every(name => verifiedFields.some(field => field.InternalName === name))) throw new Error('The private list or its fields could not be verified. Submission access was not granted.');
       progress('Applying submission-only access…');
       for (const principal of selected) await store.post(`${path}/roleassignments/addroleassignment(principalid=${principal},roledefid=${submitRole.Id})`);
       assignments = await pages(`${path}/roleassignments?$select=PrincipalId,RoleDefinitionBindings/Id&$expand=RoleDefinitionBindings`);
