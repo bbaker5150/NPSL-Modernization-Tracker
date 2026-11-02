@@ -41,14 +41,14 @@ function UpdateDocuments({ item, store, revision, canPost }) {
   }
   return <div className="update-documents">
     {!!files.length && <ul>{files.map(file => <li key={file.name}><button type="button" className="text-button" disabled={busy} onClick={() => download(file)}><Icon name="paperclip" size={14} />{file.name}</button></li>)}</ul>}
-    {canPost && <details><summary>Attach documents to this update</summary><input type="file" multiple aria-label={`Attach documents to update by ${item.authorName || 'Unknown author'}`} disabled={busy} onChange={upload} /><small>Stored with this update, separate from project documents. Up to 50 MB each.</small></details>}
+    {canPost && <details><summary>Attach documents to this update</summary><input className="document-upload" type="file" multiple aria-label={`Attach documents to update by ${item.authorName || 'Unknown author'}`} disabled={busy} onChange={upload} /><small>Up to 50 MB each.</small></details>}
     {busy && <p role="status">Working on update documents…</p>}
     {error && <p className="inline-error" role="alert">{error} <button type="button" className="text-button" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh documents</button></p>}
   </div>;
 }
 
 export function ProjectUpdates({ project, tasks, updates, risks = [], store, canPost, onPost, onTask }) {
-  const [summary, setSummary] = useState(''), [type, setType] = useState('Status'), [taskId, setTaskId] = useState('');
+  const [summary, setSummary] = useState(''), [taskId, setTaskId] = useState('');
   const [files, setFiles] = useState([]), [posted, setPosted] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [revision, setRevision] = useState(0);
   const active = useRef(false);
   function queue(event) {
@@ -60,13 +60,13 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
     }
     setFiles(next); setError(errors.join('\n'));
   }
-  function reset() { setSummary(''); setType('Status'); setTaskId(''); setFiles([]); setPosted(null); }
+  function reset() { setSummary(''); setTaskId(''); setFiles([]); setPosted(null); }
   async function post(event) {
     event.preventDefault(); if (active.current || busy || !canPost) return;
     if (!summary.trim()) { setError('Write an update before posting.'); return; }
     active.current = true; setBusy(true); setError(''); setMessage('');
     try {
-      const saved = posted || await onPost(project, { summary, type, taskId });
+      const saved = posted || await onPost(project, { summary, type: 'Status', taskId });
       if (!saved?.id) throw new Error('The update was not confirmed. Your draft has been kept.');
       setPosted(saved);
       const failed = [], errors = [];
@@ -83,14 +83,12 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
   const history = [...updates, ...risks.map(risk => ({ ...risk, id: `risk-${risk.id}`, legacyRisk: true, type: 'Risk', summary: `${risk.title}\n${risk.mitigation || 'No mitigation recorded.'}`, authorName: risk.ownerName, riskStatus: risk.status, severity: risk.severity }))]
     .sort((a, b) => String(b.postedAt || b.entryDate || '').localeCompare(String(a.postedAt || a.entryDate || '')));
   return <div className="project-updates">
-    <div className="updates-intro"><h3>Project conversation</h3><p>Share progress, flag risks, and record decisions. Reference a task when it helps.</p></div>
     {canPost && <form className="update-composer" noValidate onSubmit={post} aria-label="New project update">
-      <div className="update-options"><label className="field">Update type<select disabled={busy || !!posted} value={type} onChange={event => setType(event.target.value)}>{['Status', 'Risk', 'Decision', 'Handoff'].map(value => <option key={value}>{value}</option>)}</select></label>
-        <label className="field">Task reference <small>Optional</small><select aria-label="Task reference" disabled={busy || !!posted} value={taskId} onChange={event => setTaskId(event.target.value)}><option value="">Project-wide update</option>{tasks.map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label></div>
+      <div className="update-options"><label className="field">Task reference <small>Optional</small><select aria-label="Task reference" disabled={busy || !!posted} value={taskId} onChange={event => setTaskId(event.target.value)}><option value="">Project-wide update</option>{tasks.map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label></div>
       <label className="field">Your update<textarea aria-label="Your update" rows={4} disabled={busy || !!posted} value={summary} onChange={event => setSummary(event.target.value)} placeholder="What changed, what needs attention, or what was decided?" /></label>
-      {!posted && <label className="update-attachment-picker"><Icon name="paperclip" size={16} /><span>Attach update documents <small>Optional · up to 50 MB each</small></span><input aria-label="Update documents" type="file" multiple disabled={busy} onChange={queue} /></label>}
+      {!posted && <label className="update-attachment-picker"><Icon name="paperclip" size={16} /><span>Attach update documents <small>Optional · up to 50 MB each</small></span><input aria-label="Update documents" className="document-upload" type="file" multiple disabled={busy} onChange={queue} /></label>}
       {!!files.length && <ul className="update-pending-files">{files.map(file => <li key={file.name}><span>{file.name}</span><button type="button" className="text-button" disabled={busy} onClick={() => setFiles(rows => rows.filter(row => row !== file))}>Remove</button></li>)}</ul>}
-      <div className="update-composer-footer"><small>Documents stay with this update, separate from project documents.</small><div>{posted && <button type="button" className="button secondary" disabled={busy} onClick={() => { reset(); setError(''); setMessage('Update kept. Remaining documents were not attached.'); }}>Finish without remaining files</button>}<button type="button" className="button primary" disabled={busy || !summary.trim()} onClick={post}>{busy ? 'Posting…' : posted ? 'Retry documents' : 'Post update'}</button></div></div>
+      <div className="update-composer-footer"><div>{posted && <button type="button" className="button secondary" disabled={busy} onClick={() => { reset(); setError(''); setMessage('Update kept. Remaining documents were not attached.'); }}>Finish without remaining files</button>}<button type="button" className="button primary" disabled={busy || !summary.trim()} onClick={post}>{busy ? 'Posting…' : posted ? 'Retry documents' : 'Post update'}</button></div></div>
     </form>}
     {error && <p className="inline-error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <section className="update-history" aria-label="Project update history">
