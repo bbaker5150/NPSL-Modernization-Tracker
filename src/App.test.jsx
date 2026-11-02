@@ -354,7 +354,7 @@ describe('application shell', () => {
     await raw.saveTask({ id: 'zn', projectKey: 'z', title: 'Zulu milestone', phaseKey: 'requirement', status: 'Not Started' });
     await renderApp();
     const first = () => document.querySelector('.project-table-row:not(.table-header) > span > strong').textContent;
-    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Zulu'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
+    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Alpha'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
       const heading = () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.startsWith(label));
       await act(async () => heading().click());
       expect(first(), `${label} ascending`).toBe(ascending);
@@ -371,7 +371,7 @@ describe('application shell', () => {
     }
     await renderApp();
     expect(document.querySelector('.kpi-grid').textContent).not.toContain('Portfolio Progress');
-    for (const [organization, label] of [['CHENG Team', 'PMA 260B Needs Attention'], ['NPSL', 'NPSL (Calibration Lab)'], ['NPSL Metrology Engineering', 'NPSL Metrology Engineering Division']]) {
+    for (const [organization, label] of [['CHENG Team', 'NAVAIR METCAL 260B Needs Attention'], ['NPSL', 'NPSL (Calibration Lab)'], ['NPSL Metrology Engineering', 'NPSL Metrology Engineering Division']]) {
       await act(async () => [...document.querySelectorAll('.kpi-card')].find((card) => card.textContent.includes(label)).click());
       expect(document.querySelector('h1').textContent).toBe(label);
       expect(document.querySelector('.attention-groups').textContent).toContain(`${organization} project`);
@@ -380,7 +380,7 @@ describe('application shell', () => {
     }
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((button) => button.textContent === 'Pipeline board').click());
     await act(async () => changeValue(document.querySelector('[aria-label="Sort pipeline projects"]'), 'organization'));
-    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['NPSL project', 'NPSL Metrology Engineering project', 'CHENG Team project']);
+    expect([...document.querySelectorAll('.kanban-board .project-card h3')].map((el) => el.textContent)).toEqual(['CHENG Team project', 'NPSL project', 'NPSL Metrology Engineering project']);
   });
 
   it('places project documents after upcoming work and names files in the phase indicator', async () => {

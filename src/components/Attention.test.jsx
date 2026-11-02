@@ -7,7 +7,7 @@ const projects = [
     task('Zulu work', { dueDate: '2026-01-01', deferredDate: '2027-03-01', estimatedHours: 8, ownerName: 'Zoe' }),
     task('Alpha work', { dueDate: '2027-04-01', estimatedHours: 8, ownerName: 'Zoe' }),
     task('Completed work', { status: 'Complete', dueDate: '2020-01-01', estimatedHours: 999 }),
-    task('Other organization', { organization: 'PMA 260B', estimatedHours: 999 }),
+    task('Other organization', { organization: 'NAVAIR METCAL 260B', estimatedHours: 999 }),
   ] },
   { id: 'b', projectKey: 'b', title: 'Beta', measurementArea: 'AC Voltage', tasks: [
     task('Beta work', { dueDate: '2026-10-01', estimatedHours: 12, ownerName: 'Alex', status: 'Blocked' }),
@@ -52,4 +52,16 @@ describe('attention views', () => {
     expect(grouped[0].items.map(({ task }) => task.title)).toEqual(['Alpha work', 'Zulu work']);
     expect(grouped.flatMap(group => group.items).map(row => row.task.id).sort()).toEqual(sorted.map(row => row.task.id).sort());
   });
+});
+
+it('filters and searches by METCAL responsibility, including legacy organizations and unassigned work', () => {
+  const projects = [{ projectKey: 'p', title: 'Project', tasks: [
+    task('Team review', { organization: 'PMA 260B', subAssignment: 'Team 2 Lead' }),
+    task('Unassigned review', { organization: 'NAVAIR METCAL 260B' }),
+    task('Lab work'),
+  ] }];
+  expect(attentionRows(projects, 'NAVAIR METCAL 260B', '', 'due', 'Team 2 Lead').map(row => row.task.id)).toEqual(['Team review']);
+  expect(attentionRows(projects, '', '', 'due', 'Unassigned').map(row => row.task.id)).toEqual(['Unassigned review']);
+  expect(attentionRows(projects, '', 'team 2 lead').map(row => row.task.id)).toEqual(['Team review']);
+  expect(attentionRows(projects, 'NPSL', '', 'due', 'Team 2 Lead').map(row => row.task.id)).toEqual(['Lab work']);
 });

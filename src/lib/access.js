@@ -1,6 +1,6 @@
 import { validateReference } from './referenceDocuments';
 import { validateAttachment } from './taskAttachments';
-import { normalizeOrganization, normalizeTaskStatus, normalizeRole, ROLES } from '../data/workflow';
+import { METCAL_ORGANIZATION, METCAL_TEAMS, normalizeOrganization, normalizeTaskStatus, normalizeRole, ROLES } from '../data/workflow';
 import { isOwnedByUser, userIdentityKey } from './repository';
 
 export const DEFAULT_TEST_MANAGER_PASSWORD = 'admin123';
@@ -23,6 +23,7 @@ export function visibleData(data, user) {
   return { ...data, projects, tasks: data.tasks.filter((row) => keys.has(row.projectKey)), updates: data.updates.filter((row) => keys.has(row.projectKey)), risks: data.risks.filter((row) => keys.has(row.projectKey)) };
 }
 export function validateTask(task) {
+  if (task.subAssignment && (normalizeOrganization(task.organization) !== METCAL_ORGANIZATION || !METCAL_TEAMS.includes(task.subAssignment))) throw new Error('Select a valid METCAL responsibility.');
   if (!task.title?.trim()) throw new Error('Enter a task name.');
   if (!['Not Started', 'In Progress', 'Blocked', 'Complete', 'Not Required', 'Not Applicable'].includes(task.status)) throw new Error('Select a valid task status.');
   if (task.estimatedHours !== '' && task.estimatedHours != null && (!Number.isFinite(Number(task.estimatedHours)) || Number(task.estimatedHours) < 0)) throw new Error('Estimated hours must be a nonnegative number or left blank.');
@@ -117,7 +118,8 @@ export function authorizedStore(raw, config = {}) {
         const project = data.projects.find((project) => project.projectKey === (existing?.projectKey || row.projectKey));
         if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can edit tasks.');
         let next = { ...row, projectKey: project.projectKey, spId: existing?.spId };
-        if (!manager) next.dueDate = existing?.dueDate || '';
+        if (!manager) for (const field of ['dueDate', 'assignedDate']) next[field] = existing?.[field] || '';
+        if (normalizeOrganization(next.organization || existing?.organization || project.organization) !== METCAL_ORGANIZATION) next.subAssignment = '';
         next.organization = normalizeOrganization(next.organization || existing?.organization || project.organization);
         next.status = normalizeTaskStatus(next.status);
         if (!existing && !next.assignedDate) next.assignedDate = new Date().toISOString().slice(0, 10);
@@ -149,8 +151,32 @@ export function authorizedStore(raw, config = {}) {
         }
         return raw.listTaskAttachments(task);
       };
+      if (property === 'saveUpdate') return async (row) => {
+        const { user, data } = await context();
+        const existing = data.updates.find(item => item.id === row.id);
+        const projectKey = existing?.projectKey || row.projectKey;
+        const project = data.projects.find(item => item.projectKey === projectKey);
+        if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can update this project.');
+        if (!row.summary?.trim()) throw new Error('Enter an update.');
+        if (row.type && !['Status', 'Risk', 'Decision', 'Handoff'].includes(row.type)) throw new Error('Select a valid update type.');
+        const task = row.taskId ? data.tasks.find(item => item.id === row.taskId && item.projectKey === projectKey) : null;
+        if (row.taskId && !task) throw new Error('Select a task from this project or leave the reference blank.');
+        return raw.saveUpdate({ ...row, type: row.type || 'Status', projectKey, spId: existing?.spId, summary: row.summary.trim(), taskId: task?.id || '', taskTitle: task?.title || '',
+          postedAt: existing?.postedAt || new Date().toISOString(), entryDate: existing?.entryDate || new Date().toISOString().slice(0, 10),
+          authorName: existing?.authorName || user.title || user.email || user.loginName, authorEmail: existing?.authorEmail || user.email || '', authorKey: existing?.authorKey || userIdentityKey(user) });
+      };
+      if (['listUpdateAttachments', 'addUpdateAttachment', 'downloadUpdateAttachment'].includes(property)) return async (updateId, file) => {
+        const { user, data } = await context();
+        const update = visibleData(data, user).updates.find(row => row.id === updateId);
+        if (!update) throw new Error('You cannot access documents for this update.');
+        if (property === 'addUpdateAttachment') {
+          if (!canManageProject(data.projects.find(row => row.projectKey === update.projectKey), user, data.users)) throw new Error('Only managers or assigned project engineers can attach update documents.');
+          validateAttachment(file);
+        }
+        return raw[property](update, file);
+      };
       if (property === 'saveTasks') return undefined;
-      if (['saveProject', 'saveUpdate', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
+      if (['saveProject', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
         const { data, user, manager } = await context();
         if (!manager && ['saveAcronym', 'saveUser'].includes(property)) throw new Error('Only managers can perform this action.');
         if (!manager && property === 'saveProject') {
@@ -158,9 +184,8 @@ export function authorizedStore(raw, config = {}) {
           if (!current || !canManageProject(current, user, data.users)) throw new Error('Only managers or assigned project engineers can edit this project.');
           args[0] = { ...args[0], spId: current.spId, projectKey: current.projectKey, targetFinish: current.targetFinish || '', ownerName: current.ownerName, ownerEmail: current.ownerEmail, ownerKey: current.ownerKey };
         }
-        if (!manager && ['saveUpdate', 'saveRisk'].includes(property)) {
-          const collection = property === 'saveUpdate' ? 'updates' : 'risks';
-          const current = data[collection].find((entry) => entry.id === args[0]?.id);
+        if (!manager && property === 'saveRisk') {
+          const current = data.risks.find((entry) => entry.id === args[0]?.id);
           args[0] = { ...args[0], spId: current?.spId, projectKey: current?.projectKey || args[0]?.projectKey };
           const project = data.projects.find((entry) => entry.projectKey === args[0]?.projectKey);
           if (!canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can update this project.');

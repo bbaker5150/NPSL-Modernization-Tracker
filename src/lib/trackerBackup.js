@@ -28,7 +28,7 @@ function backupScope(backup) {
 }
 export function manualTransferItems(backup) {
   const scope = backupScope(backup);
-  return [...(scope.includeReferences ? [] : ['Reference Documents and folders']), ...(scope.includeTaskAttachments ? [] : ['task attachments'])];
+  return [...(scope.includeReferences ? [] : ['Reference Documents and folders']), ...(scope.includeTaskAttachments ? [] : ['task and update attachments'])];
 }
 
 export async function exportTrackerBackup(site, onProgress = () => {}, { includeReferences = false, includeTaskAttachments = true } = {}) {
@@ -39,7 +39,7 @@ export async function exportTrackerBackup(site, onProgress = () => {}, { include
     onProgress(`Exporting ${container.suffix} records…`);
     const schema = await site.schema(container);
     const fields = fieldsFor(container).filter(field => schema.has(field));
-    const attached = container.key === 'references' || (container.key === 'tasks' && includeTaskAttachments);
+    const attached = container.key === 'references' || (['tasks', 'updates'].includes(container.key) && includeTaskAttachments);
     const rows = await site.readRows(container.key, fields, attached);
     const records = rows.map(row => ({ Id: row.Id, Modified: row.Modified, ...writable(row, fields) }));
     payload.lists.push({ key: container.key, fields, records });
@@ -91,8 +91,8 @@ export async function validateTrackerBackup(backup) {
   }
   const files = new Set(); let totalBytes = 0;
   for (const file of payload.files) {
-    if (file.list === 'tasks' && !scope.includeTaskAttachments) throw new Error('Backup contains documents excluded by its scope.');
-    if (!['tasks', 'references'].includes(file.list) || !recordMaps.get(file.list)?.has(file.recordId)) throw new Error('Document refers to a missing record.');
+    if (['tasks', 'updates'].includes(file.list) && !scope.includeTaskAttachments) throw new Error('Backup contains documents excluded by its scope.');
+    if (!['tasks', 'updates', 'references'].includes(file.list) || !recordMaps.get(file.list)?.has(file.recordId)) throw new Error('Document refers to a missing record.');
     validateAttachmentName(file.name);
     const key = fileKey(file.list, file.recordId, file.name);
     if (files.has(key)) throw new Error('Duplicate document in backup.');
@@ -154,7 +154,7 @@ export async function importTrackerBackup(backup, target, plan, { replaceConflic
     }
     // Verify list values once and obtain the new SharePoint IDs for documents.
     onProgress(`Verifying ${list.title} records…`);
-    const attached = list.key === 'references' || (list.key === 'tasks' && scope.includeTaskAttachments);
+    const attached = list.key === 'references' || (['tasks', 'updates'].includes(list.key) && scope.includeTaskAttachments);
     const saved = await target.readRows(list.key, list.fields, attached);
     for (const entry of list.entries) {
       const matches = saved.filter(row => row.RecordId === entry.source.RecordId);

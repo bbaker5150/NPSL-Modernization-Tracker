@@ -30,3 +30,9 @@ describe('progress calculations and phase compatibility', () => {
     expect(['requirement', 'acquisition', 'development', 'production-procurement', 'operation-sustainment'].map(normalizePhaseKey)).toEqual(['requirement', 'acquisition', 'procurement', 'procurement', 'deployment']);
   });
 });
+
+it('maps previous program-office names to METCAL without dropping records', async () => {
+  const { normalizeOrganization, normalizeTaskOrganizations } = await import('./workflow');
+  for (const name of ['PMA 260B', 'Program Office', 'CHENG Team', 'NAVAIR METCAL 260B']) expect(normalizeOrganization(name)).toBe('NAVAIR METCAL 260B');
+  expect(normalizeTaskOrganizations([{ id: 'a', projectKey: 'p', subAssignment: 'Team 2 Lead' }], [{ projectKey: 'p', organization: 'PMA 260B' }])[0]).toMatchObject({ organization: 'NAVAIR METCAL 260B', subAssignment: 'Team 2 Lead' });
+});

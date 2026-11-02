@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { TaskDocuments } from './TaskDocuments';
 import { displayName } from '../lib/displayName';
-import { organizationAttentionLabel, workflowData } from '../data/workflow';
+import { METCAL_ORGANIZATION, METCAL_TEAMS, normalizeOrganization, organizationAttentionLabel, workflowData } from '../data/workflow';
 import { Icon } from './Icon';
 
 const statusOrder = ['Blocked', 'In Progress', 'Not Started'];
@@ -15,10 +15,11 @@ const compareMeasurementArea = (a, b) => {
   return (left ? 0 : 1) - (right ? 0 : 1) || left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true });
 };
 
-export function attentionRows(projects, organization = '', search = '', sort = 'due') {
+export function attentionRows(projects, organization = '', search = '', sort = 'due', responsibility = '') {
   const query = search.toLowerCase().trim();
-  return projects.flatMap((project) => project.tasks.filter((task) => !closed.has(task.status) && (!organization || task.organization === organization)).map((task) => ({ project, task })))
-    .filter(({ project, task }) => !query || [project.title, task.title, task.ownerName, displayName(task.ownerName), task.organization].join(' ').toLowerCase().includes(query))
+  return projects.flatMap((project) => project.tasks.filter((task) => !closed.has(task.status) && (!organization || normalizeOrganization(task.organization) === normalizeOrganization(organization))).map((task) => ({ project, task })))
+    .filter(({ task }) => !responsibility || (organization && normalizeOrganization(organization) !== METCAL_ORGANIZATION) || (normalizeOrganization(task.organization) === METCAL_ORGANIZATION && (task.subAssignment || 'Unassigned') === responsibility))
+    .filter(({ project, task }) => !query || [project.title, task.title, task.ownerName, displayName(task.ownerName), task.organization, task.subAssignment].join(' ').toLowerCase().includes(query))
     .sort((a, b) => {
       if (sort === 'measurement-area') return compareMeasurementArea(a.project, b.project) || a.project.title.localeCompare(b.project.title) || a.task.title.localeCompare(b.task.title);
       const value = ({ task }) => sort === 'title' ? task.title : sort === 'hours' ? -(Number(task.estimatedHours) || 0) : sort === 'owner' ? displayName(task.ownerName || '') || '\uffff' : (effectiveDue(task) || '9999');
@@ -79,8 +80,10 @@ function TaskDetails({ task, store, refreshKey }) {
 
 export function Attention({ projects, organization, onOpen, onTask, controls, onControls, store, refreshKey }) {
   const { groupBy, search, sort } = controls;
+  const responsibility = controls.responsibility || '';
+  const metcal = !organization || normalizeOrganization(organization) === METCAL_ORGANIZATION;
   const byProject = groupBy === 'project';
-  const rows = useMemo(() => attentionRows(projects, organization, search, sort), [projects, organization, search, sort]);
+  const rows = useMemo(() => attentionRows(projects, organization, search, sort, responsibility), [projects, organization, search, sort, responsibility, metcal]);
   const ordered = useMemo(() => attentionGroups(rows, groupBy, sort), [rows, groupBy, sort]);
   const hours = rows.reduce((sum, { task }) => sum + (Number(task.estimatedHours) || 0), 0);
   const projectSortHint = { due: 'Projects ordered by next task due date.', title: 'Projects ordered by name.', owner: 'Projects ordered by first assignee A–Z.', 'measurement-area': 'Projects ordered by measurement area.', hours: 'Projects ordered by total estimated hours.' }[sort];
@@ -95,6 +98,7 @@ export function Attention({ projects, organization, onOpen, onTask, controls, on
         <label className="search-box"><Icon name="search" size={16} /><input type="search" aria-label="Search attention tasks" placeholder="Search tasks, projects or people…" value={search} onChange={(event) => onControls({ ...controls, search: event.target.value })} /></label>
         <label className="select-wrap attention-sort"><span>Sort</span><select aria-label={byProject ? 'Sort attention projects' : 'Sort attention tasks'} value={sort} onChange={(event) => onControls({ ...controls, sort: event.target.value })}><option value="due">{byProject ? 'Next due soonest' : 'Due soonest'}</option><option value="title">{byProject ? 'Project name A–Z' : 'Task name A–Z'}</option><option value="owner">{byProject ? 'First assignee A–Z' : 'Assignee A–Z'}</option><option value="measurement-area">Measurement Area A–Z</option><option value="hours">{byProject ? 'Total hours high–low' : 'Hours high–low'}</option></select></label>
       </div>
+      {metcal && <div className="metcal-filters" role="group" aria-label="Filter METCAL responsibility">{[['', 'All responsibilities'], ...METCAL_TEAMS.map(team => [team, team]), ['Unassigned', 'Not yet assigned']].map(([value, label]) => <button type="button" key={value} aria-pressed={responsibility === value} onClick={() => onControls({ ...controls, responsibility: value })}>{label}</button>)}</div>}
       <p className="attention-view-hint">{byProject ? `${projectSortHint} Totals reflect the tasks shown.` : 'Tasks grouped by status, with your chosen sort applied within each group.'}</p>
     </section>
     <div id="attention-results" className={`attention-groups attention-groups-${groupBy}`} role="region" aria-label={byProject ? 'Tasks by project' : 'Tasks by status'} tabIndex={byProject ? undefined : 0}>{ordered.map(({ key, items, project, hours, overdueCount, nextDue }) => <details className="panel attention-section" key={`${groupBy}-${key}`} open><summary>
@@ -102,6 +106,7 @@ export function Attention({ projects, organization, onOpen, onTask, controls, on
     </summary><div className="attention-task-list">{items.map(({ project, task }) => <article className="attention-task-card" key={task.id}>
       <div className="attention-task-heading"><div><button className="attention-project-link" onClick={() => onOpen(project)}>{project.title}</button><button className="attention-task-title" onClick={() => onTask(task)}>{task.title}</button></div><span className={`attention-status status-${task.status.toLowerCase().replaceAll(' ', '-')}`}>{task.status}</span></div>
       <div className="attention-task-meta">{filled(task.organization) && <span>{task.organization}</span>}{filled(project.measurementArea) && <span>{project.measurementArea}</span>}{workflowData.phases.some((phase) => phase.key === task.phaseKey) && <span>{workflowData.phases.find((phase) => phase.key === task.phaseKey).name}</span>}</div>
+      {normalizeOrganization(task.organization) === METCAL_ORGANIZATION && <div className="attention-responsibility"><Icon name="user" size={15} /><span>METCAL responsibility<strong>{task.subAssignment || 'Not yet assigned'}</strong></span></div>}
       <TaskFacts task={task} />
       <TaskDetails task={task} store={store} refreshKey={refreshKey} />
     </article>)}</div></details>)}</div>

@@ -314,3 +314,30 @@ describe('page-targeted invitations', () => {
     await expect(emailFailure.shareSiteAccess({ loginName: 'claims|person', email: 'person@example.test' }, 'Viewer', pageUrl)).rejects.toThrow('Email denied');
   });
 });
+
+it('persists METCAL subassignment, task reference and exact update timestamp', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.post = vi.fn().mockResolvedValue({ value: [] });
+  await store.saveTask({ id: 't', spId: 1, organization: 'PMA 260B', subAssignment: 'Chief Engineer Office' });
+  let values = Object.fromEntries(store.post.mock.calls[0][1].body.formValues.map(row => [row.FieldName, row.FieldValue]));
+  expect(values).toMatchObject({ Organization: 'NAVAIR METCAL 260B', SubAssignment: 'Chief Engineer Office' });
+  await store.saveUpdate({ id: 'u', spId: 2, taskId: 't', taskTitle: 'Review', postedAt: '2026-11-02T18:01:23.456Z' });
+  values = Object.fromEntries(store.post.mock.calls[1][1].body.formValues.map(row => [row.FieldName, row.FieldValue]));
+  expect(values).toMatchObject({ TaskId: 't', TaskTitle: 'Review', PostedAt: '2026-11-02T18:01:23.456Z' });
+  store.listItems = vi.fn(async (key, fields, convert) => key === 'tasks' ? [convert({ Id: 1, RecordId: 't', Organization: 'PMA 260B', SubAssignment: 'Team 3 Lead' })] : key === 'updates' ? [convert({ Id: 2, RecordId: 'u', TaskId: 't', PostedAt: '2026-11-02T18:01:23.456Z' })] : []);
+  const data = await store.load();
+  expect(data.tasks[0].subAssignment).toBe('Team 3 Lead');
+  expect(data.updates[0]).toMatchObject({ taskId: 't', postedAt: '2026-11-02T18:01:23.456Z' });
+});
+it('uploads only to the Updates list and refuses duplicate update filenames', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.get = vi.fn(async path => path.includes('AttachmentFiles') ? { value: [] } : { EnableAttachments: true });
+  store.post = vi.fn();
+  const file = { name: 'decision.pdf', size: 4, arrayBuffer: async () => new ArrayBuffer(4) };
+  await store.addUpdateAttachment({ id: 'u', spId: 42 }, file);
+  expect(store.post.mock.calls[0][0]).toContain("ModernizationUpdates')/items(42)/AttachmentFiles/add");
+  expect(JSON.stringify(store.post.mock.calls)).not.toContain('ModernizationTasks');
+  store.get.mockResolvedValue({ value: [{ FileName: 'decision.pdf', ServerRelativeUrl: '/sites/mod/Lists/Updates/Attachments/42/decision.pdf' }] });
+  await expect(store.addUpdateAttachment({ id: 'u', spId: 42 }, file)).rejects.toThrow('already attached');
+  expect(store.post).toHaveBeenCalledTimes(1);
+});
