@@ -783,20 +783,17 @@ button.brand { width: 100%; }
 .metcal-filters button { border: 1px solid var(--line); border-radius: 20px; padding: 7px 12px; background: var(--surface); color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
 .metcal-filters button[aria-pressed="true"] { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
 .project-updates { display: grid; gap: 22px; }
-.updates-intro h3 { margin: 0 0 6px; }
-.updates-intro p, .update-composer small { color: var(--muted); font-size: 12px; line-height: 1.6; }
-.updates-intro p { margin: 0; }
+.update-composer small { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .update-composer { display: grid; gap: 16px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-.update-options { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 14px; }
+.update-options { display: grid; grid-template-columns: minmax(0, 1fr); }
 .update-options .field { min-width: 0; }
 .update-options small { font-weight: 400; font-size: 10px; }
 .update-attachment-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 10px; font-size: 12px; }
 .update-attachment-picker span { flex: 1; }
 .update-attachment-picker small { display: block; }
 .update-attachment-picker input { width: 100%; min-width: 0; }
-.update-composer-footer { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.update-composer-footer { display: flex; gap: 12px; align-items: center; justify-content: flex-end; }
 .update-composer-footer > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.update-composer-footer > small { max-width: 250px; }
 .update-history { display: grid; gap: 16px; }
 .update-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; overflow-wrap: anywhere; }
 .update-card > header { display: flex; align-items: center; gap: 10px; }
@@ -818,4 +815,4 @@ button.update-task-reference { cursor: pointer; }
 .update-documents input { max-width: 100%; margin: 12px 0; }
 .update-documents small { display: block; }
 .update-pending-files li { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; overflow-wrap: anywhere; }
-@media (max-width: 560px) { .update-options { grid-template-columns: 1fr; } .update-composer-footer { align-items: stretch; flex-direction: column; } .update-composer, .update-card { padding: 15px; } }
+@media (max-width: 560px) { .update-composer-footer { align-items: stretch; flex-direction: column; } .update-composer, .update-card { padding: 15px; } }
