@@ -65,3 +65,19 @@ describe('repository selection and SharePoint identity', () => {
     expect(tasks.every((task) => !task.dueDate && task.ownerKey === owner.ownerKey && task.ownerEmail === owner.ownerEmail && task.ownerName === owner.ownerName && !task.dataIssue)).toBe(true);
   });
 });
+
+it('keeps local update versions across reloads and deletes only the selected update', async () => {
+  localStorage.clear(); window.MOD_TRACKER_CONFIG = { forceLocal: true };
+  let store = createRepository().store;
+  const first = await store.saveUpdate({ id: 'first', summary: 'Original' });
+  await store.saveUpdate({ id: 'second', summary: 'Keep' });
+  const edited = await store.editUpdate({ ...first, summary: 'Revised' });
+  expect(edited.version).not.toBe(first.version);
+  store = createRepository().store;
+  await expect(store.editUpdate(first)).rejects.toThrow('changed');
+  await expect(store.deleteUpdate(first)).rejects.toThrow('changed');
+  expect((await store.load()).updates.find(row => row.id === 'first').summary).toBe('Revised');
+  await store.deleteUpdate(edited);
+  expect((await createRepository().store.load()).updates.map(row => row.id)).toEqual(['second']);
+  await expect(store.editUpdate(edited)).rejects.toThrow('deleted');
+});

@@ -41,6 +41,7 @@ export const CONTAINERS = [
   {
     key: 'updates', suffix: 'Updates', description: 'Project status updates and decisions.', fields: [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
+      ['EditedAt', 'Edited At (UTC)', FIELD.TEXT], ['EditorName', 'Last Edited By', FIELD.TEXT], ['EditorKey', 'Editor Identity Key', FIELD.TEXT],
       ['TaskId', 'Referenced Task ID', FIELD.TEXT], ['TaskTitle', 'Referenced Task', FIELD.TEXT], ['PostedAt', 'Posted At (UTC)', FIELD.TEXT],
       ['UpdateType', 'Update Type', FIELD.TEXT], ['Summary', 'Summary', FIELD.NOTE], ['EntryDate', 'Entry Date', FIELD.DATE],
       ['AuthorName', 'Author', FIELD.TEXT], ['AuthorEmail', 'Author Email', FIELD.TEXT], ['AuthorKey', 'Author Identity Key', FIELD.TEXT, true],
@@ -119,7 +120,7 @@ const taskFields = (row) => ({
 
 const updateFields = (row) => ({
   Title: `${row.projectKey} update`, RecordId: row.id, ProjectKey: row.projectKey, UpdateType: row.type,
-  TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', PostedAt: row.postedAt || '', Summary: row.summary, EntryDate: sharePointDate(row.entryDate), AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
+  EditedAt: row.editedAt || '', EditorName: row.editorName || '', EditorKey: row.editorKey || '', TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', PostedAt: row.postedAt || '', Summary: row.summary, EntryDate: sharePointDate(row.entryDate), AuthorName: row.authorName, AuthorEmail: row.authorEmail, AuthorKey: row.authorKey || '',
 });
 
 const riskFields = (row) => ({
@@ -158,7 +159,7 @@ function fromTask(item) {
 
 const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole || 'User' });
 
-const fromUpdate = (item) => ({ taskId: item.TaskId || '', taskTitle: item.TaskTitle || '', postedAt: item.PostedAt || '', spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
+const fromUpdate = (item) => ({ version: item['odata.etag'] || item['@odata.etag'] || item.__metadata?.etag, editedAt: item.EditedAt || '', editorName: item.EditorName || '', editorKey: item.EditorKey || '', taskId: item.TaskId || '', taskTitle: item.TaskTitle || '', postedAt: item.PostedAt || '', spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
 const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
@@ -270,9 +271,9 @@ export class SharePointStore {
     let path = `${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`;
     const rows = [];
     while (path) {
-      const body = await this.get(path);
+      const body = await this.get(path, key === 'updates' ? { Accept: 'application/json;odata=minimalmetadata' } : undefined);
       rows.push(...(body.value || body.d?.results || []));
-      const next = body['@odata.nextLink'] || body.d?.__next || '';
+      const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next || '';
       if (!next) path = '';
       else if (next.startsWith(this.webUrl)) path = next.slice(this.webUrl.length);
       else if (/^https?:/i.test(next)) {
@@ -622,6 +623,22 @@ export class SharePointStore {
     const spId = await this.create('updates', updateFields(row));
     if (!Number.isInteger(spId) || spId <= 0) throw new Error('SharePoint did not confirm the new update. Refresh history before retrying.');
     return { ...row, spId };
+  }
+  async editUpdate(row) {
+    await this.changeUpdate(row, { Summary: row.summary, TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', EditedAt: row.editedAt, EditorName: row.editorName, EditorKey: row.editorKey });
+    // Keep the successful content visible if a subsequent reload fails, but
+    // require a fresh version before another edit or deletion.
+    return { ...row, version: null };
+  }
+  async deleteUpdate(row) { await this.changeUpdate(row, { Archived: true }); }
+  async changeUpdate(row, body) {
+    if (!Number.isSafeInteger(row.spId) || row.spId <= 0 || !row.version || row.version === '*') throw new Error('Reload the tracker before changing this update.');
+    try { await this.post(`${apiFor(this.prefix, 'updates')}/items(${row.spId})`, { body, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': row.version } }); }
+    catch (error) {
+      if (error.status === 412) throw new Error('This update changed since you opened it. Copy your draft and reload the tracker to review the latest version.');
+      if (error.status === 404) throw new Error('This update is no longer available. Reload the tracker to refresh.');
+      throw error;
+    }
   }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
   async saveAcronym(row) { return row.spId ? (await this.update('acronyms', row.spId, acronymFields(row)), row) : { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }

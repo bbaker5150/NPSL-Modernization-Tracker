@@ -33,7 +33,7 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
+  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.updates = data.updates.map(row => ({ ...row, version: row.version || '1' })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
@@ -73,7 +73,20 @@ class LocalStore {
   async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row) { return this.upsert('projects', row, 'project'); }
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }
-  async saveUpdate(row) { return this.upsert('updates', row, 'update'); }
+  async saveUpdate(row) {
+    const current = this.data.updates.find(item => item.id === row.id);
+    return this.upsert('updates', { ...row, version: String(Number(current ? current.version || 1 : 0) + 1) }, 'update');
+  }
+  async editUpdate(row) {
+    const current = this.data.updates.find(item => item.id === row.id);
+    if (!current || String(current.version || '1') !== row.version) throw new Error('This update changed or was deleted. Reopen the project to refresh.');
+    return this.saveUpdate(row);
+  }
+  async deleteUpdate(row) {
+    const current = this.data.updates.find(item => item.id === row.id);
+    if (!current || String(current.version || '1') !== row.version) throw new Error('This update changed or was deleted. Reopen the project to refresh.');
+    return this.recycle('updates', undefined, row.id);
+  }
   async saveRisk(row) { return this.upsert('risks', row, 'risk'); }
   async saveAcronym(row) { return this.upsert('acronyms', row, 'acronym'); }
   async upsert(collection, row, prefix) {

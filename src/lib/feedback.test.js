@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createFeedback, validateFeedback } from './feedback';
-const store = (owner = false) => ({ webUrl: 'https://example.test/sites/tracker', prefix: 'Modernization', currentUser: vi.fn().mockResolvedValue({ isSiteAdmin: owner }), get: vi.fn(async path => path.includes('associatedownergroup') ? { Id: 7 } : { value: [] }), post: vi.fn().mockResolvedValue({}) });
+const store = (owner = false) => ({ webUrl: 'https://example.test/sites/tracker', prefix: 'Modernization', currentUser: vi.fn().mockResolvedValue({ isSiteAdmin: owner }), get: vi.fn(async path => path.includes('associatedownergroup') ? { Id: 7 } : { value: [] }), post: vi.fn().mockResolvedValue([{ ErrorInfo: null }]) });
 describe('private feedback', () => {
   it('validates and trims reports, rejecting missing, oversized, and invalid values', () => {
     expect(validateFeedback({ kind: 'Bug', title: ' Test ', details: ' Steps ' })).toEqual({ kind: 'Bug', title: 'Test', details: 'Steps' });
@@ -10,7 +10,8 @@ describe('private feedback', () => {
     const raw = store(); raw.currentUser.mockResolvedValue({ role });
     await createFeedback(raw).submit({ kind: 'Feature', title: 'Idea', details: 'Details', AuthorId: 99 });
     expect(raw.get).not.toHaveBeenCalled();
-    expect(raw.post).toHaveBeenCalledWith("/_api/web/lists/getbytitle('Modernization-Tracker%20-%20Feedback')/items", { body: { Title: 'Idea', FeedbackKind: 'Feature', FeedbackDetails: 'Details' } });
+    expect(raw.post).toHaveBeenCalledExactlyOnceWith('/_vti_bin/client.svc/ProcessQuery', expect.objectContaining({ raw: true, body: expect.stringContaining('Modernization-Tracker - Feedback') }));
+    expect(raw.post.mock.calls[0][1].body).not.toContain('AuthorId');
   });
   it('blocks non-owner managers before fetching submission contents', async () => {
     const raw = store(); raw.currentUser.mockResolvedValue({ role: 'Manager' });
@@ -62,16 +63,18 @@ describe('private feedback', () => {
   });
 });
 
+const missingList = title => [{ ErrorInfo: { ErrorTypeName: 'System.ArgumentException', ErrorCode: -2147024809, ErrorMessage: `List '${title}' does not exist at site with URL 'https://example.test'.` } }];
+
 it('explains missing storage to submitters without attempting provisioning', async () => {
-  const raw = store(); raw.post.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+  const raw = store(); raw.post.mockImplementation(async (_, { body }) => missingList(new DOMParser().parseFromString(body, 'text/xml').querySelector('Method[Name=GetByTitle] Parameter').textContent));
   await expect(createFeedback(raw).submit({ kind: 'Bug', title: 'Issue', details: 'Steps' })).rejects.toThrow('Set up private feedback');
   expect(raw.post).toHaveBeenCalledTimes(3); expect(raw.get).not.toHaveBeenCalled();
 });
 
 it('supports the old list title for add-only users without reading the catalog', async () => {
-  const raw = store(); raw.post.mockRejectedValueOnce(Object.assign(new Error('Missing current title'), { status: 404 })).mockResolvedValueOnce({});
+  const raw = store(); raw.post.mockResolvedValueOnce(missingList('Modernization-Tracker - Feedback')).mockResolvedValueOnce([{ ErrorInfo: null }]);
   await createFeedback(raw).submit({ kind: 'Bug', title: 'Issue', details: 'Steps' });
-  expect(raw.post.mock.calls.map(([path]) => path)).toEqual(["/_api/web/lists/getbytitle('Modernization-Tracker%20-%20Feedback')/items", "/_api/web/lists/getbytitle('ModernizationFeedback')/items"]);
+  expect(raw.post.mock.calls.map(([, { body }]) => new DOMParser().parseFromString(body, 'text/xml').querySelector('Method[Name=GetByTitle] Parameter').textContent)).toEqual(['Modernization-Tracker - Feedback', 'ModernizationFeedback']);
   expect(raw.get).not.toHaveBeenCalled();
 });
 

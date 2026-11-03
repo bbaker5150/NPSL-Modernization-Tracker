@@ -19,7 +19,7 @@ it('offers feedback to a viewer, hides inbox, and preserves a failed draft', asy
     await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Send feedback').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Denied');
     expect(document.querySelector('textarea').value).toBe('Clicking it does nothing');
-    store.post.mockResolvedValue({});
+    store.post.mockResolvedValue([{ ErrorInfo: null }]);
     await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Send feedback').click());
     expect(document.querySelector('[role="status"]').textContent).toContain('Thank you');
   } finally { document.removeEventListener('click', cancelNativeSubmit, true); await act(async () => root.unmount()); node.remove(); }

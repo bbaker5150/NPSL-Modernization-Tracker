@@ -151,12 +151,27 @@ export function authorizedStore(raw, config = {}) {
         }
         return raw.listTaskAttachments(task);
       };
+      if (['editUpdate', 'deleteUpdate'].includes(property)) return async (row) => {
+        const { user, data } = await context();
+        const existing = data.updates.find(item => item.id === row.id);
+        const project = data.projects.find(item => item.projectKey === existing?.projectKey);
+        if (!existing || !project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can change an existing project update.');
+        if (!row.version || row.version === '*' || row.version !== existing.version) throw new Error('This update changed. Copy your draft and reload the tracker before trying again.');
+        if (property === 'deleteUpdate') return raw.deleteUpdate(existing);
+        if (!row.summary?.trim()) throw new Error('Enter an update.');
+        const task = row.taskId ? data.tasks.find(item => item.id === row.taskId && item.projectKey === existing.projectKey) : null;
+        // A removed task may keep its historical reference if it was not changed.
+        if (row.taskId && !task && row.taskId !== existing.taskId) throw new Error('Select a task from this project.');
+        return raw.editUpdate({ ...existing, summary: row.summary.trim(), taskId: row.taskId || '', taskTitle: task?.title || (row.taskId ? existing.taskTitle : ''),
+          editedAt: new Date().toISOString(), editorName: user.title || user.email || user.loginName, editorKey: userIdentityKey(user) });
+      };
       if (property === 'saveUpdate') return async (row) => {
         const { user, data } = await context();
         const existing = data.updates.find(item => item.id === row.id);
         const projectKey = existing?.projectKey || row.projectKey;
         const project = data.projects.find(item => item.projectKey === projectKey);
         if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can update this project.');
+        if (existing) throw new Error('Use Edit update to change an existing update.');
         if (!row.summary?.trim()) throw new Error('Enter an update.');
         if (row.type && !['Status', 'Risk', 'Decision', 'Handoff'].includes(row.type)) throw new Error('Select a valid update type.');
         const task = row.taskId ? data.tasks.find(item => item.id === row.taskId && item.projectKey === projectKey) : null;

@@ -50,3 +50,57 @@ it('does not invent timestamps for old date-only updates', () => {
   expect(updateTimestamp({ entryDate: '2026-10-01' })).not.toContain(':');
   expect(updateTimestamp({})).toBe('Date not recorded');
 });
+
+it('edits and deletes only the selected update with draft retention, cancellation and host-safe buttons', async () => {
+  const store = { listUpdateAttachments: vi.fn().mockResolvedValue([{ name: 'decision.txt' }]) };
+  const onEdit = vi.fn().mockRejectedValueOnce(new Error('Conflict: keep your draft')).mockResolvedValueOnce();
+  const onDelete = vi.fn().mockRejectedValueOnce(new Error('Delete denied')).mockResolvedValueOnce();
+  const original = { id: 'u', version: '1', summary: 'Original summary', authorName: 'Original author', postedAt: '2026-11-02T18:05:00Z', taskId: 't' };
+  function Harness() {
+    const [updates, setUpdates] = React.useState([original, { ...original, id: 'other', summary: 'Other update' }]);
+    return <ProjectUpdates project={{ projectKey: 'p' }} tasks={[{ id: 't', title: 'Review' }]} updates={updates} store={store} canPost onEdit={async (item, changes) => { await onEdit(item, changes); setUpdates(rows => rows.map(row => row.id === item.id ? { ...row, ...changes, editorName: 'Manager', editedAt: '2026-11-03T18:05:00Z', version: '2' } : row)); }} onDelete={async item => { await onDelete(item); setUpdates(rows => rows.filter(row => row.id !== item.id)); }} />;
+  }
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const cancelNative = event => { if (event.target.closest('button')) event.preventDefault(); };
+  document.addEventListener('click', cancelNative, true);
+  try {
+    await act(async () => root.render(<Harness />));
+    await act(async () => button('Edit update').click());
+    await act(async () => change(document.querySelector('[aria-label="Edit update"]'), 'Discard this'));
+    await act(async () => button('Cancel edit').click());
+    expect(onEdit).not.toHaveBeenCalled();
+    await act(async () => button('Edit update').click());
+    expect(document.querySelector('[aria-label="Edit update"]').value).toBe('Original summary');
+    await act(async () => change(document.querySelector('[aria-label="Edit update"]'), 'Revised summary'));
+    await act(async () => change(document.querySelector('[aria-label="Edit task reference"]'), ''));
+    await act(async () => button('Save changes').click());
+    expect(document.querySelector('[role=alert]').textContent).toContain('keep your draft');
+    expect(document.querySelector('[aria-label="Edit update"]').value).toBe('Revised summary');
+    await act(async () => button('Save changes').click());
+    expect(onEdit).toHaveBeenLastCalledWith(original, { summary: 'Revised summary', taskId: '' });
+    const card = document.querySelector('.update-card');
+    expect(card.querySelector('header strong').textContent).toBe('Original author');
+    expect(card.querySelector('header time').dateTime).toBe(original.postedAt);
+    expect(card.querySelector('.update-edited').textContent).toContain('Edited by Manager');
+    expect(card.querySelector('.update-task-reference')).toBeNull();
+    expect(card.textContent).toContain('decision.txt');
+    await act(async () => button('Delete update').click());
+    await act(async () => button('Keep update').click());
+    expect(onDelete).not.toHaveBeenCalled();
+    await act(async () => button('Delete update').click());
+    await act(async () => button('Confirm delete').click());
+    expect(document.querySelector('[role=alert]').textContent).toBe('Delete denied');
+    expect(document.querySelectorAll('.update-card')).toHaveLength(2);
+    await act(async () => button('Confirm delete').click());
+    expect(document.querySelectorAll('.update-card')).toHaveLength(1);
+    expect(document.querySelector('.update-card').textContent).toContain('Other update');
+    expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'u', version: '2' }));
+  } finally { document.removeEventListener('click', cancelNative, true); await act(async () => root.unmount()); host.remove(); }
+});
+it.each([false, true])('keeps legacy risks read-only and hides edit actions for readers (canPost=%s)', async canPost => {
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<ProjectUpdates project={{}} tasks={[]} updates={canPost ? [] : [{ id: 'u', version: '1', summary: 'Read only' }]} risks={[{ id: 'r', title: 'Old risk' }]} store={{ listUpdateAttachments: async () => [] }} canPost={canPost} />));
+    expect(button('Edit update')).toBeUndefined(); expect(button('Delete update')).toBeUndefined();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

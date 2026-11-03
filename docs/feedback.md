@@ -32,7 +32,7 @@ Local preview uses disposable module memory, labels submissions accordingly, and
 
 Send feedback uses a direct click handler, like the directory’s Save action, so embedded hosts that cancel native form activation do not swallow the send operation. Empty fields show validation errors, pending setup shows a status message, and failed writes keep the draft.
 
-The list uses the same App name - Content convention as the other tracker lists. Opening feedback as an owner with Manage Lists renames an existing `ModernizationFeedback` or `NPSL Tracker - Feedback` list in place by GUID after privacy checks. It preserves records, URLs and permissions. Duplicate aliases stop resolution instead of creating a replacement. Add-only users submit by display title with a legacy fallback only on a definitive 404; they do not read the list catalog. Feedback remains excluded from shared portfolio loading and permission repair.
+The list uses the same App name - Content convention as the other tracker lists. Opening feedback as an owner with Manage Lists renames an existing `ModernizationFeedback` or `NPSL Tracker - Feedback` list in place by GUID after privacy checks. It preserves records, URLs and permissions. Duplicate aliases stop resolution instead of creating a replacement. Add-only users submit by display title with a legacy fallback only on an explicit CSOM list-resolution error before a write; they do not read the list catalog. Feedback remains excluded from shared portfolio loading and permission repair.
 
 ## Managing individual submissions
 
@@ -49,3 +49,11 @@ Verify in SharePoint that an owner can edit one report, reopen the inbox to see 
 Inside the inbox, the redundant Owner inbox navigation button is hidden. **Clear inbox** opens an in-app confirmation for the submissions currently loaded. It clears the shared inbox for all owners by moving those list items to the SharePoint recycle bin; it does not delete the list or change its permissions. New submissions received after the inbox was loaded are not included. Site owners can restore recycled items through SharePoint’s normal recycle-bin controls.
 
 Owner permission is rechecked when clearing begins. Ordinary users and non-owner tracker Managers cannot clear submissions. A partial failure stops the operation and reports how many items were cleared; uncertain writes are not automatically retried. Reopen the inbox to see the current state before retrying.
+
+## Add-only submission transport
+
+Submission uses SharePoint CSOM `/_vti_bin/client.svc/ProcessQuery` with AddItem, SetFieldValue and Update. It sends the signed-in user's cookies and the site's form digest, and never loads or queries the created item. The REST `/items` create endpoint returns the created item; that read-back can fail for the intentionally add-only submission role, even after the item was written. The site owner confirmed that the report affected by the HTTP 500 “Item does not exist” error was present in the inbox. Creation succeeded despite the failed confirmation. The write-only transport avoids returning that protected item; the new transport still requires live tenant validation.
+
+The application confirms success only when CSOM returns an explicit `ErrorInfo: null`. Errors inside an HTTP 200 response are failures too. Only an explicit missing-list error during GetByTitle can try a legacy name. Timeouts, HTTP errors and generic “Item does not exist” responses never retry creation automatically. Before resubmitting a report affected by the old error, ask an owner to check whether it already arrived. No read permissions are added to submission groups.
+
+Protocol reference: [Microsoft CSOM update example](https://learn.microsoft.com/en-us/openspecs/sharepoint_protocols/ms-csomspt/ec9d185e-97c4-49e6-bbb3-8de04445db47). Automated coverage checks the request, digest/cookies, response handling and no-retry behavior; it does not replace submitting as an actual add-only SharePoint user.
