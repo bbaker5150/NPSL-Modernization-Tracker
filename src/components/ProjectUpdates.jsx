@@ -13,7 +13,7 @@ export function updateTimestamp(item) {
     : { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function UpdateDocuments({ item, store, revision, canPost }) {
+function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
   const [files, setFiles] = useState([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let active = true;
@@ -37,6 +37,7 @@ function UpdateDocuments({ item, store, revision, canPost }) {
     }
     // Reload first; keep upload errors visible after a partial failure.
     try { setFiles(await store.listUpdateAttachments(item.id)); } catch (err) { errors.push(err.message); }
+    await onRefresh?.();
     setError(errors.join('\n')); setBusy(false);
   }
   return <div className="update-documents">
@@ -47,7 +48,43 @@ function UpdateDocuments({ item, store, revision, canPost }) {
   </div>;
 }
 
-export function ProjectUpdates({ project, tasks, updates, risks = [], store, canPost, onPost, onTask }) {
+function UpdateCard({ item, tasks, store, revision, canPost, onEdit, onDelete, onTask, onRefresh }) {
+  const [mode, setMode] = useState(''), [draft, setDraft] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const active = useRef(false);
+  const task = tasks.find(row => row.id === item.taskId);
+  const canEdit = canPost && !item.legacyRisk;
+  function begin(next) { setError(''); setDraft({ summary: item.summary, taskId: item.taskId || '', version: item.version }); setMode(next); }
+  async function apply(event) {
+    event.preventDefault(); if (active.current || !canEdit) return;
+    active.current = true; setBusy(true); setError('');
+    try {
+      if (mode === 'delete') await onDelete({ ...item, version: draft.version });
+      else { if (!draft.summary.trim()) throw new Error('Write an update before saving.'); await onEdit({ ...item, version: draft.version }, { summary: draft.summary, taskId: draft.taskId }); }
+      setMode(''); setDraft(null);
+    } catch (err) { setError(err.message); }
+    finally { active.current = false; setBusy(false); }
+  }
+  return <article className="update-card">
+    <header><span className="update-avatar" aria-hidden="true">{(displayName(item.authorName || '?')).slice(0, 1).toUpperCase()}</span><div><strong>{item.legacyRisk ? 'Risk owner · ' : ''}{displayName(item.authorName || 'Author not recorded')}</strong><time dateTime={item.postedAt || item.entryDate || undefined}>{updateTimestamp(item)}</time></div><span className={`update-kind ${item.type === 'Risk' ? 'update-risk' : ''}`}>{item.type || 'Status'}</span></header>
+    {item.editedAt && <p className="update-edited">Edited by {displayName(item.editorName || 'Unknown editor')} · <time dateTime={item.editedAt}>{updateTimestamp({ postedAt: item.editedAt })}</time></p>}
+    {item.taskId && (task ? <button type="button" className="update-task-reference" onClick={() => onTask(task)}><Icon name="task" size={14} />{task.title}</button> : <span className="update-task-reference">{item.taskTitle || 'Referenced task'} · Task removed</span>)}
+    {item.legacyRisk && <small className="update-legacy">Previously recorded risk · {item.severity} · {item.riskStatus}</small>}
+    {mode === 'edit' ? <form className="update-editor" onSubmit={apply} noValidate aria-label="Edit project update">
+      <label className="field">Task reference <small>Optional</small><select aria-label="Edit task reference" disabled={busy} value={draft.taskId} onChange={event => setDraft(value => ({ ...value, taskId: event.target.value }))}><option value="">Project-wide update</option>{item.taskId && !task && <option value={item.taskId}>{item.taskTitle || 'Referenced task'} · Task removed</option>}{tasks.map(row => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
+      <label className="field">Update<textarea aria-label="Edit update" autoFocus rows={4} disabled={busy} value={draft.summary} onChange={event => setDraft(value => ({ ...value, summary: event.target.value }))} /></label>
+      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Cancel edit</button><button type="button" className="button primary" disabled={busy || !draft.summary.trim()} onClick={apply}>{busy ? 'Saving…' : 'Save changes'}</button></div>
+    </form> : <p className="update-summary">{item.summary}</p>}
+    {!item.legacyRisk && <UpdateDocuments item={item} store={store} revision={revision} canPost={canPost && !mode} onRefresh={onRefresh} />}
+    {canEdit && !mode && <div className="update-actions update-actions-rest"><button type="button" className="text-button" disabled={!item.version} onClick={() => begin('edit')}>Edit update</button><button type="button" className="text-button update-delete" disabled={!item.version} onClick={() => begin('delete')}>Delete update</button>{!item.version && <small>Reload the tracker to manage this update.</small>}</div>}
+    {mode === 'delete' && <div className="update-delete-confirm" role="group" aria-label="Delete this update?">
+      <strong>Delete this update?</strong><p>This removes this update and its attached documents from the project history. Other updates stay in place.</p>
+      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Keep update</button><button type="button" className="button danger" disabled={busy} onClick={apply}>{busy ? 'Deleting…' : 'Confirm delete'}</button></div>
+    </div>}
+    {error && <p className="inline-error" role="alert">{error}</p>}
+  </article>;
+}
+
+export function ProjectUpdates({ project, tasks, updates, risks = [], store, canPost, onPost, onEdit, onDelete, onTask, onRefresh }) {
   const [summary, setSummary] = useState(''), [taskId, setTaskId] = useState('');
   const [files, setFiles] = useState([]), [posted, setPosted] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [revision, setRevision] = useState(0);
   const active = useRef(false);
@@ -75,6 +112,7 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
         catch (err) { failed.push(file); errors.push(`${file.name}: ${err.message}`); }
       }
       setRevision(value => value + 1); setFiles(failed);
+      await onRefresh?.();
       if (failed.length) setError(`Update posted. ${failed.length} document(s) could not upload. Retry only the remaining documents, or finish and attach them later.\n${errors.join('\n')}`);
       else { reset(); setMessage(files.length ? 'Update posted with all selected documents.' : 'Update posted.'); }
     } catch (err) { setError(err.message); }
@@ -93,13 +131,7 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
     {error && <p className="inline-error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <section className="update-history" aria-label="Project update history">
       {!history.length && <div className="empty-state"><h3>No updates yet</h3><p>Progress, decisions and risks will appear here with their author and date.</p></div>}
-      {history.map(item => { const task = tasks.find(row => row.id === item.taskId); return <article className="update-card" key={item.id}>
-        <header><span className="update-avatar" aria-hidden="true">{(displayName(item.authorName || '?')).slice(0, 1).toUpperCase()}</span><div><strong>{item.legacyRisk ? 'Risk owner · ' : ''}{displayName(item.authorName || 'Author not recorded')}</strong><time dateTime={item.postedAt || item.entryDate || undefined}>{updateTimestamp(item)}</time></div><span className={`update-kind ${item.type === 'Risk' ? 'update-risk' : ''}`}>{item.type || 'Status'}</span></header>
-        {item.taskId && (task ? <button type="button" className="update-task-reference" onClick={() => onTask(task)}><Icon name="task" size={14} />{task.title}</button> : <span className="update-task-reference">{item.taskTitle || 'Referenced task'} · Task removed</span>)}
-        {item.legacyRisk && <small className="update-legacy">Previously recorded risk · {item.severity} · {item.riskStatus}</small>}
-        <p className="update-summary">{item.summary}</p>
-        {!item.legacyRisk && <UpdateDocuments item={item} store={store} revision={revision} canPost={canPost} />}
-      </article>; })}
+      {history.map(item => <UpdateCard key={item.id} item={item} tasks={tasks} store={store} revision={revision} canPost={canPost} onEdit={onEdit} onDelete={onDelete} onTask={onTask} onRefresh={onRefresh} />)}
     </section>
   </div>;
 }

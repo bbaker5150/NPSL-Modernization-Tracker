@@ -1,4 +1,5 @@
 import { TrackerLists, legacyListTitle, listTitleAliases } from './trackerLists';
+import { submitPrivateFeedback } from './feedbackSubmission';
 import { feedbackSetup } from './feedbackSetup';
 import { ensureFeedbackStatus, FEEDBACK_STATUSES } from './feedbackFields';
 // Feedback is deliberately separate from shared tracker data and exports.
@@ -10,6 +11,7 @@ export function validateFeedback(input) {
   if (!['Bug', 'Feature'].includes(input.kind)) throw new Error('Choose a bug report or feature request.');
   if (!title || title.length > 200) throw new Error('Enter a summary of 1–200 characters.');
   if (!details || details.length > 10000) throw new Error('Enter details of 1–10,000 characters.');
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/.test(title + details)) throw new Error('Remove unsupported control characters from your feedback.');
   return { kind: input.kind, title, details };
 }
 export function createFeedback(store) {
@@ -47,16 +49,8 @@ export function createFeedback(store) {
     async submit(input) {
       const value = validateFeedback(input);
       if (local) { preview.unshift({ ...value, status: 'New', etag: '1', id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
-      // No read-before-write or return-body display: submitters have Add Items only.
-      // Add-only users cannot resolve the list catalog. Try the current display
-      // title first, falling back only after a definitive 404 (never a timeout).
       const aliases = listTitleAliases(store.prefix, 'feedback');
-      for (const name of [aliases[1], aliases[0], ...aliases.slice(2)]) {
-        const path = `/_api/web/lists/getbytitle('${encodeURIComponent(name.replace(/'/g, "''"))}')`;
-        try { await store.post(`${path}/items`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details } }); return; }
-        catch (error) { if (error.status !== 404) throw error; }
-      }
-      throw new Error('Feedback storage is missing or unavailable. A site owner must open feedback and complete Set up private feedback.');
+      await submitPrivateFeedback(store, [aliases[1], aliases[0], ...aliases.slice(2)], value);
     },
     async update(id, input, etag) {
       if (!await isOwner()) throw new Error('Only site owners can update submissions.');

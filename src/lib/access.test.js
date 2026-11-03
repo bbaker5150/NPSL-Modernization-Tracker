@@ -195,3 +195,40 @@ it('checks update attachment scope and permissions independently of task documen
   await store.downloadUpdateAttachment('u2', 'decision.txt');
   expect(raw.downloadUpdateAttachment).toHaveBeenCalledWith(state.updates[0], 'decision.txt');
 });
+
+function updateFixture(role) {
+  const f = fixture(role);
+  f.state.updates.push({ id: 'u1', spId: 21, projectKey: 'own', summary: 'Original', authorName: 'Original author', authorKey: 'original', postedAt: '2026-11-01T12:00:00Z', version: '"3"' });
+  f.state.updates[0].version = '"1"';
+  f.raw.editUpdate = vi.fn(async row => row); f.raw.deleteUpdate = vi.fn();
+  return { ...f, update: f.state.updates[1] };
+}
+it.each(['Manager', 'Project Engineer'])('allows %s to edit one update, preserving identity and stamping the editor', async role => {
+  const { store, raw, update } = updateFixture(role);
+  const saved = await store.editUpdate({ ...update, summary: ' Revised ', taskId: 't1', projectKey: 'other', spId: 99, authorName: 'Forged', postedAt: '1900-01-01', editorName: 'Forged' });
+  expect(saved).toMatchObject({ summary: 'Revised', taskTitle: 'Review', projectKey: 'own', spId: 21, authorName: 'Original author', postedAt: update.postedAt, editorName: user.email, editorKey: user.loginName });
+  expect(saved.editedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  await store.deleteUpdate({ ...update, spId: 99, projectKey: 'other' });
+  expect(raw.deleteUpdate).toHaveBeenCalledExactlyOnceWith(update);
+});
+it('rechecks roles, ownership, task scope and persisted versions for every update change', async () => {
+  const { store, state, raw, update } = updateFixture('Project Engineer');
+  await expect(store.editUpdate({ ...update, taskId: 't2' })).rejects.toThrow('this project');
+  await expect(store.editUpdate({ ...update, summary: ' ' })).rejects.toThrow('Enter an update');
+  for (const method of ['editUpdate', 'deleteUpdate']) {
+    for (const version of [undefined, '*', '"2"']) await expect(store[method]({ ...update, version })).rejects.toThrow('changed');
+    await expect(store[method]({ ...state.updates[0], projectKey: 'own' })).rejects.toThrow('Only managers');
+    await expect(store[method]({ ...update, id: 'missing' })).rejects.toThrow('existing project update');
+  }
+  state.users = directory('Viewer');
+  await expect(store.editUpdate(update)).rejects.toThrow('Only managers');
+  await expect(store.deleteUpdate(update)).rejects.toThrow('Only managers');
+  expect(raw.editUpdate).not.toHaveBeenCalled(); expect(raw.deleteUpdate).not.toHaveBeenCalled();
+});
+it('retains an unchanged historical task reference and prevents saveUpdate bypassing edit checks', async () => {
+  const { store, update } = updateFixture('Manager');
+  Object.assign(update, { taskId: 'removed', taskTitle: 'Historical task' });
+  expect(await store.editUpdate(update)).toMatchObject({ taskId: 'removed', taskTitle: 'Historical task' });
+  expect(await store.editUpdate({ ...update, taskId: '' })).toMatchObject({ taskId: '', taskTitle: '' });
+  await expect(store.saveUpdate(update)).rejects.toThrow('Use Edit update');
+});

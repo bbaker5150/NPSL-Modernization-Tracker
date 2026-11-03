@@ -816,3 +816,13 @@ button.update-task-reference { cursor: pointer; }
 .update-documents small { display: block; }
 .update-pending-files li { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .update-composer-footer { align-items: stretch; flex-direction: column; } .update-composer, .update-card { padding: 15px; } }
+
+.update-editor { display: grid; gap: 14px; margin-top: 18px; }
+.update-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; }
+.update-actions-rest { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
+.update-actions-rest small, .update-edited { color: var(--muted); font-size: 11px; }
+.update-edited { margin: 10px 0 0 44px; }
+.update-delete { color: var(--rose); }
+.update-delete-confirm .button.danger { color: var(--rose); background: var(--rose-soft); border-color: var(--rose); }
+.update-delete-confirm { padding: 16px; margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.update-delete-confirm p { color: var(--muted); font-size: 12px; line-height: 1.6; }

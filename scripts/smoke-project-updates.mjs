@@ -15,6 +15,7 @@ async function boot() {
   await page.reload();
   await page.locator('#app').evaluate((el, html) => { el.srcdoc = html; }, html);
   await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
+  await app.locator('body').evaluate(el => el.ownerDocument.addEventListener('click', event => { if (event.target.closest('.project-updates button')) event.preventDefault(); }, true));
 }
 async function openUpdates() {
   await app.locator('.project-table-row:not(.table-header)').click();
@@ -44,7 +45,6 @@ try {
   await app.locator('.sidebar nav').getByRole('button', { name: 'Portfolio', exact: true }).click();
   await openUpdates();
   await app.getByText(/Legacy supply risk/).waitFor();
-  await app.locator('body').evaluate(el => el.ownerDocument.addEventListener('click', event => { if (event.target.closest('.update-composer button')) event.preventDefault(); }, true));
   await app.getByRole('combobox', { name: 'Task reference', exact: true }).selectOption('t1');
   await app.getByRole('textbox', { name: 'Your update', exact: true }).fill('Reviewed the engineering package. Team 2 will coordinate the next handoff.');
   await app.getByLabel('Update documents', { exact: true }).setInputFiles({ name: 'update-only.txt', mimeType: 'text/plain', buffer: Buffer.from('Engineering decision document') });
@@ -91,8 +91,47 @@ try {
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks.find(row => row.id === 't1'));
   assert.equal(saved.assignedDate, '2026-10-01'); assert.equal(saved.dueDate, '2027-06-01'); assert.equal(saved.deferredDate, '2027-07-01');
   assert.equal(saved.subAssignment, 'Chief Engineer Office');
+  const originalCard = app.locator('.update-card').filter({ hasText: 'Reviewed the engineering package.' });
+  const originalTime = await originalCard.locator('header time').getAttribute('datetime');
+  await originalCard.getByRole('button', { name: 'Edit update', exact: true }).click();
+  await app.getByRole('textbox', { name: 'Edit update', exact: true }).fill('Discarded edit');
+  await app.getByRole('button', { name: 'Cancel edit', exact: true }).click();
+  await originalCard.getByRole('button', { name: 'Edit update', exact: true }).click();
+  await app.getByRole('textbox', { name: 'Edit update', exact: true }).fill('Revised engineering decision. Package accepted by the project owner.');
+  await app.getByRole('combobox', { name: 'Edit task reference', exact: true }).selectOption('');
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1050 });
+    await app.locator('.update-editor').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-artifacts/update-editor-${width}.png` });
+    assert.ok(await app.locator('.project-updates').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  }
+  await app.getByRole('button', { name: 'Save changes', exact: true }).click();
+  const revised = app.locator('.update-card').filter({ hasText: 'Revised engineering decision.' });
+  await revised.getByText(/Edited by Local Engineer/).waitFor();
+  assert.equal(await revised.locator('header strong').innerText(), 'Local Engineer');
+  assert.equal(await revised.locator('header time').getAttribute('datetime'), originalTime);
+  assert.equal(await revised.locator('.update-task-reference').count(), 0);
+  await revised.getByRole('button', { name: 'update-only.txt', exact: true }).waitFor();
+  await revised.getByRole('button', { name: 'Delete update', exact: true }).click();
+  await revised.getByRole('button', { name: 'Keep update', exact: true }).click();
+  await boot(); await openUpdates();
+  await revised.getByText(/Edited by Local Engineer/).waitFor();
+  await revised.getByRole('button', { name: 'Delete update', exact: true }).click();
+  await app.locator('.update-delete-confirm').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'test-artifacts/update-delete-confirm-mobile.png' });
+  await revised.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await revised.waitFor({ state: 'detached' });
+  await boot(); await openUpdates();
+  assert.equal(await app.locator('.update-card').count(), 2); // Other update + historical risk.
+  assert.equal(await app.getByRole('button', { name: 'update-only.txt', exact: true }).count(), 0);
+  await app.getByText('Project-wide decision with no task required.', { exact: true }).waitFor();
+  await page.evaluate(() => { const key = 'modernization-project-tracker:v2', data = JSON.parse(localStorage.getItem(key)); data.users[0].role = 'Viewer'; localStorage.setItem(key, JSON.stringify(data)); });
+  await boot(); await openUpdates();
+  assert.equal(await app.getByRole('button', { name: 'Edit update', exact: true }).count(), 0);
+  assert.equal(await app.getByRole('button', { name: 'Delete update', exact: true }).count(), 0);
+
   assert.deepEqual(errors, []);
-  console.log('Project updates smoke passed: METCAL rename/filter/subassignment, engineer date restrictions with editable deferrals, no Risks tab, optional task links, update-only attachments/downloads, author/timestamps, persistence, desktop/mobile themes.');
+  console.log('Project updates smoke passed: METCAL rename/filter/subassignment, engineer date restrictions with editable deferrals, no Risks tab, optional task links, update-only attachments/downloads, author/timestamps, per-update edits/deletes with author preservation, cancel/save/reload, Viewer restrictions, persistence, desktop/mobile themes.');
 } catch (err) {
   await page.screenshot({ path: 'test-artifacts/project-updates-failure.png' }).catch(() => {});
   throw err;

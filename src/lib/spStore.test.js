@@ -341,3 +341,30 @@ it('uploads only to the Updates list and refuses duplicate update filenames', as
   await expect(store.addUpdateAttachment({ id: 'u', spId: 42 }, file)).rejects.toThrow('already attached');
   expect(store.post).toHaveBeenCalledTimes(1);
 });
+
+it('loads update versions and audit metadata and uses conditional writes for editing/deletion', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.get = vi.fn(async path => ({ value: path.includes('ModernizationUpdates') ? [{ Id: 7, RecordId: 'u', Summary: 'Saved', 'odata.etag': '"3"', EditedAt: '2026-11-03T18:00:00Z', EditorName: 'Editor' }] : [] }));
+  store.post = vi.fn();
+  const row = (await store.load()).updates[0];
+  expect(row).toMatchObject({ version: '"3"', editedAt: '2026-11-03T18:00:00Z', editorName: 'Editor' });
+  expect(store.get.mock.calls.find(([path]) => path.includes('ModernizationUpdates'))[1]).toEqual({ Accept: 'application/json;odata=minimalmetadata' });
+  expect(await store.editUpdate({ ...row, summary: 'Edited' })).toMatchObject({ summary: 'Edited', version: null });
+  expect(store.post).toHaveBeenLastCalledWith(expect.stringContaining('/items(7)'), expect.objectContaining({ headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '"3"' }, body: { Summary: 'Edited', TaskId: '', TaskTitle: '', EditedAt: row.editedAt, EditorName: 'Editor', EditorKey: '' } }));
+  await store.deleteUpdate(row);
+  expect(store.post).toHaveBeenLastCalledWith(expect.stringContaining('/items(7)'), { headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '"3"' }, body: { Archived: true } });
+  expect(store.post.mock.calls.every(([, { body }]) => !Object.hasOwn(body, 'AuthorName'))).toBe(true);
+});
+it.each([412, 404, 403, 500])('does not retry a rejected update mutation (%s)', async status => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.post = vi.fn().mockRejectedValue(Object.assign(new Error('Server error'), { status }));
+  await expect(store.editUpdate({ spId: 7, version: '"3"', summary: 'Draft' })).rejects.toThrow();
+  expect(store.post).toHaveBeenCalledTimes(1);
+});
+it('follows minimal-metadata update pages and filters archived updates', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.get = vi.fn().mockResolvedValueOnce({ value: [{ Id: 1, 'odata.etag': '"1"' }], 'odata.nextLink': `${store.webUrl}/_api/next` }).mockResolvedValueOnce({ value: [{ Id: 2, Archived: true }, { Id: 3, 'odata.etag': '"2"' }] });
+  const rows = await store.listItems('updates', ['Archived'], row => row);
+  expect(rows.map(row => row.Id)).toEqual([1, 3]);
+  expect(store.get).toHaveBeenLastCalledWith('/_api/next', { Accept: 'application/json;odata=minimalmetadata' });
+});

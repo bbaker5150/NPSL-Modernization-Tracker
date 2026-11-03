@@ -43,7 +43,7 @@ export function Feedback({ store }) {
     catch (caught) { setError(caught.message); return; }
     active.current = true; setBusy(true); setError('');
     try { await api.submit(report); setSent(true); setTitle(''); setDetails(''); }
-    catch (caught) { setError(`${caught.message} Your draft is still here. If access is denied or the list is missing, ask a site owner to configure feedback. If the request timed out, check with an owner before retrying.`); }
+    catch (caught) { setError(`${caught.message} Your draft is still here.`); }
     finally { active.current = false; setBusy(false); }
   }
   const setupBlocked = owner && (!setupState?.ready || !!setupError);
