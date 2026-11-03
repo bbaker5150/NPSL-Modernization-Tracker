@@ -421,7 +421,7 @@ export function App() {
     try {
       const [currentUser, readiness] = await Promise.all([repo.store.currentUser(), repo.store.readiness()]);
       setUser(currentUser);
-      if (!readiness.ready) await repo.store.provision();
+      if (!readiness.ready) await repo.store.provision({ allowCompatibleRead: true });
       await repo.store.registerCurrentUser();
       const loaded = await repo.store.load();
       setData(loaded);

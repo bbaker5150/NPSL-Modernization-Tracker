@@ -104,3 +104,15 @@ it.each([false, true])('keeps legacy risks read-only and hides edit actions for 
     expect(button('Edit update')).toBeUndefined(); expect(button('Delete update')).toBeUndefined();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+it('explains a pending editing upgrade without blocking history or individual deletion', async () => {
+  const store = { updateEditingAvailable: false, listUpdateAttachments: async () => [] };
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<ProjectUpdates project={{}} tasks={[]} updates={[{ id: 'u', version: '1', summary: 'Existing history' }]} store={store} canPost />));
+    expect(document.body.textContent).toContain('Existing history');
+    expect(button('Edit update').disabled).toBe(true);
+    expect(button('Delete update').disabled).toBe(false);
+    expect(document.body.textContent).toContain('a site owner needs to open the latest tracker');
+    expect(document.querySelector('[aria-label="Your update"]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
