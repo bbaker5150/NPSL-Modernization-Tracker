@@ -143,7 +143,7 @@ describe('application shell', () => {
     expect(writes).toHaveBeenCalledTimes(5);
   });
 
-  it('resolves an engineer email to a verified name and saves the canonical identity', async () => {
+  it('assigns a verified SharePoint user from partial-name suggestions when editing a project', async () => {
     const raw = createRepository().store;
     await raw.saveUser({ id: 'hank', title: 'Chi, Hank CIV', email: 'hank@example.test', loginName: 'claims|hank@example.test', role: 'Project Engineer' });
     await raw.saveProject({ id: 'owner-edit', projectKey: 'owner-edit', title: 'Owner selection', ownerName: 'Old Owner', ownerEmail: 'old@example.test', ownerKey: 'old' });
@@ -152,19 +152,105 @@ describe('application shell', () => {
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Edit project').click());
     expect(document.querySelector('.modal').textContent).not.toContain('Assign project owner');
-    const owner = document.querySelector('.modal input[type="email"]');
+    const label = [...document.querySelectorAll('.modal label')].find(row => row.textContent === 'Project Engineer’s email');
+    const owner = label.control;
     const save = () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Save project');
     await act(async () => changeValue(owner, 'Hank'));
     expect(save().disabled).toBe(true);
     expect(document.querySelector('.modal output').textContent).not.toContain('Old Owner');
-    await act(async () => changeValue(owner, 'hank@example.test'));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 360)); });
+    const option = document.querySelector('.modal [role="option"]');
+    expect(option.textContent).toContain('Chi, Hank CIV');
+    expect(option.textContent).toContain('hank@example.test');
+    expect(save().disabled).toBe(true);
+    await act(async () => option.click());
     expect(document.querySelector('.modal output').textContent).toBe('Chi, Hank CIV');
     expect(owner.value).toBe('hank@example.test');
     expect(save().disabled).toBe(false);
     expect(document.querySelector('.owner-edit-option')).toBeNull();
     await act(async () => save().click());
     expect((await createRepository().store.load()).projects[0]).toMatchObject({ ownerKey: 'claims|hank@example.test', ownerEmail: 'hank@example.test', ownerName: 'Chi, Hank CIV' });
+  });
+
+  it('searches partial email addresses and resolves only the keyboard-selected account before saving', async () => {
+    vi.useFakeTimers();
+    try {
+      const first = { title: 'Alex River', loginName: 'claims|one@example.test', email: 'alex.river@example.test' };
+      const second = { title: 'Alex Rivers', loginName: 'claims|two@example.test', email: 'alex.rivers@example.test' };
+      let confirm;
+      const store = {
+        searchPeople: vi.fn().mockResolvedValue([first, second]),
+        resolvePerson: vi.fn(() => new Promise(resolve => { confirm = resolve; })),
+      };
+      const onSave = vi.fn();
+      const onClose = vi.fn();
+      await act(async () => {
+        root = createRoot(document.getElementById('root'));
+        root.render(<ProjectEditor manager store={store} user={{}} onSave={onSave} onClose={onClose} />);
+      });
+      const email = document.querySelector('#project-engineer-email');
+      const options = () => [...document.querySelectorAll('.modal [role="option"]')];
+      const key = key => act(async () => email.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+      const save = [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save project');
+      await act(async () => {
+        email.focus();
+        changeValue(email, 'a');
+        changeValue(document.querySelector('.modal .field input'), 'New assignment');
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      expect(store.searchPeople).not.toHaveBeenCalled();
+      await act(async () => changeValue(email, 'alex.riv'));
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      expect(store.searchPeople).toHaveBeenCalledWith('alex.riv');
+      expect(options().map(option => option.textContent)).toEqual([expect.stringContaining(first.email), expect.stringContaining(second.email)]);
+      await key('Escape');
+      expect(options()).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(save.disabled).toBe(true);
+      await act(async () => changeValue(email, 'alex.rive'));
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      await key('ArrowDown');
+      await key('ArrowDown');
+      await key('Enter');
+      expect(store.resolvePerson).toHaveBeenCalledExactlyOnceWith(second.loginName);
+      expect(save.disabled).toBe(true);
+      const confirmed = { ...second, title: 'Rivers, Alex' };
+      await act(async () => confirm(confirmed));
+      expect(document.querySelector('.modal output').textContent).toBe(confirmed.title);
+      expect(email.value).toBe(confirmed.email);
+      expect(options()).toHaveLength(0);
+      await act(async () => save.click());
+      expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ownerName: confirmed.title, ownerEmail: confirmed.email, ownerKey: confirmed.loginName }), confirmed.loginName);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows suggestions for a partially typed domain and rejects a different resolved login with the same email', async () => {
+    vi.useFakeTimers();
+    try {
+      const suggestion = { title: 'River Smith', email: 'river@example.com', loginName: 'claims|river-primary' };
+      const store = {
+        searchPeople: vi.fn().mockResolvedValue([suggestion]),
+        resolvePerson: vi.fn().mockResolvedValue({ ...suggestion, loginName: 'claims|river-alternate' }),
+      };
+      const onSave = vi.fn();
+      await act(async () => {
+        root = createRoot(document.getElementById('root'));
+        root.render(<ProjectEditor manager store={store} user={{}} project={{ id: 'p', title: 'Existing project' }} onClose={() => {}} onSave={onSave} />);
+      });
+      const email = document.querySelector('#project-engineer-email');
+      await act(async () => { email.focus(); changeValue(email, 'river@example.co'); });
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      const option = document.querySelector('.modal [role="option"]');
+      expect(option.textContent).toContain(suggestion.email);
+      expect(store.resolvePerson).not.toHaveBeenCalled();
+      await act(async () => option.click());
+      expect(store.resolvePerson).toHaveBeenCalledExactlyOnceWith(suggestion.loginName);
+      expect(document.querySelector('.modal [role="alert"]').textContent).toContain('does not match');
+      const save = [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save project');
+      expect(save.disabled).toBe(true);
+      await act(async () => save.click());
+      expect(onSave).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
 
   it('discards a stale engineer lookup and retries a new project with the same identity and IDs', async () => {

@@ -1,6 +1,6 @@
 import { ProjectUpdates } from './components/ProjectUpdates';
 import { Feedback } from './components/Feedback';
-import { SavedUserPicker } from './components/SavedUserPicker';
+import { PeopleCombobox, SavedUserPicker } from './components/SavedUserPicker';
 import { AutoSizeTextarea } from './components/AutoSizeTextarea';
 import { Attention, attentionRows } from './components/Attention';
 import { validateAttachment } from './lib/taskAttachments';
@@ -225,15 +225,21 @@ function Modal({ title, subtitle, onClose, children, actions, wide = false }) {
 const PROJECT_STATUSES = ['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'];
 const isEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-async function findEngineerByEmail(store, email) {
-  const matchesEmail = person => isOwnedByUser({ ownerEmail: email }, person);
-  const matches = (await store.searchPeople(email)).filter(matchesEmail);
-  if (matches.length > 1) throw new Error('More than one account matches this email. Enter the engineer’s unique sign-in email.');
-  const person = await store.resolvePerson(matches[0]?.loginName || email);
-  if (!person.title || !person.loginName || !matchesEmail(person)) {
-    throw new Error('The resolved SharePoint account does not match this email. Check the address and try again.');
+function engineerEmail(person) {
+  const signIn = person?.loginName?.split('|').pop();
+  return person?.email || (isEmail(signIn) ? signIn : '');
+}
+
+async function verifyEngineer(store, candidate, typedEmail) {
+  const person = await store.resolvePerson(candidate?.loginName || typedEmail);
+  if (!person?.title || !person.loginName ||
+      (candidate && userIdentityKey(person) !== userIdentityKey(candidate)) ||
+      (typedEmail && !isOwnedByUser({ ownerEmail: typedEmail }, person))) {
+    throw new Error('The resolved SharePoint account does not match the selection or email. Check the address and try again.');
   }
-  return person;
+  const email = engineerEmail(person) || candidate?.email;
+  if (!isEmail(email)) throw new Error('SharePoint did not return an email address for this account. Choose another account or check its directory entry.');
+  return { ...person, email };
 }
 
 export function ProjectEditor({ project, user, store, manager, displayedStage, onClose, onSave }) {
@@ -248,18 +254,37 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
   const [saveError, setSaveError] = useState('');
   const set = key => event => setDraft(row => ({ ...row, [key]: event.target.value }));
   useEffect(() => {
-    if (assignment?.state !== 'pending') return;
+    if (assignment?.state !== 'searching' && assignment?.state !== 'verifying') return;
     let active = true;
-    const timer = setTimeout(async () => {
-      let result;
-      try {
-        const person = await findEngineerByEmail(store, assignment.email.trim());
-        result = { state: 'resolved', email: person.email || assignment.email.trim(), person };
-      } catch (error) {
-        result = { ...assignment, state: 'error', error: error.message };
-      }
+    const query = assignment.email.trim();
+    const finish = result => {
       if (active) setAssignment(current => current === assignment ? result : current);
-    }, 300);
+    };
+    async function lookup() {
+      let matches = [];
+      try {
+        let candidate = assignment.candidate;
+        if (!candidate) {
+          matches = await store.searchPeople(query);
+          if (!active) return;
+          const exact = matches.filter(person => isOwnedByUser({ ownerEmail: query }, person));
+          // A partially typed domain can already have valid email syntax.
+          if (!isEmail(query) || (!exact.length && matches.length)) {
+            finish({ state: 'choose', email: assignment.email, matches });
+            return;
+          }
+          if (exact.length > 1) throw new Error('More than one account matches this email. Select the intended account or enter its unique sign-in email.');
+          candidate = exact[0];
+        }
+        const person = await verifyEngineer(store, candidate, assignment.candidate ? '' : query);
+        finish({ state: 'resolved', email: person.email, person });
+      } catch (error) {
+        finish({ state: 'error', email: assignment.email, matches, error: error.message });
+      }
+    }
+    let timer;
+    if (assignment.candidate) lookup();
+    else timer = setTimeout(lookup, 300);
     return () => { active = false; clearTimeout(timer); };
   }, [assignment, store]);
 
@@ -267,11 +292,11 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
     setSaveError('');
     const email = value.trim();
     if (!email) setAssignment({ state: 'empty', email: '' });
-    else if (isEmail(email)) setAssignment({ state: 'pending', email: value });
+    else if (email.length >= 2) setAssignment({ state: 'searching', email: value });
     else setAssignment({ state: 'typing', email: value });
   }
 
-  const unresolved = ['typing', 'pending', 'error'].includes(assignment?.state);
+  const unresolved = assignment && assignment.state !== 'empty' && assignment.state !== 'resolved';
   const automaticStage = project && !project.currentStageKey && workflowData.phases.find(phase => phase.key === displayedStage);
   const legacyLogin = (draft.ownerKey || '').split('|').pop();
   const displayedEmail = assignment?.email ?? (draft.ownerEmail || (isEmail(legacyLogin) ? legacyLogin : ''));
@@ -301,13 +326,20 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
       <Field label="Project name"><input disabled={!manager || saving} value={draft.title || ''} onChange={set('title')} /></Field>
       <Field label="Measurement area"><input disabled={!manager || saving} value={draft.measurementArea || ''} onChange={set('measurementArea')} /></Field>
       <div className="field">
-        <label htmlFor="project-engineer-email">Engineer email</label>
-        <div className={manager ? 'input-action' : ''}>
-          <input id="project-engineer-email" type="email" autoComplete="off" placeholder="Unassigned" disabled={!manager || saving} value={displayedEmail} onChange={event => changeEmail(event.target.value)} />
-          {manager && <button type="button" disabled={saving} onClick={() => setAssignment({ state: 'resolved', person: user, email: user.email || '' })}>Assign me</button>}
-        </div>
-        {assignment?.state === 'typing' && <small>Enter the complete SharePoint email address.</small>}
-        {assignment?.state === 'pending' && <small role="status">Looking up engineer…</small>}
+        <label htmlFor="project-engineer-email">Project Engineer’s email</label>
+        <PeopleCombobox id="project-engineer-email" value={displayedEmail} disabled={!manager || saving}
+          placeholder={manager ? 'Search by name or email' : 'Unassigned'} listLabel="Matching SharePoint users"
+          matches={assignment?.matches || []} emptyMessage={assignment?.state === 'choose' ? 'No people found. Try another name or email.' : ''}
+          onQuery={changeEmail} onSelect={candidate => {
+            setSaveError('');
+            setAssignment({ state: 'verifying', candidate, email: engineerEmail(candidate) || assignment.email });
+          }}
+          renderOption={person => <><strong>{person.title}</strong><small>{engineerEmail(person) || person.loginName}</small>{person.detail && <small>{person.detail}</small>}</>}
+          action={manager && <button type="button" disabled={saving} onClick={() => setAssignment({ state: 'resolved', person: user, email: engineerEmail(user) })}>Assign me</button>}
+        />
+        {assignment?.state === 'typing' && <small>Enter at least two characters.</small>}
+        {assignment?.state === 'searching' && <small role="status">Searching SharePoint…</small>}
+        {assignment?.state === 'verifying' && <small role="status">Verifying account…</small>}
         {assignment?.state === 'error' && <small className="inline-error" role="alert">{assignment.error}</small>}
       </div>
       <Field label="Project engineer"><output aria-label="Project engineer">{displayedName || (unresolved ? 'Awaiting verified email' : 'Unassigned')}</output></Field>

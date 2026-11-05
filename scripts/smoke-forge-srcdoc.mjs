@@ -122,13 +122,15 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
-  await frame.getByLabel('Engineer email', { exact: true }).fill('sme@example.test');
+  const engineerEmail = frame.getByLabel('Project Engineer’s email', { exact: true });
+  await engineerEmail.fill('sme@');
+  await frame.getByRole('option', { name: /SME Test User.*sme@example\.test/i }).click();
   await frame.locator('.modal output[aria-label="Project engineer"]').filter({ hasText: 'SME Test User' }).waitFor();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
-      const layout = await frame.getByLabel('Engineer email', { exact: true }).evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
+      const layout = await engineerEmail.evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
       if (!layout || await frame.locator('.modal input[type="checkbox"]').count()) errors.push('Project engineer field is cramped or retired checkbox remains');
     }
   }
