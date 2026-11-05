@@ -73,4 +73,4 @@ foreach ($group in $groups) {
   $list.RoleAssignments.Add($group, $binding) | Out-Null
 }
 $ctx.ExecuteQuery()
-Write-Host "Configured $title. Verify POST succeeds and GET is denied with a non-owner account before releasing the feature."
+Write-Host "Configured $title. Open the Tracker feedback dialog as a site owner and select Enable manager history access. Test submission as a Viewer and history editing as a Tracker Manager."

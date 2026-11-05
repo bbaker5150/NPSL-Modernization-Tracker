@@ -170,8 +170,12 @@ function fromTask(item) {
 
 const fromUser = (item) => ({ spId: item.Id, id: item.RecordId, title: item.Title, loginName: item.LoginKey, email: item.Email || '', role: item.AppRole || 'User' });
 
-const fromUpdate = (item) => ({ version: item['odata.etag'] || item['@odata.etag'] || item.__metadata?.etag, editedAt: item.EditedAt || '', editorName: item.EditorName || '', editorKey: item.EditorKey || '', taskId: item.TaskId || '', taskTitle: item.TaskTitle || '', postedAt: item.PostedAt || '', spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
-const fromRisk = (item) => ({ spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
+function itemVersion(item) {
+  const tag = item['odata.etag'] || item['@odata.etag'] || item.__metadata?.etag;
+  return typeof tag === 'string' && tag.trim() && tag.trim() !== '*' ? tag : undefined;
+}
+const fromUpdate = (item) => ({ version: itemVersion(item), editedAt: item.EditedAt || '', editorName: item.EditorName || '', editorKey: item.EditorKey || '', taskId: item.TaskId || '', taskTitle: item.TaskTitle || '', postedAt: item.PostedAt || '', spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, type: item.UpdateType, summary: item.Summary, entryDate: dateOnly(item.EntryDate), authorName: item.AuthorName, authorEmail: item.AuthorEmail, authorKey: item.AuthorKey || '' });
+const fromRisk = (item) => ({ version: itemVersion(item), spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.RiskTitle || item.Title, severity: item.Severity, probability: item.Probability, mitigation: item.Mitigation || '', ownerName: item.OwnerName || '', ownerKey: item.OwnerKey || '', status: item.RiskStatus || 'Open', dueDate: dateOnly(item.DueDate) });
 const fromAcronym = (item) => ({ spId: item.Id, id: item.RecordId, acronym: item.Acronym || item.Title, term: item.FullTerm || '', definition: item.Definition || '', seedVersion: item.SeedVersion || '' });
 
 export class SharePointStore {
@@ -300,8 +304,24 @@ export class SharePointStore {
     const select = ['Id', 'Title', 'FileSystemObjectType', ...this.availableReadFields(key, fields)].join(',');
     let path = `${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`;
     const rows = [];
+    const versioned = key === 'updates' || key === 'risks';
+    let headers = versioned ? { Accept: 'application/json;odata=minimalmetadata' } : undefined;
+    let verboseUnavailable = false;
     while (path) {
-      const body = await this.get(path, key === 'updates' ? { Accept: 'application/json;odata=minimalmetadata' } : undefined);
+      let body = await this.get(path, headers);
+      const page = body.value || body.d?.results || [];
+      if (!verboseUnavailable && headers?.Accept.endsWith('minimalmetadata') && page.some(row => row.FileSystemObjectType !== 1 && !row.Archived && !itemVersion(row))) {
+        // Some SharePoint hosts omit per-item ETags from minimal metadata.
+        // Use the re-read rows and versions together, including its next link.
+        const verbose = { Accept: 'application/json;odata=verbose' };
+        try {
+          body = await this.get(path, verbose);
+          headers = verbose;
+        } catch {
+          // Keep the authorized read. Only records with a real ETag may change.
+          verboseUnavailable = true;
+        }
+      }
       rows.push(...(body.value || body.d?.results || []));
       const next = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next || '';
       if (!next) path = '';
@@ -326,7 +346,8 @@ export class SharePointStore {
     const directory = normalizeDirectory(users, projects);
     if (this.permissions) {
       const current = await this.currentUser();
-      const { role } = await this.permissions.currentRole(current);
+      const { role, siteOwner } = await this.permissions.currentRole(current);
+      this.sessionSiteOwner = siteOwner;
       const entry = directory.find(row => isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, current));
       if (entry) { entry.role = role; delete entry.roleMigrationPending; }
       else directory.push({ id: `session-${current.id}`, title: current.title, email: current.email, loginName: current.loginName, role, sessionOnly: true });
@@ -448,6 +469,11 @@ export class SharePointStore {
     const settings = await this.get(`${apiFor(this.prefix, 'updates')}?$select=EnableAttachments`);
     if ((settings.d || settings).EnableAttachments === false) throw new Error('A site owner must enable attachments on the Updates list.');
     await this.post(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles/add(FileName='${escapeOData(file.name)}')`, { raw: true, headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() });
+  }
+  async deleteUpdateAttachment(update, name) {
+    const files = await this.listUpdateAttachments(update);
+    if (!files.some(file => file.name === name)) throw new Error('This update document is no longer available.');
+    await this.post(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles('${escapeOData(name)}')`, { headers: { 'X-HTTP-Method': 'DELETE' } });
   }
   async downloadUpdateAttachment(update, name) {
     const file = (await this.listUpdateAttachments(update)).find(item => item.name === name);
@@ -758,23 +784,41 @@ export class SharePointStore {
   }
   async editUpdate(row) {
     if (!this.updateEditingAvailable) throw new Error('A site owner must open the latest tracker to enable update editing. Your draft has been kept.');
-    await this.changeUpdate(row, { Summary: row.summary, TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', EditedAt: row.editedAt, EditorName: row.editorName, EditorKey: row.editorKey });
+    await this.#changeHistoryItem('updates', row, { Summary: row.summary, TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', EditedAt: row.editedAt, EditorName: row.editorName, EditorKey: row.editorKey });
     // Keep the successful content visible if a subsequent reload fails, but
     // require a fresh version before another edit or deletion.
     return { ...row, version: null };
   }
-  async deleteUpdate(row) { await this.changeUpdate(row, { Archived: true }); }
-  async changeUpdate(row, body) {
+  async deleteUpdate(row) { await this.#changeHistoryItem('updates', row, { Archived: true }); }
+  async editRisk(row) {
+    await this.#changeHistoryItem('risks', row, { Title: row.title, RiskTitle: row.title, Mitigation: row.mitigation, Severity: row.severity, RiskStatus: row.status });
+    return { ...row, version: null };
+  }
+  async deleteRisk(row) { await this.#changeHistoryItem('risks', row, { Archived: true }); }
+  async #changeHistoryItem(collection, row, body) {
     if (!Number.isSafeInteger(row.spId) || row.spId <= 0 || !row.version || row.version === '*') throw new Error('Reload the tracker before changing this update.');
-    try { await this.post(`${apiFor(this.prefix, 'updates')}/items(${row.spId})`, { body, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': row.version } }); }
+    try { await this.post(`${apiFor(this.prefix, collection)}/items(${row.spId})`, { body, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': row.version } }); }
     catch (error) {
       if (error.status === 412) throw new Error('This update changed since you opened it. Copy your draft and reload the tracker to review the latest version.');
+      if (error.status === 403) throw new Error(`SharePoint denied this change. Ask a site owner to check this project’s item permissions and the ${displayListTitle(this.prefix, collection)} list’s item-level edit settings. ${error.message}`);
       if (error.status === 404) throw new Error('This update is no longer available. Reload the tracker to refresh.');
       throw error;
     }
   }
   async saveRisk(row) { return row.spId ? (await this.update('risks', row.spId, riskFields(row)), row) : { ...row, spId: await this.create('risks', riskFields(row)) }; }
-  async saveAcronym(row) { return row.spId ? (await this.update('acronyms', row.spId, acronymFields(row)), row) : { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }
+  async saveAcronym(row) {
+    if (row.spId) { await this.update('acronyms', row.spId, acronymFields(row)); return row; }
+    try { return { ...row, spId: await this.create('acronyms', acronymFields(row)) }; }
+    catch (error) {
+      if (error.status !== 403) throw error;
+      const repair = this.scopedAccess ? 'Ask a SharePoint site owner to run Set up glossary access.' : 'Ask a site owner to grant Add Items on the Acronyms list.';
+      throw new Error(`SharePoint denied adding an entry to the Acronyms list. ${repair}`);
+    }
+  }
+  async prepareGlossaryAccess() {
+    if (!this.permissions) throw new Error('Set up glossary access on the Acronyms list in SharePoint.');
+    return this.permissions.prepareGlossaryAccess();
+  }
 
   directoryRows() { return this.listItems('users', CONTAINERS[5].fields.map(field => field.name), fromUser); }
   permissionProjects() { return this.listItems('projects', CONTAINERS[0].fields.map(field => field.name), item => ({ ...fromProject(item), archived: !!item.Archived }), true); }

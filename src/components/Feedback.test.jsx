@@ -14,7 +14,7 @@ it('offers feedback to a viewer, hides inbox, and preserves a failed draft', asy
   try {
     await act(async () => root.render(<Feedback store={store} />));
     await act(async () => document.querySelector('button').click());
-    expect(document.body.textContent).not.toContain('Owner inbox');
+    expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Feedback History')).toBe(false);
     await act(async () => { change(document.querySelector('input[maxlength]'), 'Broken button'); change(document.querySelector('textarea'), 'Clicking it does nothing'); });
     await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Send feedback').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('Denied');
@@ -34,9 +34,9 @@ it('shows the private inbox for owners and renders reports as text', async () =>
     const send = [...document.querySelectorAll('button')].filter(button => button.textContent === 'Send feedback');
     expect(send).toHaveLength(1);
     expect(send[0].closest('footer')).not.toBeNull();
-    expect(send[0].previousElementSibling.textContent).toBe('Owner inbox');
-    expect(document.querySelector('header').textContent).not.toContain('Owner inbox');
-    await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Owner inbox').click());
+    expect(send[0].previousElementSibling.textContent).toBe('Feedback History');
+    expect(document.querySelector('header').textContent).not.toContain('Feedback History');
+    await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Feedback History').click());
     expect(document.body.textContent).toContain('<script>bad</script>'); expect(document.querySelector('script,img')).toBeNull();
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
@@ -48,16 +48,16 @@ it('rechecks signed-in owner access on reopen and explains verification failures
     await act(async () => root.render(<Feedback store={store} />));
     await act(async () => node.querySelector('button').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('could not be verified');
-    expect(document.body.textContent).not.toContain('Owner inbox');
+    expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Feedback History')).toBe(false);
     await act(async () => document.querySelector('[aria-label="Close feedback"]').click());
     store.get.mockImplementation(async path => path.includes('/lists?') ? { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] } : { Low: '4294967295', High: '2147483647', Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] });
     await act(async () => node.querySelector('button').click());
-    expect(document.querySelector('footer').textContent).toContain('Owner inbox');
+    expect(document.querySelector('footer').textContent).toContain('Feedback History');
     expect(document.querySelector('[role="alert"]')).toBeNull();
     await act(async () => document.querySelector('[aria-label="Close feedback"]').click());
     store.get.mockResolvedValue({ Low: '0', High: '0' });
     await act(async () => node.querySelector('button').click());
-    expect(document.body.textContent).not.toContain('Owner inbox');
+    expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Feedback History')).toBe(false);
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
 
@@ -101,9 +101,9 @@ it('hides the inbox navigation inside the inbox and confirms or cancels clearing
     await act(async () => node.querySelector('button').click());
     await act(async () => { change(document.querySelector('input[maxlength]'), 'Review me'); change(document.querySelector('textarea'), 'Details'); });
     await act(async () => button('Send feedback').click());
-    await act(async () => button('Owner inbox').click());
-    expect(button('Owner inbox')).toBeUndefined();
-    expect(document.querySelector('#feedback-title').textContent).toBe('Owner inbox');
+    await act(async () => button('Feedback History').click());
+    expect(button('Feedback History')).toBeUndefined();
+    expect(document.querySelector('#feedback-title').textContent).toBe('Feedback History');
     await act(async () => button('Clear inbox').click());
     expect(document.querySelector('.feedback-clear-confirm').textContent).toContain('all site owners');
     await act(async () => button('Cancel').click());
@@ -114,7 +114,7 @@ it('hides the inbox navigation inside the inbox and confirms or cancels clearing
     expect(document.body.textContent).toContain('1 submission cleared');
     expect(button('Clear inbox').disabled).toBe(true);
     await act(async () => button('Back to feedback').click());
-    expect(button('Owner inbox')).toBeDefined();
+    expect(button('Feedback History')).toBeDefined();
   } finally { await act(async () => root.unmount()); node.remove(); }
 });
 
@@ -132,7 +132,7 @@ it('edits, cancels and deletes individual reports while preserving other submiss
       await act(async () => button('Send feedback').click());
       if (title === 'Keep me') await act(async () => button('Send another').click());
     }
-    await act(async () => button('Owner inbox').click());
+    await act(async () => button('Feedback History').click());
     const selected = () => document.querySelectorAll('article')[0];
     await act(async () => button('Edit', selected()).click());
     await act(async () => change(document.querySelector('input[maxlength]'), 'Discard this'));
@@ -174,7 +174,7 @@ it('keeps the owner edit draft and original record on a failed save', async () =
   try {
     await act(async () => root.render(<Feedback store={store} />));
     await act(async () => node.querySelector('button').click());
-    await act(async () => button('Owner inbox').click());
+    await act(async () => button('Feedback History').click());
     await act(async () => button('Edit').click());
     await act(async () => change(document.querySelector('input[maxlength]'), 'My draft'));
     await act(async () => button('Save changes').click());
@@ -182,5 +182,28 @@ it('keeps the owner edit draft and original record on a failed save', async () =
     expect(document.querySelector('input[maxlength]').value).toBe('My draft');
     expect(document.querySelector('article h3').textContent).toBe('Original report');
     expect(store.post).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); node.remove(); }
+});
+
+it('shows Feedback History and editing controls to a verified manager without deletion or list setup', async () => {
+  const store = { webUrl: 'https://example.test', currentUser: async () => ({}), get: vi.fn(async path => {
+    if (path.includes('effectivebasepermissions')) return { Low: '1' };
+    if (path.includes('currentuser/groups')) return { value: [{ Id: 22, Title: 'Tracker Managers' }] };
+    if (path.includes('associatedownergroup')) return { Id: 10 };
+    if (path.includes('/lists?')) return { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] };
+    if (path.includes('/items?')) return { value: [{ Id: 1, Title: 'History report', FeedbackKind: 'Bug', FeedbackDetails: 'Details', 'odata.etag': '"2"', Created: '2026-10-30T00:00:00Z' }] };
+    throw new Error('Unexpected read ' + path);
+  }) };
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  const button = label => [...document.querySelectorAll('button')].find(button => button.textContent === label);
+  try {
+    await act(async () => root.render(<Feedback store={store} />));
+    await act(async () => node.querySelector('button').click());
+    await act(async () => button('Feedback History').click());
+    expect(document.querySelector('#feedback-title').textContent).toBe('Feedback History');
+    expect(button('Clear inbox')).toBeUndefined(); expect(button('Delete')).toBeUndefined();
+    expect(button('Enable manager history access')).toBeUndefined();
+    await act(async () => button('Edit').click());
+    expect(document.querySelector('.feedback-edit input').value).toBe('History report');
   } finally { await act(async () => root.unmount()); node.remove(); }
 });

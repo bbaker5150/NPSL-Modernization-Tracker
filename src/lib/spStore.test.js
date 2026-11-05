@@ -387,3 +387,53 @@ it('follows minimal-metadata update pages and filters archived updates', async (
   expect(rows.map(row => row.Id)).toEqual([1, 3]);
   expect(store.get).toHaveBeenLastCalledWith('/_api/next', { Accept: 'application/json;odata=minimalmetadata' });
 });
+
+it.each(['updates', 'risks'])('recovers the row and its ETag together when %s minimal metadata omits it', async collection => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  const old = { Id: 4, RecordId: 'r', ProjectKey: 'project', Summary: 'Original', RiskTitle: 'Original' };
+  const latest = { ...old, Summary: 'Revised', RiskTitle: 'Revised', __metadata: { etag: '"5"' } };
+  store.get = vi.fn(async (path, headers) => {
+    const suffix = collection === 'risks' ? 'Risks' : 'Updates';
+    if (!path.includes('Modernization' + suffix) && path !== '/_api/more') return { value: [] };
+    if (path === '/_api/more') return { d: { results: [] } };
+    return headers.Accept.endsWith('verbose') ? { d: { results: [latest], __next: store.webUrl + '/_api/more' } } : { value: [old] };
+  });
+  store.post = vi.fn();
+  const row = (await store.load())[collection][0];
+  expect(row).toMatchObject({ version: '"5"', [collection === 'risks' ? 'title' : 'summary']: 'Revised' });
+  expect(store.get).toHaveBeenCalledWith('/_api/more', { Accept: 'application/json;odata=verbose' });
+  if (collection === 'risks') {
+    await store.editRisk({ ...row, mitigation: 'Measure', status: 'Closed', severity: 'Low' });
+    expect(store.post).toHaveBeenLastCalledWith(expect.stringContaining('ModernizationRisks'), {
+      body: { Title: 'Revised', RiskTitle: 'Revised', Mitigation: 'Measure', RiskStatus: 'Closed', Severity: 'Low' },
+      headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '"5"' },
+    });
+    await store.deleteRisk(row);
+  } else await store.deleteUpdate(row);
+  expect(store.post).toHaveBeenLastCalledWith(expect.stringContaining('/items(4)'), { body: { Archived: true }, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '"5"' } });
+});
+
+it('removes only a named attachment from its original update', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  const name = "Bob's file.pdf";
+  store.get = vi.fn().mockResolvedValue({ value: [{ FileName: name, ServerRelativeUrl: '/sites/mod/Lists/Updates/Attachments/9/file.pdf' }] });
+  store.post = vi.fn();
+  await store.deleteUpdateAttachment({ spId: 9 }, name);
+  expect(store.post).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("/items(9)/AttachmentFiles('Bob''s%20file.pdf')"), { headers: { 'X-HTTP-Method': 'DELETE' } });
+  await expect(store.deleteUpdateAttachment({ spId: 9 }, 'missing')).rejects.toThrow('no longer available');
+  expect(store.post).toHaveBeenCalledTimes(1);
+});
+
+it('retains readable history when the host cannot return a version and refuses an unversioned deletion', async () => {
+  const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
+  store.get = vi.fn(async (path, headers) => {
+    if (!path.includes('ModernizationUpdates')) return { value: [] };
+    if (headers.Accept.endsWith('verbose')) throw new Error('Unsupported response format');
+    return { value: [{ Id: 4, RecordId: 'u', Summary: 'Readable' }] };
+  });
+  store.post = vi.fn();
+  const row = (await store.load()).updates[0];
+  expect(row.summary).toBe('Readable');
+  await expect(store.deleteUpdate(row)).rejects.toThrow('Reload');
+  expect(store.post).not.toHaveBeenCalled();
+});

@@ -22,7 +22,9 @@ Workbook exports include responsibility, update timestamps and task references. 
 
 ## Editing and deleting individual updates
 
-Managers and the assigned Project Engineer see **Edit update** and **Delete update** on each update. Editing changes its text and optional task reference, preserving its original author, posting time and documents. History shows the last editor's signed-in name and timestamp. Viewer accounts and unrelated engineers cannot change it; the repository rechecks the current role and project assignment for each action. Historical risk records remain read-only in this view.
+Managers and the assigned Project Engineer can edit or delete entries regardless of who posted them. Editing a regular update changes its text and optional task reference. History retains the original author, posting time and documents and shows the last editor and edit time. Historical risks can be managed from the same tab and stay in their original Risks list. The repository rechecks the current role and project assignment for each action. Viewers have read-only access.
+
+If SharePoint denies an edit to someone else’s entry, check both the affected item’s project permissions and the list’s **Advanced settings → Item-level Permissions**. An author-only write setting on Updates or Risks can block an assigned engineer who has item Edit access. Use the all-items setting with the existing project-specific grants when the team needs cross-author editing. [Microsoft SharePoint list security settings](https://learn.microsoft.com/en-us/sharepoint/dev/schema/security-element)
 
 Save uses the version captured when editing began, plus SharePoint's ETag check, to reject stale drafts. Errors retain the draft. Copy it before reloading the tracker to resolve a conflict. Documents added later refresh the update version. Delete requires confirmation and archives only that update (`Archived=true`); its attachments stay on the archived SharePoint item and leave the project history together. Other updates and project/task documents are untouched. An administrator can restore the archived update by clearing its Archived field; it is not sent to the recycle bin.
 

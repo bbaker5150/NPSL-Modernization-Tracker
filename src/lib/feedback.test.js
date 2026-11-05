@@ -13,7 +13,7 @@ describe('private feedback', () => {
     expect(raw.post).toHaveBeenCalledExactlyOnceWith('/_vti_bin/client.svc/ProcessQuery', expect.objectContaining({ raw: true, body: expect.stringContaining('Modernization-Tracker - Feedback') }));
     expect(raw.post.mock.calls[0][1].body).not.toContain('AuthorId');
   });
-  it('blocks non-owner managers before fetching submission contents', async () => {
+  it('ignores an unverified Manager label before fetching submission contents', async () => {
     const raw = store(); raw.currentUser.mockResolvedValue({ role: 'Manager' });
     await expect(createFeedback(raw).list()).rejects.toThrow('Only site owners');
     expect(raw.get.mock.calls.some(([path]) => path.includes('/items'))).toBe(false);
@@ -122,7 +122,7 @@ const updatingStore = () => {
   raw.get.mockImplementation(async path => path.includes('/fields?') ? { value: [statusField] } : feedbackList);
   return raw;
 };
-it.each(['Viewer', 'Project Engineer', 'Manager'])('rejects updates by non-owner %s before writes', async role => {
+it.each(['Viewer', 'Project Engineer', 'Manager'])('rejects an unverified %s label before writes', async role => {
   const raw = store(); raw.currentUser.mockResolvedValue({ role });
   await expect(createFeedback(raw).update(1, validUpdate, '"2"')).rejects.toThrow('Only site owners');
   expect(raw.post).not.toHaveBeenCalled();
@@ -142,18 +142,18 @@ it.each([
   const raw = updatingStore(); await expect(createFeedback(raw).update(id, value, etag)).rejects.toThrow();
   expect(raw.post).not.toHaveBeenCalled();
 });
-it.each([[412, 'Another owner updated'], [404, 'was deleted'], [403, 'Denied'], [503, 'Denied']])('does not retry an update rejected with %s', async (status, message) => {
+it.each([[412, 'Another reviewer updated'], [404, 'was deleted'], [403, 'Denied'], [503, 'Denied']])('does not retry an update rejected with %s', async (status, message) => {
   const raw = updatingStore(); raw.post.mockRejectedValue(Object.assign(new Error('Denied'), { status }));
   await expect(createFeedback(raw).update(1, validUpdate, '"1"')).rejects.toThrow(message);
   expect(raw.post).toHaveBeenCalledTimes(1);
 });
 it('keeps old lists readable, requests version metadata, and defaults legacy status to New', async () => {
   const raw = store(true);
-  raw.get.mockResolvedValueOnce(feedbackList).mockResolvedValueOnce({ value: [{ Id: 1, Title: 'Legacy', 'odata.etag': '"2"' }, { Id: 2, FeedbackStatus: 'Resolved', __metadata: { etag: '"4"' } }] });
+  raw.get.mockResolvedValueOnce(feedbackList).mockResolvedValueOnce({ d: { results: [{ Id: 1, Title: 'Legacy', 'odata.etag': '"2"' }, { Id: 2, FeedbackStatus: 'Resolved', __metadata: { etag: '"4"' } }] } });
   const result = await createFeedback(raw).list();
   expect(result[0]).toMatchObject({ status: 'New', etag: '"2"' });
   expect(result[1]).toMatchObject({ status: 'Resolved', etag: '"4"' });
-  expect(raw.get).toHaveBeenLastCalledWith(expect.stringContaining('$select=*,Author/Title'), { Accept: 'application/json;odata=minimalmetadata' });
+  expect(raw.get).toHaveBeenLastCalledWith(expect.stringContaining('$select=*,Author/Title'), { Accept: 'application/json;odata=verbose' });
 });
 it('updates and deletes one preview record while preserving other submissions and rejecting stale versions', async () => {
   const api = createFeedback({ currentUser: async () => ({ isSiteAdmin: true }) });
@@ -166,4 +166,27 @@ it('updates and deletes one preview record while preserving other submissions an
   expect((await api.list())[0]).toMatchObject(validUpdate);
   await api.clearInbox([selected.id]);
   expect(await api.list()).toEqual([kept]);
+});
+
+it('allows verified Tracker Managers to read and edit history, and rechecks membership before each operation', async () => {
+  const raw = store(); let manager = true;
+  raw.get.mockImplementation(async path => {
+    if (path.includes('effectivebasepermissions')) return { Low: '1' };
+    if (path.includes('associatedownergroup')) return { Id: 7 };
+    if (path.includes('currentuser/groups')) return { value: manager ? [{ Id: 22, Title: 'Tracker Managers' }] : [] };
+    if (path.includes('/lists?')) return feedbackList;
+    if (path.includes('/fields?')) return { value: [statusField] };
+    if (path.includes('/items?')) return { value: [{ Id: 5, Title: 'Existing report', 'odata.etag': '"1"' }] };
+    throw new Error('Unexpected read ' + path);
+  });
+  const api = createFeedback(raw);
+  expect(await api.access()).toEqual({ owner: false, review: true });
+  expect(await api.list()).toMatchObject([{ id: 5, title: 'Existing report' }]);
+  await api.update(5, validUpdate, '"1"');
+  await expect(api.clearInbox([5])).rejects.toThrow('Only site owners');
+  await expect(api.setup.enableManagerReview()).rejects.toThrow('Only site owners');
+  manager = false;
+  await expect(api.update(5, validUpdate, '"2"')).rejects.toThrow('Only site owners');
+  await expect(api.list()).rejects.toThrow('Only site owners');
+  expect(raw.post).toHaveBeenCalledTimes(1);
 });

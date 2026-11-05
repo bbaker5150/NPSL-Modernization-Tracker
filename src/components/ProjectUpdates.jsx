@@ -15,6 +15,7 @@ export function updateTimestamp(item) {
 
 function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
   const [files, setFiles] = useState([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [refresh, setRefresh] = useState(0);
+  const [removal, setRemoval] = useState(null);
   useEffect(() => {
     let active = true;
     store.listUpdateAttachments(item.id).then(rows => { if (active) { setFiles(rows); setError(''); } }).catch(err => { if (active) setError(err.message); });
@@ -40,8 +41,24 @@ function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
     await onRefresh?.();
     setError(errors.join('\n')); setBusy(false);
   }
+  async function remove() {
+    if (!canPost || busy || !removal) return;
+    setBusy(true); setError('');
+    try {
+      await store.deleteUpdateAttachment(item.id, removal.name, removal.version);
+      setFiles(rows => rows.filter(file => file.name !== removal.name));
+      setRemoval(null);
+      await onRefresh?.();
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
   return <div className="update-documents">
-    {!!files.length && <ul>{files.map(file => <li key={file.name}><button type="button" className="text-button" disabled={busy} onClick={() => download(file)}><Icon name="paperclip" size={14} />{file.name}</button></li>)}</ul>}
+    {!!files.length && <ul>{files.map(file => <li key={file.name}><button type="button" className="text-button" disabled={busy} onClick={() => download(file)}><Icon name="paperclip" size={14} />{file.name}</button>
+      {canPost && (removal?.name === file.name ? <>
+        <button type="button" className="text-button" disabled={busy} onClick={() => setRemoval(null)}>Keep file</button>
+        <button type="button" className="text-button update-delete" aria-label={`Confirm remove ${file.name}`} disabled={busy} onClick={remove}>Confirm removal</button>
+      </> : <button type="button" className="text-button" aria-label={`Remove ${file.name}`} disabled={busy || !item.version} onClick={() => setRemoval({ name: file.name, version: item.version })}>Remove</button>)}
+    </li>)}</ul>}
     {canPost && <details><summary>Attach documents to this update</summary><input className="document-upload" type="file" multiple aria-label={`Attach documents to update by ${item.authorName || 'Unknown author'}`} disabled={busy} onChange={upload} /><small>Up to 50 MB each.</small></details>}
     {busy && <p role="status">Working on update documents…</p>}
     {error && <p className="inline-error" role="alert">{error} <button type="button" className="text-button" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh documents</button></p>}
@@ -52,13 +69,22 @@ function UpdateCard({ item, tasks, store, revision, canPost, onEdit, onDelete, o
   const [mode, setMode] = useState(''), [draft, setDraft] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const active = useRef(false);
   const task = tasks.find(row => row.id === item.taskId);
-  const canEdit = canPost && !item.legacyRisk;
-  function begin(next) { setError(''); setDraft({ summary: item.summary, taskId: item.taskId || '', version: item.version }); setMode(next); }
+  const canEdit = canPost;
+  const editAvailable = item.legacyRisk || store.updateEditingAvailable !== false;
+  const label = item.legacyRisk ? 'risk' : 'update';
+  function begin(next) {
+    setError('');
+    setDraft(item.legacyRisk
+      ? { title: item.title, mitigation: item.mitigation || '', severity: item.severity || '', status: item.status || 'Open', version: item.version }
+      : { summary: item.summary, taskId: item.taskId || '', version: item.version });
+    setMode(next);
+  }
   async function apply(event) {
     event.preventDefault(); if (active.current || !canEdit) return;
     active.current = true; setBusy(true); setError('');
     try {
       if (mode === 'delete') await onDelete({ ...item, version: draft.version });
+      else if (item.legacyRisk) await onEdit({ ...item, version: draft.version }, draft);
       else { if (!draft.summary.trim()) throw new Error('Write an update before saving.'); await onEdit({ ...item, version: draft.version }, { summary: draft.summary, taskId: draft.taskId }); }
       setMode(''); setDraft(null);
     } catch (err) { setError(err.message); }
@@ -69,16 +95,23 @@ function UpdateCard({ item, tasks, store, revision, canPost, onEdit, onDelete, o
     {item.editedAt && <p className="update-edited">Edited by {displayName(item.editorName || 'Unknown editor')} · <time dateTime={item.editedAt}>{updateTimestamp({ postedAt: item.editedAt })}</time></p>}
     {item.taskId && (task ? <button type="button" className="update-task-reference" onClick={() => onTask(task)}><Icon name="task" size={14} />{task.title}</button> : <span className="update-task-reference">{item.taskTitle || 'Referenced task'} · Task removed</span>)}
     {item.legacyRisk && <small className="update-legacy">Previously recorded risk · {item.severity} · {item.riskStatus}</small>}
-    {mode === 'edit' ? <form className="update-editor" onSubmit={apply} noValidate aria-label="Edit project update">
+    {mode === 'edit' && canEdit ? <form className="update-editor" onSubmit={apply} noValidate aria-label={`Edit project ${label}`}>
+      {item.legacyRisk ? <>
+        <label className="field">Risk title<input autoFocus disabled={busy} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
+        <label className="field">Mitigation<textarea rows={3} disabled={busy} value={draft.mitigation} onChange={e => setDraft({ ...draft, mitigation: e.target.value })} /></label>
+        <label className="field">Severity<input disabled={busy} value={draft.severity} onChange={e => setDraft({ ...draft, severity: e.target.value })} /></label>
+        <label className="field">Risk status<input disabled={busy} value={draft.status} onChange={e => setDraft({ ...draft, status: e.target.value })} /></label>
+      </> : <>
       <label className="field">Task reference <small>Optional</small><select aria-label="Edit task reference" disabled={busy} value={draft.taskId} onChange={event => setDraft(value => ({ ...value, taskId: event.target.value }))}><option value="">Project-wide update</option>{item.taskId && !task && <option value={item.taskId}>{item.taskTitle || 'Referenced task'} · Task removed</option>}{tasks.map(row => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
       <label className="field">Update<textarea aria-label="Edit update" autoFocus rows={4} disabled={busy} value={draft.summary} onChange={event => setDraft(value => ({ ...value, summary: event.target.value }))} /></label>
-      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Cancel edit</button><button type="button" className="button primary" disabled={busy || !draft.summary.trim()} onClick={apply}>{busy ? 'Saving…' : 'Save changes'}</button></div>
+      </>}
+      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Cancel edit</button><button type="button" className="button primary" disabled={busy || !(item.legacyRisk ? draft.title : draft.summary).trim()} onClick={apply}>{busy ? 'Saving…' : 'Save changes'}</button></div>
     </form> : <p className="update-summary">{item.summary}</p>}
     {!item.legacyRisk && <UpdateDocuments item={item} store={store} revision={revision} canPost={canPost && !mode} onRefresh={onRefresh} />}
-    {canEdit && !mode && <div className="update-actions update-actions-rest"><button type="button" className="text-button" disabled={!item.version || store.updateEditingAvailable === false} onClick={() => begin('edit')}>Edit update</button><button type="button" className="text-button update-delete" disabled={!item.version} onClick={() => begin('delete')}>Delete update</button>{!item.version && <small>Reload the tracker to manage this update.</small>}{store.updateEditingAvailable === false && <small>To enable editing, a site owner needs to open the latest tracker once.</small>}</div>}
-    {mode === 'delete' && <div className="update-delete-confirm" role="group" aria-label="Delete this update?">
-      <strong>Delete this update?</strong><p>This removes this update and its attached documents from the project history. Other updates stay in place.</p>
-      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Keep update</button><button type="button" className="button danger" disabled={busy} onClick={apply}>{busy ? 'Deleting…' : 'Confirm delete'}</button></div>
+    {canEdit && !mode && <div className="update-actions update-actions-rest"><button type="button" className="text-button" disabled={!item.version || !editAvailable} onClick={() => begin('edit')}>Edit {label}</button><button type="button" className="text-button update-delete" disabled={!item.version} onClick={() => begin('delete')}>Delete {label}</button>{!item.version && <small>Reload the tracker to manage this {label}.</small>}{!editAvailable && <small>To enable editing, a site owner needs to open the latest tracker once.</small>}</div>}
+    {mode === 'delete' && canEdit && <div className="update-delete-confirm" role="group" aria-label={`Delete this ${label}?`}>
+      <strong>Delete this {label}?</strong><p>{item.legacyRisk ? `This removes “${item.title}” from the project history.` : 'This removes this update and its attached documents from the project history.'}</p>
+      <div className="update-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setMode(''); setError(''); }}>Keep {label}</button><button type="button" className="button danger" disabled={busy} onClick={apply}>{busy ? 'Deleting…' : 'Confirm delete'}</button></div>
     </div>}
     {error && <p className="inline-error" role="alert">{error}</p>}
   </article>;
@@ -118,7 +151,7 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
     } catch (err) { setError(err.message); }
     finally { active.current = false; setBusy(false); }
   }
-  const history = [...updates, ...risks.map(risk => ({ ...risk, id: `risk-${risk.id}`, legacyRisk: true, type: 'Risk', summary: `${risk.title}\n${risk.mitigation || 'No mitigation recorded.'}`, authorName: risk.ownerName, riskStatus: risk.status, severity: risk.severity }))]
+  const history = [...updates, ...risks.map(risk => ({ ...risk, legacyRisk: true, type: 'Risk', summary: `${risk.title}\n${risk.mitigation || 'No mitigation recorded.'}`, authorName: risk.ownerName, riskStatus: risk.status, severity: risk.severity }))]
     .sort((a, b) => String(b.postedAt || b.entryDate || '').localeCompare(String(a.postedAt || a.entryDate || '')));
   return <div className="project-updates">
     {canPost && <form className="update-composer" noValidate onSubmit={post} aria-label="New project update">
@@ -131,7 +164,7 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
     {error && <p className="inline-error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <section className="update-history" aria-label="Project update history">
       {!history.length && <div className="empty-state"><h3>No updates yet</h3><p>Progress, decisions and risks will appear here with their author and date.</p></div>}
-      {history.map(item => <UpdateCard key={item.id} item={item} tasks={tasks} store={store} revision={revision} canPost={canPost} onEdit={onEdit} onDelete={onDelete} onTask={onTask} onRefresh={onRefresh} />)}
+      {history.map(item => <UpdateCard key={`${item.legacyRisk ? 'risk' : 'update'}:${item.id}`} item={item} tasks={tasks} store={store} revision={revision} canPost={canPost} onEdit={onEdit} onDelete={onDelete} onTask={onTask} onRefresh={onRefresh} />)}
     </section>
   </div>;
 }

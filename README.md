@@ -8,7 +8,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Engineer-focused **My work** queues tied to the signed-in SharePoint login identity
 - Project pipeline tasks, updates, risks, ownership, health, and milestones
 - Manager portfolio access and ownership-scoped standard-user views
-- The original 37-entry acronym reference, with manager add/remove controls backed by SharePoint
+- A shared acronym glossary that every Tracker user can add to and Managers can curate
 - Styled multi-sheet Excel export including the current acronym reference
 - Light and dark themes with the NAVAIR seal in the tracker identity
 - A Forge-compatible single HTML build with no external runtime requests
@@ -19,6 +19,7 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 - Managers assign projects by SharePoint email. Saving an assignment fills in the resolved name and enrolls a new user or Viewer as a Project Engineer. An existing Manager keeps the Manager role.
 - Project Engineers can update health, stage and status on assigned projects. They can complete existing tasks, edit tracking details and manage task documents. Managers control the project definition, assignee and target date. Only managers can create, rename or delete tasks and set the original due and assigned dates.
 - Viewers read all projects and documents without editing. Task assignment alone does not grant Project Engineer project access.
+- Managers and the Project Engineer assigned to a project can edit and delete entries on its Updates tab. All Tracker users can submit bug reports and feature requests. Managers and site owners can review them and save changes in **Feedback History**.
 - Existing project owners with legacy User/SME roles become Project Engineers automatically, matched by login/email rather than display name. Existing Managers stay Managers; other legacy accounts become Viewers. A manager's next app startup persists directory migration; an owner's own startup persists their migrated role. Explicit later Viewer assignments are respected. Owners missing from the directory register as Project Engineers when they first open the app.
 - Deferrals require a date after the original deadline and a justification. Not Required requires justification. The original due date is retained.
 - Task codes have been removed from the UI, templates, exports, and active SharePoint schema.
@@ -83,7 +84,7 @@ On first SharePoint load, the app silently creates empty lists and missing field
 
 Existing list titles and visibility are updated in place when a site owner opens the app. This preserves list IDs, URLs, records, documents, and permissions. Viewer and manager sessions without site-owner permissions do not perform these updates. Both original internal titles and former `NPSL Tracker - …` titles remain supported. See [List organization](docs/list-organization.md).
 
-For the metsoft rollout, first follow [Tracker permissions](docs/tracker-permissions.md), including non-owner acceptance tests. The Site Contents organization, Tracker permissions, and Site owner tools panels have been retired from the normal app; automatic permission updates for role and project-engineer changes remain enabled. Historical migration documentation describes the retired utilities.
+For the metsoft rollout, a site owner can enable glossary additions in **Users and managers → Tracker permissions → Set up glossary access**. For an existing private Feedback list, open the bug/feature dialog and select **Enable manager history access**. [Tracker permissions](docs/tracker-permissions.md) · [Feedback setup](docs/feedback.md)
 
 See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and deployment behavior.
 

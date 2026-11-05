@@ -99,6 +99,24 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
 
+  it.each(['click', 'Enter'])('lets a viewer add an acronym via %s in an embedded host that blocks form submission', async method => {
+    await renderApp(false);
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.includes('Acronym glossary')).click());
+    await act(async () => {
+      changeValue(document.querySelector('[aria-label="Acronym"]'), 'vt');
+      changeValue(document.querySelector('[aria-label="Full term"]'), 'Viewer term');
+    });
+    const form = document.querySelector('.glossary-composer');
+    form.addEventListener('submit', event => { event.preventDefault(); event.stopPropagation(); });
+    await act(async () => {
+      if (method === 'click') form.querySelector('button').click();
+      else form.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('.glossary-table').textContent).toContain('Viewer term');
+    expect(document.querySelector('.glossary-delete')).toBeNull();
+    expect((await createRepository().store.load()).acronyms).toContainEqual(expect.objectContaining({ acronym: 'VT', term: 'Viewer term' }));
+  });
+
   it('counts owned projects in My Work and assigns their starter tasks to the project owner', async () => {
     await renderApp();
     const newProject = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('New project'));

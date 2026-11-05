@@ -97,11 +97,29 @@ it('edits and deletes only the selected update with draft retention, cancellatio
     expect(onDelete).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'u', version: '2' }));
   } finally { document.removeEventListener('click', cancelNative, true); await act(async () => root.unmount()); host.remove(); }
 });
-it.each([false, true])('keeps legacy risks read-only and hides edit actions for readers (canPost=%s)', async canPost => {
+it.each([false, true])('allows risk changes and attachment removal only for project writers (canPost=%s)', async canPost => {
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const onEdit = vi.fn(), onDelete = vi.fn();
+  const store = { listUpdateAttachments: async () => [{ name: 'report.pdf' }], deleteUpdateAttachment: vi.fn() };
   try {
-    await act(async () => root.render(<ProjectUpdates project={{}} tasks={[]} updates={canPost ? [] : [{ id: 'u', version: '1', summary: 'Read only' }]} risks={[{ id: 'r', title: 'Old risk' }]} store={{ listUpdateAttachments: async () => [] }} canPost={canPost} />));
-    expect(button('Edit update')).toBeUndefined(); expect(button('Delete update')).toBeUndefined();
+    await act(async () => root.render(<ProjectUpdates project={{}} tasks={[]} updates={[{ id: 'u', version: '1', summary: 'By another user' }]} risks={[{ id: 'r', version: '2', title: 'Old risk', ownerName: 'Original owner' }]} store={store} canPost={canPost} onEdit={onEdit} onDelete={onDelete} />));
+    const remove = () => document.querySelector('[aria-label="Remove report.pdf"]');
+    if (!canPost) {
+      for (const action of ['Edit update', 'Delete update', 'Edit risk', 'Delete risk']) expect(button(action)).toBeUndefined();
+      expect(remove()).toBeNull();
+      return;
+    }
+    await act(async () => button('Edit risk').click());
+    await act(async () => change(document.querySelector('.update-editor textarea'), 'Mitigation after review'));
+    await act(async () => button('Save changes').click());
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'r', legacyRisk: true, version: '2' }), expect.objectContaining({ title: 'Old risk', mitigation: 'Mitigation after review' }));
+    await act(async () => button('Delete risk').click());
+    await act(async () => button('Confirm delete').click());
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'r', version: '2', legacyRisk: true }));
+    await act(async () => remove().click());
+    expect(store.deleteUpdateAttachment).not.toHaveBeenCalled();
+    await act(async () => document.querySelector('[aria-label="Confirm remove report.pdf"]').click());
+    expect(store.deleteUpdateAttachment).toHaveBeenCalledExactlyOnceWith('u', 'report.pdf', '1');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 it('explains a pending editing upgrade without blocking history or individual deletion', async () => {

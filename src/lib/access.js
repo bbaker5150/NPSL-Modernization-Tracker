@@ -174,13 +174,19 @@ export function authorizedStore(raw, config = {}) {
         }
         return raw.listTaskAttachments(task);
       };
-      if (['editUpdate', 'deleteUpdate'].includes(property)) return async (row) => {
+      if (['editUpdate', 'deleteUpdate', 'editRisk', 'deleteRisk'].includes(property)) return async (row) => {
         const { user, data } = await context();
-        const existing = data.updates.find(item => item.id === row.id);
+        const risk = property === 'editRisk' || property === 'deleteRisk';
+        const existing = (risk ? data.risks : data.updates).find(item => item.id === row.id);
         const project = data.projects.find(item => item.projectKey === existing?.projectKey);
         if (!existing || !project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can change an existing project update.');
         if (!row.version || row.version === '*' || row.version !== existing.version) throw new Error('This update changed. Copy your draft and reload the tracker before trying again.');
-        if (property === 'deleteUpdate') return raw.deleteUpdate(existing);
+        if (property === 'deleteUpdate' || property === 'deleteRisk') return raw[property](existing);
+        if (risk) {
+          if (!row.title?.trim()) throw new Error('Enter a risk title.');
+          return raw.editRisk({ ...existing, title: row.title.trim(), mitigation: row.mitigation?.trim() || '',
+            severity: row.severity?.trim() || '', status: row.status?.trim() || 'Open' });
+        }
         if (!row.summary?.trim()) throw new Error('Enter an update.');
         const task = row.taskId ? data.tasks.find(item => item.id === row.taskId && item.projectKey === existing.projectKey) : null;
         // A removed task may keep its historical reference if it was not changed.
@@ -203,20 +209,34 @@ export function authorizedStore(raw, config = {}) {
           postedAt: existing?.postedAt || new Date().toISOString(), entryDate: existing?.entryDate || new Date().toISOString().slice(0, 10),
           authorName: existing?.authorName || user.title || user.email || user.loginName, authorEmail: existing?.authorEmail || user.email || '', authorKey: existing?.authorKey || userIdentityKey(user) });
       };
-      if (['listUpdateAttachments', 'addUpdateAttachment', 'downloadUpdateAttachment'].includes(property)) return async (updateId, file) => {
+      if (['listUpdateAttachments', 'addUpdateAttachment', 'downloadUpdateAttachment', 'deleteUpdateAttachment'].includes(property)) return async (updateId, file, version) => {
         const { user, data } = await context();
         const update = visibleData(data, user).updates.find(row => row.id === updateId);
         if (!update) throw new Error('You cannot access documents for this update.');
-        if (property === 'addUpdateAttachment') {
-          if (!canManageProject(data.projects.find(row => row.projectKey === update.projectKey), user, data.users)) throw new Error('Only managers or assigned project engineers can attach update documents.');
-          validateAttachment(file);
+        if (property === 'addUpdateAttachment' || property === 'deleteUpdateAttachment') {
+          const project = data.projects.find(row => row.projectKey === update.projectKey);
+          if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can change update documents.');
+          if (property === 'addUpdateAttachment') validateAttachment(file);
+          else if (!version || version === '*' || version !== update.version) throw new Error('This update changed. Refresh history before removing its document.');
         }
         return raw[property](update, file);
       };
       if (property === 'saveTasks' || property === 'saveProjectTracking') return undefined;
       if (['saveProject', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
         const { data, user, manager } = await context();
-        if (!manager && ['saveAcronym', 'saveUser'].includes(property)) throw new Error('Only managers can perform this action.');
+        if (!manager && property === 'saveUser') throw new Error('Only managers can perform this action.');
+        if (property === 'saveAcronym') {
+          if (!userIdentityKey(user)) throw new Error('Sign in to add an acronym.');
+          const [row] = args;
+          const existing = data.acronyms.find(entry => entry.id === row.id);
+          if (!manager && (existing || row.spId != null)) throw new Error('Only managers can change existing acronyms.');
+          const acronym = row.acronym?.trim().toUpperCase();
+          const term = row.term?.trim();
+          if (!acronym || !term) throw new Error('Enter an acronym and its full term.');
+          if (data.acronyms.some(entry => entry !== existing && entry.acronym.trim().toUpperCase() === acronym)) throw new Error(`${acronym} is already in the glossary.`);
+          const record = manager ? row : { id: row.id };
+          return raw.saveAcronym({ ...record, acronym, term, definition: row.definition?.trim() || '' });
+        }
         if (property === 'saveProject') {
           const [draft] = args;
           if (manager) {
@@ -237,6 +257,7 @@ export function authorizedStore(raw, config = {}) {
         }
         if (!manager && property === 'recycle') {
           const [collection, spId, id] = args;
+          if (collection === 'acronyms') throw new Error('Only managers can remove acronyms.');
           if (collection === 'projects' || collection === 'tasks') throw new Error('Only managers can delete projects and tasks.');
           const rows = data[collection] || [];
           const row = rows.find((entry) => entry.id === id || (spId != null && entry.spId === spId));

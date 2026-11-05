@@ -1,5 +1,5 @@
 import { TrackerLists, displayListTitle } from './trackerLists';
-import { FEEDBACK_STATUS_XML } from './feedbackFields';
+import { ensureFeedbackStatus, FEEDBACK_STATUS_XML } from './feedbackFields';
 import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(value.replace(/'/g, "''"));
@@ -8,7 +8,9 @@ const PENDING = 'NPSL Tracker private feedback setup pending v1';
 const READY = 'Private bug reports and feature requests. Managed by NPSL Tracker.';
 // AddListItems, ViewFormPages, Open, ViewPages; UseRemoteAPIs. NO ViewListItems.
 export const SUBMIT_PERMISSIONS = { Low: '200706', High: '32' };
-const sameMask = bits => String(bits?.Low) === SUBMIT_PERMISSIONS.Low && String(bits?.High) === SUBMIT_PERMISSIONS.High;
+// The submission mask plus ViewListItems and EditListItems, without DeleteListItems.
+export const REVIEW_PERMISSIONS = { Low: '200711', High: '32' };
+const sameMask = (bits, expected = SUBMIT_PERMISSIONS) => String(bits?.Low) === expected.Low && String(bits?.High) === expected.High;
 
 export function feedbackSetup(store, legacyTitle, isOwner) {
   const title = displayListTitle(store.prefix, 'feedback');
@@ -34,8 +36,23 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
     return result;
   }
   async function metadata() {
-    try { path = await catalog.path('feedback'); return unwrap(await store.get(`${path}?$select=Id,Title,Description,ItemCount,HasUniqueRoleAssignments,BaseTemplate,Hidden`)); }
+    try { path = await catalog.path('feedback'); return unwrap(await store.get(`${path}?$select=Id,Title,Description,ItemCount,HasUniqueRoleAssignments,BaseTemplate,Hidden,ReadSecurity,WriteSecurity`)); }
     catch (error) { if (error.status === 404) return null; throw error; }
+  }
+  async function reviewRole() {
+    const name = `${legacyTitle} Review`;
+    const roles = await pages('/_api/web/roledefinitions?$select=Id,Name,BasePermissions&$top=500');
+    let role = roles.find(entry => entry.Name === name);
+    if (!role) {
+      await store.post('/_api/web/roledefinitions', { body: { Name: name, Description: 'Read, submit and edit Tracker feedback.', BasePermissions: REVIEW_PERMISSIONS } });
+      role = unwrap(await store.get(`/_api/web/roledefinitions/getbyname('${quote(name)}')?$select=Id,BasePermissions`));
+    }
+    if (!id(role?.Id) || !sameMask(role.BasePermissions, REVIEW_PERMISSIONS)) throw new Error('SharePoint did not verify the feedback review permission level. Ask a site owner to check its permissions.');
+    return role;
+  }
+  async function managerGroup() {
+    const groups = await pages(`/_api/web/sitegroups?$select=Id,Title&$filter=Title eq '${TRACKER_GROUPS.Manager}'`);
+    return groups.find(group => group.Title === TRACKER_GROUPS.Manager && id(group.Id));
   }
   return {
     async status() {
@@ -48,12 +65,22 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       const fields = await pages(`${path}/fields?$select=InternalName&$top=500`);
       if (!['FeedbackKind', 'FeedbackDetails'].every(name => fields.some(field => field.InternalName === name))) throw new Error('The feedback list is missing required fields. Ask a site administrator to review its setup.');
       const owners = unwrap(await store.get('/_api/web/associatedownergroup?$select=Id,Title'));
+      const managers = await managerGroup();
+      let managerReview = false;
       const assignments = await pages(`${path}/roleassignments?$select=PrincipalId,RoleDefinitionBindings/BasePermissions&$expand=RoleDefinitionBindings`);
       if (!id(owners?.Id) || assignments.some(assignment => {
         const roles = assignment.RoleDefinitionBindings?.results || assignment.RoleDefinitionBindings;
         if (!Array.isArray(roles)) return true;
-        return roles.some(role => role.BasePermissions?.Low == null || (assignment.PrincipalId !== owners.Id && (BigInt(role.BasePermissions.Low) & 1n) !== 0n));
-      })) throw new Error('The feedback list grants reading access outside the site Owners group, or its permissions could not be verified. Ask a site administrator to review it.');
+        return roles.some(role => {
+          if (role.BasePermissions?.Low == null) return true;
+          if (assignment.PrincipalId === owners.Id || (BigInt(role.BasePermissions.Low) & 1n) === 0n) return false;
+          if (managers && assignment.PrincipalId === managers.Id && sameMask(role.BasePermissions, REVIEW_PERMISSIONS)) {
+            managerReview = true;
+            return false;
+          }
+          return true;
+        });
+      })) throw new Error('The feedback list grants reading access outside its approved owner and manager permissions, or its permissions could not be verified. Ask a site administrator to review it.');
       // Rename the existing list by GUID; never replace records or ACLs.
       if (list.Title !== title || list.Hidden) {
         const permissions = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));
@@ -63,7 +90,26 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
           if (verified.Id !== list.Id || verified.Title !== title || verified.Hidden !== false) throw new Error('Could not verify the feedback list name. Reopen feedback to retry.');
         }
       }
-      return { ready: true, title };
+      const itemRestrictions = (list.ReadSecurity != null && Number(list.ReadSecurity) !== 1) || (list.WriteSecurity != null && Number(list.WriteSecurity) !== 1);
+      return { ready: true, title, itemRestrictions, managerReviewNeeded: !managerReview || itemRestrictions || !fields.some(field => field.InternalName === 'FeedbackStatus') };
+    },
+    async enableManagerReview() {
+      // Recheck privacy and owner access even when the dialog has been open for a while.
+      const state = await this.status();
+      if (!state.ready) throw new Error('Finish setting up the private feedback list first.');
+      if (!state.managerReviewNeeded) return state;
+      if (state.itemRestrictions) throw new Error('The Feedback list restricts item access by author. Under List settings → Advanced settings, allow reading and editing all items for accounts with those list permissions, then retry.');
+      const managers = await managerGroup();
+      if (!managers) throw new Error(`Create the SharePoint group ${TRACKER_GROUPS.Manager} first.`);
+      await ensureFeedbackStatus(store, path);
+      const role = await reviewRole();
+      const grants = await pages(`${path}/roleassignments?$select=PrincipalId,RoleDefinitionBindings/Id&$expand=RoleDefinitionBindings`);
+      if (!grants.some(grant => grant.PrincipalId === managers.Id && (grant.RoleDefinitionBindings?.results || grant.RoleDefinitionBindings || []).some(binding => binding.Id === role.Id))) {
+        await store.post(`${path}/roleassignments/addroleassignment(principalid=${managers.Id},roledefid=${role.Id})`);
+      }
+      const verified = await this.status();
+      if (!verified.ready || verified.managerReviewNeeded) throw new Error('SharePoint did not verify manager access to Feedback History. Reopen feedback and retry.');
+      return verified;
     },
     async options() {
       await requireOwner();
@@ -76,7 +122,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
         const members = unwrap(await store.get('/_api/web/associatedmembergroup?$select=Id,Title'));
         if (members?.Title) defaults.push(members.Title);
       }
-      return { owners, groups, selected: groups.filter(group => defaults.includes(group.Title)).map(group => group.Id) };
+      return { owners, groups, manager: groups.find(group => group.Title === TRACKER_GROUPS.Manager), selected: groups.filter(group => defaults.includes(group.Title)).map(group => group.Id) };
     },
     async provision(selectedIds, progress = () => {}) {
       await requireOwner();
@@ -84,7 +130,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       const response = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));
       const low = BigInt((response.EffectiveBasePermissions || response).Low || 0);
       if ((low & 33556480n) !== 33556480n) throw new Error('Setup requires Manage Lists and Manage Permissions on this SharePoint site.');
-      const { owners, groups } = await this.options();
+      const { owners, groups, manager } = await this.options();
       const selected = [...new Set(selectedIds.map(Number))];
       if (!selected.length || selected.some(value => !groups.some(group => group.Id === value))) throw new Error('Select the existing SharePoint groups that contain all tracker users.');
       const user = await store.currentUser();
@@ -126,16 +172,19 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       const secured = await metadata();
       const verifiedFields = await pages(`${path}/fields?$select=InternalName&$top=500`);
       if (!secured?.HasUniqueRoleAssignments || !['FeedbackKind', 'FeedbackDetails', 'FeedbackStatus'].every(name => verifiedFields.some(field => field.InternalName === name))) throw new Error('The private list or its fields could not be verified. Submission access was not granted.');
-      progress('Applying submission-only access…');
-      for (const principal of selected) await store.post(`${path}/roleassignments/addroleassignment(principalid=${principal},roledefid=${submitRole.Id})`);
+      progress('Applying feedback permissions…');
+      const reviewer = manager && await reviewRole();
+      const expected = new Map([[owners.Id, full.Id], [user.id, full.Id], ...selected.map(principal => [principal, submitRole.Id])]);
+      if (manager) expected.set(manager.Id, reviewer.Id);
+      const grantees = [...new Set([...selected, ...(manager ? [manager.Id] : [])])];
+      for (const principal of grantees) await store.post(`${path}/roleassignments/addroleassignment(principalid=${principal},roledefid=${expected.get(principal)})`);
       assignments = await pages(`${path}/roleassignments?$select=PrincipalId,RoleDefinitionBindings/Id&$expand=RoleDefinitionBindings`);
       const bindings = assignment => assignment.RoleDefinitionBindings?.results || assignment.RoleDefinitionBindings || [];
-      const expected = new Map([[owners.Id, full.Id], [user.id, full.Id], ...selected.map(principal => [principal, submitRole.Id])]);
-      if (assignments.some(assignment => !expected.has(assignment.PrincipalId) || bindings(assignment).some(role => role.Id !== expected.get(assignment.PrincipalId))) || ![owners.Id, ...selected].every(principal => assignments.some(assignment => assignment.PrincipalId === principal && bindings(assignment).some(role => role.Id === expected.get(principal))))) throw new Error('Could not verify the feedback permission assignments. Ask a site administrator to review this list before accepting submissions.');
+      if (assignments.some(assignment => !expected.has(assignment.PrincipalId) || bindings(assignment).some(role => role.Id !== expected.get(assignment.PrincipalId))) || ![owners.Id, ...grantees].every(principal => assignments.some(assignment => assignment.PrincipalId === principal && bindings(assignment).some(role => role.Id === expected.get(principal))))) throw new Error('Could not verify the feedback permission assignments. Ask a site administrator to review this list before accepting submissions.');
       await merge({ Description: READY, Title: title, Hidden: false });
-      // Remove the automatic creator grant. Only Owners retain reading access.
+      // Remove the automatic creator grant. Owner and manager access is inherited from groups.
       if (assignments.some(assignment => assignment.PrincipalId === user.id)) await store.post(`${path}/roleassignments/getbyprincipalid(${user.id})`, { headers: { 'X-HTTP-Method': 'DELETE' } });
-      return { ready: true, title };
+      return { ready: true, title, managerReviewNeeded: !manager };
     },
   };
 }

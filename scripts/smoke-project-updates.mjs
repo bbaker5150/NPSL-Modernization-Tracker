@@ -123,12 +123,19 @@ try {
   await revised.waitFor({ state: 'detached' });
   await boot(); await openUpdates();
   assert.equal(await app.locator('.update-card').count(), 2); // Other update + historical risk.
+  const legacyRisk = app.locator('.update-card').filter({ hasText: 'Risk owner' });
+  await legacyRisk.getByRole('button', { name: 'Edit risk', exact: true }).click();
+  await legacyRisk.getByRole('textbox', { name: 'Mitigation', exact: true }).fill('Expedite vendor review.');
+  await legacyRisk.getByRole('button', { name: 'Save changes' }).click();
+  await legacyRisk.getByText(/Expedite vendor review/).waitFor();
   assert.equal(await app.getByRole('button', { name: 'update-only.txt', exact: true }).count(), 0);
   await app.getByText('Project-wide decision with no task required.', { exact: true }).waitFor();
   await page.evaluate(() => { const key = 'modernization-project-tracker:v2', data = JSON.parse(localStorage.getItem(key)); data.users[0].role = 'Viewer'; localStorage.setItem(key, JSON.stringify(data)); });
   await boot(); await openUpdates();
   assert.equal(await app.getByRole('button', { name: 'Edit update', exact: true }).count(), 0);
   assert.equal(await app.getByRole('button', { name: 'Delete update', exact: true }).count(), 0);
+  assert.equal(await app.getByRole('button', { name: 'Edit risk', exact: true }).count(), 0);
+  assert.equal(await app.getByRole('button', { name: 'Delete risk', exact: true }).count(), 0);
 
   assert.deepEqual(errors, []);
   console.log('Project updates smoke passed: METCAL rename/filter/subassignment, engineer date restrictions with editable deferrals, no Risks tab, optional task links, update-only attachments/downloads, author/timestamps, per-update edits/deletes with author preservation, cancel/save/reload, Viewer restrictions, persistence, desktop/mobile themes.');

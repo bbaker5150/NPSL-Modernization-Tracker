@@ -133,3 +133,62 @@ it('uses Tracker Users as the baseline and preserves unrelated existing suite gr
   expect(acl('/project')).toContainEqual(row(100, 2));
   expect(store.post.mock.calls.some(([path]) => path.includes('principalid=100'))).toBe(false);
 });
+
+const glossaryScope = "/_api/web/lists(guid'836fb5d6-3f10-4e6b-92dc-3aa8e297dfee')";
+function glossaryFixture() {
+  const { store, permissions, acl } = fixture();
+  const get = store.get.getMockImplementation(), post = store.post.getMockImplementation();
+  const defined = [
+    { Id: 2, RoleTypeKind: 2, BasePermissions: { High: '32', Low: '200705' } },
+    { Id: 3, RoleTypeKind: 3, BasePermissions: { High: '32', Low: '200719' } },
+  ];
+  let unique = false;
+  store.currentUser = vi.fn(async () => ({}));
+  permissions.currentRole = vi.fn(async () => ({ siteOwner: true, role: 'Manager' }));
+  store.listApi = vi.fn(async key => { expect(key).toBe('acronyms'); return glossaryScope; });
+  store.get.mockImplementation(path => {
+    if (path.includes('/roledefinitions?')) return { value: defined };
+    if (path.includes('/roledefinitions/getbyname')) return defined.find(role => role.Name === 'ModernizationAcronyms Add Only');
+    if (path === glossaryScope + '?$select=HasUniqueRoleAssignments,ReadSecurity,WriteSecurity') return { HasUniqueRoleAssignments: unique, ReadSecurity: 1, WriteSecurity: 1 };
+    return get(path);
+  });
+  store.post.mockImplementation((path, options) => {
+    if (path === '/_api/web/roledefinitions') { defined.push({ ...options.body, Id: 26 }); return {}; }
+    if (path === glossaryScope + '/breakroleinheritance(copyRoleAssignments=true,clearSubscopes=false)') { unique = true; return {}; }
+    expect(path.startsWith(glossaryScope + '/roleassignments/')).toBe(true);
+    return post(path);
+  });
+  acl(glossaryScope).push(row(20, 2), row(21, 2));
+  return { store, permissions, acl, defined };
+}
+it('sets up only the glossary for add access and manager removal, preserving existing grants across retries', async () => {
+  const { store, permissions, acl, defined } = glossaryFixture();
+  await permissions.prepareGlossaryAccess();
+  expect(defined.find(role => role.Name === 'ModernizationAcronyms Add Only').BasePermissions).toEqual({ Low: '200707', High: '32' });
+  expect(acl(glossaryScope)).toEqual(expect.arrayContaining([row(99, 1073741829), row(88, 19, 1), row(20, 2), row(21, 2), row(20, 26), row(21, 26), row(22, 3)]));
+  store.post.mockClear();
+  await permissions.prepareGlossaryAccess();
+  expect(store.post).not.toHaveBeenCalled();
+});
+it.each(['delegated manager', 'unsafe named role', 'existing edit grant', 'creator-only list settings'])('stops glossary setup for %s without granting access', async reason => {
+  const { store, permissions, acl, defined } = glossaryFixture();
+  if (reason === 'delegated manager') permissions.currentRole.mockResolvedValue({ role: 'Manager', siteOwner: false });
+  if (reason === 'unsafe named role') defined.push({ Id: 26, Name: 'ModernizationAcronyms Add Only', BasePermissions: { Low: '200719', High: '32' } });
+  if (reason === 'existing edit grant') acl(glossaryScope).push(row(21, 3));
+  if (reason === 'creator-only list settings') {
+    const get = store.get.getMockImplementation();
+    store.get.mockImplementation(path => path.includes('WriteSecurity') ? { HasUniqueRoleAssignments: true, ReadSecurity: 1, WriteSecurity: 2 } : get(path));
+  }
+  await expect(permissions.prepareGlossaryAccess()).rejects.toThrow();
+  expect(store.post).not.toHaveBeenCalled();
+});
+it('resumes an interrupted glossary grant and verifies SharePoint accepted the remaining bindings', async () => {
+  const { permissions, store, acl } = glossaryFixture();
+  const post = store.post.getMockImplementation();
+  store.post.mockImplementation((path, options) => path.includes('principalid=21') ? Promise.resolve({}) : post(path, options));
+  await expect(permissions.prepareGlossaryAccess()).rejects.toThrow('did not verify');
+  expect(acl(glossaryScope)).toContainEqual(row(20, 26));
+  store.post.mockImplementation(post).mockClear();
+  await permissions.prepareGlossaryAccess();
+  expect(store.post.mock.calls.map(([path]) => path)).toEqual([glossaryScope + '/roleassignments/addroleassignment(principalid=21,roledefid=26)']);
+});

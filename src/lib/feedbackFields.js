@@ -2,7 +2,7 @@ export const FEEDBACK_STATUSES = ['New', 'In progress', 'Resolved', 'Closed'];
 export const FEEDBACK_STATUS_XML = '<Field Type="Choice" DisplayName="Feedback status" Name="FeedbackStatus" StaticName="FeedbackStatus" Required="FALSE"><Default>New</Default><CHOICES>' + FEEDBACK_STATUSES.map(value => `<CHOICE>${value}</CHOICE>`).join('') + '</CHOICES></Field>';
 
 // Upgrade existing lists only when an owner saves an update. No ACL or item changes.
-export async function ensureFeedbackStatus(store, path) {
+export async function ensureFeedbackStatus(store, path, { allowCreate = true } = {}) {
   const read = async () => {
     // A collection query returns [] for an absent column; direct field lookups
     // can report a missing field as 400, indistinguishable from other errors.
@@ -13,6 +13,7 @@ export async function ensureFeedbackStatus(store, path) {
   };
   let field = await read();
   if (!field) {
+    if (!allowCreate) throw new Error('Ask a site owner to enable manager history access in the feedback dialog.');
     try {
       await store.post(`${path}/fields/createfieldasxml`, { verbose: true, body: { parameters: { __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' }, SchemaXml: FEEDBACK_STATUS_XML, Options: 24 } } });
     } catch (error) {

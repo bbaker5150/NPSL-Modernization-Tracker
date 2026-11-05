@@ -8,7 +8,7 @@ import { FEEDBACK_STATUSES } from '../lib/feedbackFields';
 export function Feedback({ store }) {
   const api = useMemo(() => createFeedback(store), [store]);
   const dialog = useRef(null), trigger = useRef(null), active = useRef(false);
-  const [open, setOpen] = useState(false), [owner, setOwner] = useState(false), [tab, setTab] = useState('submit');
+  const [open, setOpen] = useState(false), [{ owner, review }, setAccess] = useState({ owner: false, review: false }), [tab, setTab] = useState('submit');
   const [kind, setKind] = useState('Bug'), [title, setTitle] = useState(''), [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [sent, setSent] = useState(false), [items, setItems] = useState(null);
   const [clearIds, setClearIds] = useState(null), [inboxMessage, setInboxMessage] = useState('');
@@ -16,18 +16,18 @@ export function Feedback({ store }) {
   const [ownerError, setOwnerError] = useState('');
   const [setupState, setSetupState] = useState(null), [setupError, setSetupError] = useState(''), [setupMessage, setSetupMessage] = useState('');
   useEffect(() => {
-    setOwner(false); setOwnerError(''); setSetupState(null); setSetupError(''); setSetupMessage(''); setClearIds(null); setInboxMessage(''); setEditing(null); setDeleteTitle(null);
+    setAccess({ owner: false, review: false }); setOwnerError(''); setSetupState(null); setSetupError(''); setSetupMessage(''); setClearIds(null); setInboxMessage(''); setEditing(null); setDeleteTitle(null);
     if (!open) return;
     let mounted = true;
-    api.isOwner().then(async value => {
+    api.access().then(async value => {
       if (!mounted) return;
-      setOwner(value);
-      if (value) {
+      setAccess(value);
+      if (value.owner) {
         try { const status = await api.setup.status(); if (mounted) setSetupState(status); }
         catch (caught) { if (mounted) setSetupError(caught.message); }
       }
     }).catch(() => {
-      if (mounted) setOwnerError('Site-owner access could not be verified. Close and reopen feedback to retry. You can still send feedback.');
+      if (mounted) setOwnerError('Feedback History access could not be verified. Close and reopen feedback to retry. You can still send feedback.');
     });
     return () => { mounted = false; };
   }, [api, open]);
@@ -49,12 +49,12 @@ export function Feedback({ store }) {
   const setupBlocked = owner && (!setupState?.ready || !!setupError);
   async function inbox() {
     setTab('inbox'); setBusy(true); setError(''); setItems(null); setClearIds(null); setInboxMessage(''); setEditing(null); setDeleteTitle(null);
-    try { setItems(await api.list()); } catch (caught) { setError(caught.message); }
+    try { setItems(await api.list()); } catch (caught) { setError(!owner && [403, 404].includes(caught.status) ? 'Ask a site owner to enable manager history access in the feedback dialog.' : caught.message); }
     finally { setBusy(false); }
   }
   async function saveSubmission(event) {
     event.preventDefault();
-    if (!owner || busy || active.current || !editing) return;
+    if (!review || busy || active.current || !editing) return;
     let value;
     try { value = { ...validateFeedback(editing), status: editing.status }; }
     catch (caught) { setError(caught.message); return; }
@@ -64,8 +64,8 @@ export function Feedback({ store }) {
       setItems(current => current.map(item => item.id === editing.id ? { ...item, ...value, etag: null } : item));
       setEditing(null); setInboxMessage('Submission updated.');
       try { setItems(await api.list()); }
-      catch (caught) { setError(`Saved, but the inbox could not refresh. Reopen it before editing again. ${caught.message}`); }
-    } catch (caught) { setError(`${caught.message} Your draft has been kept. If the request timed out, reopen the inbox to check before retrying.`); }
+      catch (caught) { setError(`Saved, but Feedback History could not refresh. Reopen it before editing again. ${caught.message}`); }
+    } catch (caught) { setError(`${caught.message} Your draft has been kept. If the request timed out, reopen Feedback History to check before retrying.`); }
     finally { active.current = false; setBusy(false); }
   }
   async function clearInbox() {
@@ -76,7 +76,7 @@ export function Feedback({ store }) {
       setItems(value => value?.filter(item => !clearedIds.includes(item.id)));
       setInboxMessage(`${deleteTitle !== null ? 'Submission deleted.' : `${clearedIds.length} submission${clearedIds.length === 1 ? '' : 's'} cleared.`}${api.local ? '' : ' Items can be restored from the SharePoint recycle bin.'}`);
       try { setItems(await api.list()); }
-      catch (caught) { setError(`The submissions were cleared, but the inbox could not refresh. Reopen it to see new arrivals. ${caught.message}`); }
+      catch (caught) { setError(`The submissions were cleared, but Feedback History could not refresh. Reopen it to see new arrivals. ${caught.message}`); }
     } catch (caught) {
       if (caught.clearedIds) setItems(value => value?.filter(item => !caught.clearedIds.includes(item.id)));
       setInboxMessage(''); setError(caught.message);
@@ -85,17 +85,26 @@ export function Feedback({ store }) {
   return <>
     <button ref={trigger} className="icon-button" aria-label="Report a bug or request a feature" title="Report a bug or request a feature" onClick={() => { setOpen(true); setTab('submit'); setError(''); setSent(false); }}><Icon name="bug" /></button>
     {open && createPortal(<dialog ref={dialog} className="modal feedback-dialog" aria-labelledby="feedback-title" onCancel={event => { if (busy) event.preventDefault(); else setOpen(false); }} onClose={() => setOpen(false)}>
-      <header><div><h2 id="feedback-title">{tab === 'inbox' ? 'Owner inbox' : 'Help improve the tracker'}</h2><p>{tab === 'inbox' ? 'Private bug reports and feature requests for site owners.' : 'Report an issue or share an idea for what comes next.'}</p></div><button className="icon-button" aria-label="Close feedback" disabled={busy} onClick={() => setOpen(false)}><Icon name="close" /></button></header>
+      <header><div><h2 id="feedback-title">{tab === 'inbox' ? 'Feedback History' : 'Help improve the tracker'}</h2><p>{tab === 'inbox' ? 'Review bug reports and feature requests.' : 'Report an issue or share an idea for what comes next.'}</p></div><button className="icon-button" aria-label="Close feedback" disabled={busy} onClick={() => setOpen(false)}><Icon name="close" /></button></header>
       <div className="modal-body feedback-body">
-        <p className="feedback-privacy"><Icon name="shield" size={16} /> {api.local ? 'Local preview · submissions disappear when the page reloads.' : 'Private feedback · only site owners can read submissions.'}</p>
+        <p className="feedback-privacy"><Icon name="shield" size={16} /> {api.local ? 'Local preview · submissions disappear when the page reloads.' : 'Private feedback · site owners and Tracker Managers can review submissions.'}</p>
         {owner && !setupState && !setupError && <p role="status">Checking feedback storage and permissions…</p>}
         {ownerError && <p role="alert" className="inline-error">{ownerError}</p>}
         {setupMessage && <p role="status">{setupMessage}</p>}
         {setupError && <p role="alert" className="inline-error">Feedback setup could not be verified: {setupError}</p>}
+        {owner && setupState?.ready && setupState.managerReviewNeeded && <section className="feedback-setup">
+          <h3>Manager access to Feedback History</h3><p>Give Tracker Managers permission to read and edit submissions on this list.</p>
+          <button type="button" className="button secondary" disabled={busy} onClick={async () => {
+            setBusy(true); setError('');
+            try { setSetupState(await api.setup.enableManagerReview()); setSetupMessage('Tracker Managers can now review and edit feedback.'); }
+            catch (caught) { setError(caught.message); }
+            finally { setBusy(false); }
+          }}>Enable manager history access</button>
+        </section>}
         {owner && setupState && !setupState.ready && <FeedbackSetup setup={api.setup} state={setupState} busy={busy} onBusy={setBusy} onReady={state => { setSetupState(state); setError(''); setSetupMessage(`${state.title} is ready in Site Contents.`); }} />}
         {tab === 'inbox' && inboxMessage && <p role="status" aria-live="polite">{inboxMessage}</p>}
         {error && <p role="alert" className="inline-error">{error}</p>}
-        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in the owner inbox.' : 'Your submission has been sent privately to the site owners.'}</p></div> : <form noValidate onSubmit={submit} className="feedback-form">
+        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in Feedback History.' : 'Your submission was added to Feedback History.'}</p></div> : <form noValidate onSubmit={submit} className="feedback-form">
           <fieldset disabled={busy}><legend>What would you like to share?</legend><div className="feedback-types">{[['Bug', 'bug', 'Report a bug', 'Something isn’t working as expected.'], ['Feature', 'idea', 'Request a feature', 'An idea to make your work easier.']].map(([value, icon, label, hint]) => <label key={value} className={kind === value ? 'selected' : ''}><input type="radio" name="feedback-kind" value={value} checked={kind === value} onChange={() => setKind(value)} /><Icon name={icon} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
           <label className="field">Summary<input autoFocus required maxLength={200} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} placeholder={kind === 'Bug' ? 'What went wrong?' : 'What would you like to do?'} /></label>
           <label className="field">{kind === 'Bug' ? 'What happened?' : 'Tell us about your idea'}<textarea required maxLength={10000} rows={7} value={details} disabled={busy} onChange={event => setDetails(event.target.value)} placeholder={kind === 'Bug' ? 'Include steps to reproduce, what you expected, and what happened instead.' : 'Describe the feature and how it would help your workflow.'} /></label>
@@ -103,7 +112,7 @@ export function Feedback({ store }) {
         </form> : clearIds ? <section className="feedback-clear-confirm" aria-labelledby="feedback-clear-title">
           <Icon name="trash" size={28} />
           <h3 id="feedback-clear-title">{deleteTitle !== null ? 'Delete this submission?' : `Clear ${clearIds.length} submission${clearIds.length === 1 ? '' : 's'}?`}</h3>
-          {deleteTitle !== null ? <><strong>{deleteTitle}</strong><p>This removes this submission from the shared inbox for all site owners. Other submissions will be kept.</p></> : <p>This clears the submissions currently shown for all site owners. New feedback received after this inbox was loaded will be kept.</p>}
+          {deleteTitle !== null ? <><strong>{deleteTitle}</strong><p>This removes this submission from Feedback History for all site owners and Tracker Managers. Other submissions will be kept.</p></> : <p>This clears the submissions currently shown for all site owners and Tracker Managers. New feedback received after this inbox was loaded will be kept.</p>}
           <p>{api.local ? 'Local preview submissions will be removed.' : 'Submissions will move to the SharePoint recycle bin, where a site owner can restore them.'}</p>
         </section> : <section aria-label="Feedback submissions" aria-busy={busy}>
           {busy && items === null ? <p role="status">Loading submissions…</p> : items?.length === 0 ? <div className="feedback-success"><Icon name="note" size={32} /><h3>No feedback yet</h3><p>Bug reports and feature requests will appear here.</p></div> : items?.map(item => <article key={item.id} className="feedback-item" aria-label={item.title}>
@@ -120,9 +129,9 @@ export function Feedback({ store }) {
             </form> : <>
               <p>{item.details}</p>
               <div className="feedback-item-footer"><span className="feedback-status" data-status={item.status}>{item.status}</span>
-                {owner && <div className="feedback-item-actions">
+                {review && <div className="feedback-item-actions">
                   <button type="button" className="button secondary" disabled={busy || !!editing || !item.etag} onClick={() => { setEditing({ ...item }); setError(''); setInboxMessage(''); }}>Edit</button>
-                  <button type="button" className="button feedback-clear" disabled={busy || !!editing} onClick={() => { setClearIds([item.id]); setDeleteTitle(item.title); setError(''); setInboxMessage(''); }}><Icon name="trash" size={15} />Delete</button>
+                  {owner && <button type="button" className="button feedback-clear" disabled={busy || !!editing} onClick={() => { setClearIds([item.id]); setDeleteTitle(item.title); setError(''); setInboxMessage(''); }}><Icon name="trash" size={15} />Delete</button>}
                 </div>}
               </div>
             </>}
@@ -137,7 +146,7 @@ export function Feedback({ store }) {
           {owner && <button type="button" className="button secondary" disabled={busy || !!editing || !items?.length} onClick={() => { setClearIds(items.map(item => item.id)); setDeleteTitle(null); setError(''); setInboxMessage(''); }}>Clear inbox</button>}
           <button type="button" className="button primary" disabled={busy || !!editing} onClick={() => { setTab('submit'); setSent(false); setError(''); }}>Back to feedback</button>
         </> : <>
-          {owner && <button type="button" className="button secondary" disabled={busy || setupBlocked} onClick={inbox}><Icon name="note" size={16} />Owner inbox</button>}
+          {review && <button type="button" className="button secondary" disabled={busy || setupBlocked} onClick={inbox}><Icon name="note" size={16} />Feedback History</button>}
           {sent ? <button type="button" className="button primary" onClick={() => setSent(false)}>Send another</button>
             : <button type="button" onClick={submit} className="button primary" disabled={busy || setupBlocked}>{busy ? 'Sending…' : 'Send feedback'}</button>}
         </>}

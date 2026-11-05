@@ -1,5 +1,7 @@
 import { TrackerLists, legacyListTitle, listTitleAliases } from './trackerLists';
 import { submitPrivateFeedback } from './feedbackSubmission';
+import { TRACKER_GROUPS } from './trackerGroups';
+import { isManager } from './access';
 import { feedbackSetup } from './feedbackSetup';
 import { ensureFeedbackStatus, FEEDBACK_STATUSES } from './feedbackFields';
 // Feedback is deliberately separate from shared tracker data and exports.
@@ -20,10 +22,13 @@ export function createFeedback(store) {
   // Local mode is a disposable demonstration, never a private data store.
   const preview = [];
   const local = !store.webUrl;
-  async function isOwner() {
+  async function access() {
     const user = await store.currentUser();
-    if (user.isSiteAdmin) return true;
-    if (local) return false;
+    if (user.isSiteAdmin) return { owner: true, review: true };
+    if (local) {
+      const data = await store.load?.();
+      return { owner: false, review: isManager(user, data?.users) };
+    }
     // Match the tracker's site-owner definition: Manage Permissions on the WEB.
     // Effective permissions include direct grants and security-group membership;
     // currentuser/groups alone can omit these. List/project permissions and app
@@ -32,18 +37,21 @@ export function createFeedback(store) {
     try {
       const response = unwrap(await store.get('/_api/web/effectivebasepermissions'));
       const bits = response?.EffectiveBasePermissions || response;
-      if ((BigInt(bits?.Low || 0) & 33554432n) !== 0n) return true;
+      if ((BigInt(bits?.Low || 0) & 33554432n) !== 0n) return { owner: true, review: true };
     } catch (error) { permissionError = error; }
-    const group = unwrap(await store.get('/_api/web/associatedownergroup?$select=Id'));
-    if (Number.isInteger(group?.Id)) {
-      const groups = rows(await store.get('/_api/web/currentuser/groups?$select=Id&$top=5000'));
-      if (groups.some(entry => entry.Id === group.Id)) return true;
-    }
-    if (permissionError) throw permissionError;
-    return false;
+    const groups = rows(await store.get('/_api/web/currentuser/groups?$select=Id,Title&$top=5000'));
+    const manager = groups.some(group => group.Title === TRACKER_GROUPS.Manager);
+    try {
+      const group = unwrap(await store.get('/_api/web/associatedownergroup?$select=Id'));
+      if (Number.isInteger(group?.Id) && groups.some(entry => entry.Id === group.Id)) return { owner: true, review: true };
+    } catch (error) { permissionError ||= error; }
+    if (permissionError && !manager) throw permissionError;
+    return { owner: false, review: manager };
   }
+  const isOwner = async () => (await access()).owner;
   return {
     local,
+    access,
     isOwner,
     setup: feedbackSetup(store, title, isOwner),
     async submit(input) {
@@ -53,25 +61,26 @@ export function createFeedback(store) {
       await submitPrivateFeedback(store, [aliases[1], aliases[0], ...aliases.slice(2)], value);
     },
     async update(id, input, etag) {
-      if (!await isOwner()) throw new Error('Only site owners can update submissions.');
+      const { owner, review } = await access();
+      if (!review) throw new Error('Only site owners and Tracker Managers can update submissions.');
       if (local ? typeof id !== 'string' || !id : !Number.isSafeInteger(id) || id <= 0) throw new Error('Select a valid feedback submission to update.');
       const value = validateFeedback(input);
       if (!FEEDBACK_STATUSES.includes(input.status)) throw new Error('Choose a valid feedback status.');
-      if (typeof etag !== 'string' || !etag || etag === '*') throw new Error('Reopen the inbox to load the latest submission before editing.');
+      if (typeof etag !== 'string' || !etag || etag === '*') throw new Error('Reopen Feedback History to load the latest submission before editing.');
       if (local) {
         const index = preview.findIndex(item => item.id === id);
-        if (index < 0) throw new Error('This submission was deleted. Reopen the inbox.');
-        if (preview[index].etag !== etag) throw new Error('This submission changed. Reopen the inbox before editing again.');
+        if (index < 0) throw new Error('This submission was deleted. Reopen Feedback History.');
+        if (preview[index].etag !== etag) throw new Error('This submission changed. Reopen Feedback History before editing again.');
         preview[index] = { ...preview[index], ...value, status: input.status, etag: String(Number(etag) + 1) };
         return;
       }
       const path = await catalog.path('feedback');
-      await ensureFeedbackStatus(store, path);
+      await ensureFeedbackStatus(store, path, { allowCreate: owner });
       try {
         await store.post(`${path}/items(${id})`, { body: { Title: value.title, FeedbackKind: value.kind, FeedbackDetails: value.details, FeedbackStatus: input.status }, headers: { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': etag } });
       } catch (error) {
-        if (error.status === 412) throw new Error('Another owner updated this submission. Your draft is still here; copy any changes and reopen the inbox to review the latest version.');
-        if (error.status === 404) throw new Error('This submission was deleted. Your draft is still here; reopen the inbox to refresh.');
+        if (error.status === 412) throw new Error('Another reviewer updated this submission. Your draft is still here; copy any changes and reopen Feedback History to review the latest version.');
+        if (error.status === 404) throw new Error('This submission was deleted. Your draft is still here; reopen Feedback History to refresh.');
         throw error;
       }
     },
@@ -93,7 +102,7 @@ export function createFeedback(store) {
           clearedIds.push(id);
           onProgress({ cleared: clearedIds.length, total: selected.length });
         } catch (cause) {
-          const error = new Error(`Cleared ${clearedIds.length} of ${selected.length} submissions. ${cause.message} Reopen the inbox to check its current contents before retrying.`);
+          const error = new Error(`Cleared ${clearedIds.length} of ${selected.length} submissions. ${cause.message} Reopen Feedback History to check its current contents before retrying.`);
           error.clearedIds = [...clearedIds];
           throw error;
         }
@@ -101,13 +110,13 @@ export function createFeedback(store) {
       return { clearedIds };
     },
     async list() {
-      if (!await isOwner()) throw new Error('Only site owners can view submissions.');
+      if (!(await access()).review) throw new Error('Only site owners and Tracker Managers can view submissions.');
       if (local) return preview.map(item => ({ ...item }));
       const path = await catalog.path('feedback');
       // Select * so older lists without FeedbackStatus remain readable before upgrade.
       const result = []; let next = `${path}/items?$select=*,Author/Title&$expand=Author&$orderby=Created desc&$top=100`;
       while (next) {
-        const body = await store.get(next, { Accept: 'application/json;odata=minimalmetadata' });
+        const body = await store.get(next, { Accept: 'application/json;odata=verbose' });
         result.push(...rows(body).map(row => ({ id: row.Id, title: row.Title, kind: row.FeedbackKind, details: row.FeedbackDetails, status: row.FeedbackStatus || 'New', etag: row['@odata.etag'] || row['odata.etag'] || row.__metadata?.etag, created: row.Created, author: row.Author?.Title || 'Unknown' })));
         const link = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
         if (!link) break;

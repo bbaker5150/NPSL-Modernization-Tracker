@@ -136,7 +136,7 @@ try {
         await app.getByLabel('What happened?', { exact: true }).fill('A newly invited Tracker Viewer can submit private feedback.');
         await app.getByRole('button', { name: 'Send feedback', exact: true }).click();
         await app.getByRole('heading', { name: 'Thank you for the feedback' }).waitFor();
-        assert.equal(await app.getByRole('button', { name: 'Owner inbox', exact: true }).count(), 0);
+        assert.equal(await app.getByRole('button', { name: 'Feedback History', exact: true }).count(), 0);
         const viewerWrites = writes.slice(viewerWriteStart).filter(write => !write.path.endsWith('/contextinfo'));
         assert.deepEqual(viewerWrites.map(write => write.path), ['/_vti_bin/client.svc/ProcessQuery']);
         assert.match(viewerWrites[0].body, /Tracker-only Viewer feedback/);

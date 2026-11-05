@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { feedbackSetup, SUBMIT_PERMISSIONS } from './feedbackSetup';
+import { feedbackSetup, SUBMIT_PERMISSIONS, REVIEW_PERMISSIONS } from './feedbackSetup';
 const missing = () => Object.assign(new Error('Missing'), { status: 404 });
 export function setupFixture() {
   const state = { list: null, fields: [], roles: [{ Id: 1, RoleTypeKind: 5, BasePermissions: { Low: '4294967295', High: '2147483647' } }], assignments: [], failField: false };
@@ -9,7 +9,7 @@ export function setupFixture() {
     if (path.includes('/EffectiveBasePermissions')) return { Low: '4294967295' };
     if (path.includes('/associatedownergroup')) return { Id: 10, Title: 'Site Owners' };
     if (path.includes('/sitegroups?')) return { value: [{ Id: 10, Title: 'Site Owners' }, { Id: 20, Title: 'Tracker Users' }, { Id: 21, Title: 'Tracker Project Engineers' }, { Id: 22, Title: 'Tracker Managers' }] };
-    if (path.includes('/roledefinitions/getbyname')) return state.roles.find(role => role.Name);
+    if (path.includes('/roledefinitions/getbyname')) return state.roles.find(role => role.Name && decodeURIComponent(path).includes(role.Name));
     if (path.includes('/roledefinitions?')) return { value: structuredClone(state.roles) };
     if (path.includes('/roleassignments?')) return { value: state.assignments.map(assignment => ({ ...assignment, RoleDefinitionBindings: assignment.RoleDefinitionBindings.map(role => path.includes('BasePermissions') ? state.roles.find(entry => entry.Id === role.Id) : role) })) };
     if (path.includes('/fields?')) return { value: structuredClone(state.fields) };
@@ -19,8 +19,8 @@ export function setupFixture() {
   raw.post = vi.fn(async (path, options = {}) => {
     if (path === '/_api/web/lists') state.list = { Id: '11111111-1111-1111-1111-111111111111', ...options.body, ItemCount: 0, HasUniqueRoleAssignments: false };
     else if (path.includes('/breakroleinheritance')) { state.list.HasUniqueRoleAssignments = true; if (!state.assignments.length) state.assignments = [{ PrincipalId: 8, RoleDefinitionBindings: [{ Id: 1 }] }]; }
-    else if (path.includes('/fields/createfieldasxml')) { if (state.failField) throw new Error('Field creation failed'); state.fields.push({ InternalName: options.body.parameters.SchemaXml.match(/ Name="([^"]+)"/)[1] }); }
-    else if (path === '/_api/web/roledefinitions') state.roles.push({ Id: 2, ...options.body });
+    else if (path.includes('/fields/createfieldasxml')) { if (state.failField) throw new Error('Field creation failed'); state.fields.push({ TypeAsString: 'Choice', Choices: ['New', 'In progress', 'Resolved', 'Closed'], InternalName: options.body.parameters.SchemaXml.match(/ Name="([^"]+)"/)[1] }); }
+    else if (path === '/_api/web/roledefinitions') state.roles.push({ Id: state.roles.length + 1, ...options.body });
     else if (path.includes('/addroleassignment(')) { const [, principal, role] = path.match(/principalid=(\d+),roledefid=(\d+)/); state.assignments.push({ PrincipalId: Number(principal), RoleDefinitionBindings: [{ Id: Number(role) }] }); }
     else if (options.headers?.['X-HTTP-Method'] === 'DELETE') { const principal = Number(path.match(/getbyprincipalid\((\d+)\)/)[1]); state.assignments = state.assignments.filter(assignment => assignment.PrincipalId !== principal); }
     else if (options.headers?.['X-HTTP-Method'] === 'MERGE') Object.assign(state.list, options.body);
@@ -39,8 +39,9 @@ describe('private feedback setup', () => {
     const { raw, state, setup } = setupFixture();
     expect(await setup.provision([20, 21, 22])).toMatchObject({ ready: true });
     expect(state.list).toMatchObject({ HasUniqueRoleAssignments: true, Hidden: false, NoCrawl: true, EnableAttachments: false });
-    expect(state.assignments).toEqual([{ PrincipalId: 10, RoleDefinitionBindings: [{ Id: 1 }] }, ...[20, 21, 22].map(PrincipalId => ({ PrincipalId, RoleDefinitionBindings: [{ Id: 2 }] }))]);
+    expect(state.assignments).toEqual([{ PrincipalId: 10, RoleDefinitionBindings: [{ Id: 1 }] }, ...[20, 21, 22].map(PrincipalId => ({ PrincipalId, RoleDefinitionBindings: [{ Id: PrincipalId === 22 ? 3 : 2 }] }))]);
     expect(state.roles[1].BasePermissions).toEqual(SUBMIT_PERMISSIONS);
+    expect(state.roles[2].BasePermissions).toEqual(REVIEW_PERMISSIONS);
     const calls = raw.post.mock.calls.map(([path]) => path);
     expect(calls.findIndex(path => path.includes('principalid=20'))).toBeGreaterThan(calls.findLastIndex(path => path.includes('createfieldasxml')));
     expect(await setup.status()).toMatchObject({ ready: true });
@@ -71,7 +72,7 @@ describe('private feedback setup', () => {
     expect(await setup.status()).toMatchObject({ ready: false, partial: true });
     state.failField = false; await setup.provision([20]);
     expect(raw.post.mock.calls.filter(([path]) => path === '/_api/web/lists')).toHaveLength(1);
-    expect(state.assignments.map(assignment => assignment.PrincipalId)).toEqual([10, 20]);
+    expect(state.assignments.map(assignment => assignment.PrincipalId)).toEqual([10, 20, 22]);
   });
   it('detects reading access granted outside Owners on a configured list', async () => {
     const { state, setup } = setupFixture(); await setup.provision([20]);
@@ -119,5 +120,41 @@ it('requires Tracker Users before offering scoped feedback setup without a suite
   const get = raw.get.getMockImplementation();
   raw.get.mockImplementation(path => path.includes('/sitegroups?') ? { value: [{ Id: 30, Title: 'Metrology App User' }] } : get(path));
   await expect(setup.options()).rejects.toThrow('Create the SharePoint group Tracker Users');
+  expect(raw.post).not.toHaveBeenCalled();
+});
+
+it('upgrades a populated private list in place and preserves every existing grant and item', async () => {
+  const { raw, state, setup } = setupFixture();
+  await setup.provision([20, 21, 22]);
+  // The old version gave managers only the submit role and had no status column.
+  const manager = state.assignments.find(row => row.PrincipalId === 22);
+  manager.RoleDefinitionBindings = [{ Id: 2 }];
+  state.fields = state.fields.filter(field => field.InternalName !== 'FeedbackStatus');
+  state.roles = state.roles.filter(role => role.Name !== 'ModernizationFeedback Review');
+  state.list.ItemCount = 14;
+  const previous = structuredClone(state.assignments);
+  raw.post.mockClear();
+  expect(await setup.status()).toMatchObject({ managerReviewNeeded: true });
+  expect(raw.post).not.toHaveBeenCalled();
+  expect(await setup.enableManagerReview()).toMatchObject({ ready: true, managerReviewNeeded: false });
+  expect(state.list.ItemCount).toBe(14);
+  expect(state.assignments).toEqual([...previous, { PrincipalId: 22, RoleDefinitionBindings: [{ Id: 3 }] }]);
+  expect(raw.post.mock.calls.every(([path]) => !/breakroleinheritance|\/items|recycle/.test(path))).toBe(true);
+  raw.post.mockClear();
+  await setup.enableManagerReview();
+  expect(raw.post).not.toHaveBeenCalled();
+});
+
+it('refuses broader manager privileges and unsafe legacy privacy settings before granting history access', async () => {
+  const { raw, state, setup } = setupFixture();
+  await setup.provision([20]);
+  const manager = state.assignments.find(row => row.PrincipalId === 22);
+  manager.RoleDefinitionBindings = [{ Id: 1 }];
+  raw.post.mockClear();
+  await expect(setup.enableManagerReview()).rejects.toThrow('reading access outside');
+  expect(raw.post).not.toHaveBeenCalled();
+  manager.RoleDefinitionBindings = [{ Id: 2 }];
+  state.list.ReadSecurity = 2;
+  await expect(setup.enableManagerReview()).rejects.toThrow('restricts item access by author');
   expect(raw.post).not.toHaveBeenCalled();
 });

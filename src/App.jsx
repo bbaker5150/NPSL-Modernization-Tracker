@@ -198,6 +198,7 @@ function MyWork({ projects, tasks, user, onOpen, onTask, onDelete }) {
 function Glossary({ manager, acronyms, onAdd, onDelete }) {
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState({ acronym: '', term: '', definition: '' });
+  const [adding, setAdding] = useState(false);
   const normalizedQuery = query.trim().toLowerCase();
   const rows = [...acronyms]
     .filter((entry) => [entry.acronym, entry.term, entry.definition].some((value) => String(value || '').toLowerCase().includes(normalizedQuery)))
@@ -205,13 +206,22 @@ function Glossary({ manager, acronyms, onAdd, onDelete }) {
   const set = (key) => (event) => setDraft((entry) => ({ ...entry, [key]: event.target.value }));
   const submit = async (event) => {
     event.preventDefault();
-    if (!draft.acronym.trim() || !draft.term.trim()) return;
-    const saved = await onAdd(draft);
-    if (saved) setDraft({ acronym: '', term: '', definition: '' });
+    if (adding || !draft.acronym.trim() || !draft.term.trim()) return;
+    setAdding(true);
+    try {
+      if (await onAdd(draft)) setDraft({ acronym: '', term: '', definition: '' });
+    } finally { setAdding(false); }
   };
-  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Modernization reference</span><h1>Acronym glossary</h1><p>A shared modernization reference maintained by managers.</p></div><label className="select-wrap glossary-search"><Icon name="search" /><input aria-label="Search acronym glossary" placeholder="Search terms or definitions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></section>
-    {manager && <form className="panel glossary-composer" onSubmit={submit}><label><span>Acronym</span><input aria-label="Acronym" placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label><label><span>Full term</span><input aria-label="Full term" placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label><label className="glossary-definition"><span>Definition</span><input aria-label="Definition" placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label><button className="button primary" type="submit" disabled={!draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button></form>}
-    <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span><span>Actions</span></div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p>{manager && <button className="glossary-delete" type="button" aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button>}</div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>
+  return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Modernization reference</span><h1>Acronym glossary</h1><p>Add terms and definitions to the shared glossary.</p></div><label className="select-wrap glossary-search"><Icon name="search" /><input aria-label="Search acronym glossary" placeholder="Search terms or definitions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></section>
+    <form className="panel glossary-composer" onSubmit={submit} onKeyDown={event => {
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.target.tagName === 'INPUT') submit(event);
+    }}>
+      <label><span>Acronym</span><input aria-label="Acronym" disabled={adding} placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label>
+      <label><span>Full term</span><input aria-label="Full term" disabled={adding} placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label>
+      <label className="glossary-definition"><span>Definition</span><input aria-label="Definition" disabled={adding} placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label>
+      <button className="button primary" type="button" onClick={submit} disabled={adding || !draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button>
+    </form>
+    <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span>{manager && <span>Actions</span>}</div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p>{manager && <button className="glossary-delete" type="button" aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button>}</div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>
   </div>;
 }
 
@@ -631,20 +641,23 @@ export function App() {
   }
 
   async function editUpdate(item, changes) {
-    const saved = await repo.store.editUpdate({ ...item, ...changes });
-    setData(state => ({ ...state, updates: state.updates.map(row => row.id === saved.id ? saved : row) }));
+    const saved = item.legacyRisk ? await repo.store.editRisk({ ...item, ...changes }) : await repo.store.editUpdate({ ...item, ...changes });
+    const collection = item.legacyRisk ? 'risks' : 'updates';
+    setData(state => ({ ...state, [collection]: state[collection].map(row => row.id === saved.id ? saved : row) }));
     await refreshUpdates();
     return saved;
   }
   async function refreshUpdates() {
     try {
       const fresh = await repo.store.load();
-      setData(state => ({ ...state, updates: fresh.updates }));
+      setData(state => ({ ...state, updates: fresh.updates, risks: fresh.risks }));
     } catch { setToast({ tone: 'info', message: 'History could not refresh. Reload the tracker before editing an update.' }); }
   }
   async function deleteUpdate(item) {
-    await repo.store.deleteUpdate(item);
-    setData(state => ({ ...state, updates: state.updates.filter(row => row.id !== item.id) }));
+    const collection = item.legacyRisk ? 'risks' : 'updates';
+    if (item.legacyRisk) await repo.store.deleteRisk(item);
+    else await repo.store.deleteUpdate(item);
+    setData(state => ({ ...state, [collection]: state[collection].filter(row => row.id !== item.id) }));
   }
 
   async function toggleTaskComplete(task) {

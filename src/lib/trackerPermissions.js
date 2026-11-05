@@ -1,5 +1,6 @@
 import { isOwnedByUser } from './identity';
 import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
+import { legacyListTitle } from './trackerLists';
 export { TRACKER_GROUPS } from './trackerGroups';
 
 const CHILDREN = ['tasks', 'updates', 'risks'];
@@ -41,6 +42,9 @@ export class TrackerPermissions {
   async group(role) {
     const title = TRACKER_GROUPS[role];
     if (!title) throw new Error('Select a valid tracker role.');
+    return this.groupByName(title);
+  }
+  async groupByName(title) {
     const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
     if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`Verify the SharePoint group ${title} before assigning this role.`);
     return group;
@@ -170,6 +174,55 @@ export class TrackerPermissions {
     const role = roles.find(row => row.RoleTypeKind === 3);
     if (!positiveId(role?.Id)) throw new Error('SharePoint Contribute permission level is unavailable.');
     return role.Id;
+  }
+  async prepareGlossaryAccess() {
+    const { siteOwner } = await this.currentRole(await this.store.currentUser());
+    if (!siteOwner) throw new Error('Only a SharePoint site owner can set up glossary access.');
+    const scope = await this.store.listApi('acronyms');
+    const [basic, engineers, managers] = await Promise.all([
+      this.groupByName(TRACKER_USERS_GROUP), this.group('Project Engineer'), this.group('Manager'),
+    ]);
+    const roles = await this.pages('/_api/web/roledefinitions?$select=Id,Name,RoleTypeKind,BasePermissions');
+    const contribute = roles.find(role => role.RoleTypeKind === 3);
+    if (!positiveId(contribute?.Id) || (Number(contribute.BasePermissions?.Low) & 15) !== 15) throw new Error('Check the SharePoint Contribute permission level before setting up glossary access.');
+    const roleName = `${legacyListTitle(this.store.prefix, 'acronyms')} Add Only`;
+    // View/Add Items, View Forms, Open, View Pages, and Use Remote APIs.
+    const addMask = { Low: '200707', High: '32' };
+    const info = unwrap(await this.get(`${scope}?$select=HasUniqueRoleAssignments,ReadSecurity,WriteSecurity`));
+    if (typeof info.HasUniqueRoleAssignments !== 'boolean') throw new Error('SharePoint did not verify permission inheritance on the Acronyms list.');
+    if (Number(info.ReadSecurity) !== 1 || Number(info.WriteSecurity) !== 1) {
+      throw new Error('Check item-level permissions in Acronyms list settings → Advanced settings. Select Read all items and Create and edit all items. The list grants then control who can add and who can edit. Retry glossary setup.');
+    }
+    const current = await this.assignments(scope);
+    for (const row of current.filter(row => [Number(basic.Id), Number(engineers.Id)].includes(Number(row.PrincipalId)))) {
+      for (const binding of row.RoleDefinitionBindings.results || row.RoleDefinitionBindings) {
+        const assigned = roles.find(role => Number(role.Id) === Number(binding.Id));
+        const bits = assigned?.BasePermissions?.Low;
+        // Editing an item can archive it, so both Edit Items and Delete Items
+        // must be manager-only. Leave existing broad grants for owner review.
+        if (bits == null || !/^\d+$/.test(String(bits)) || (Number(bits) & (4 | 8 | 2048 | 33554432))) {
+          throw new Error('Review the Tracker Users and Tracker Project Engineers grants on the Acronyms list. Give these groups Read and glossary add access only. Existing grants were preserved.');
+        }
+      }
+    }
+    let addRole = roles.find(role => role.Name === roleName);
+    if (!addRole) {
+      await this.post('/_api/web/roledefinitions', { body: { Name: roleName, Description: 'Read and add glossary entries.', BasePermissions: addMask } });
+      addRole = unwrap(await this.get(`/_api/web/roledefinitions/getbyname('${quote(roleName)}')?$select=Id,Name,BasePermissions`));
+    }
+    if (!positiveId(addRole?.Id) || addRole.Name !== roleName || String(addRole.BasePermissions?.Low) !== addMask.Low || String(addRole.BasePermissions?.High) !== addMask.High) {
+      throw new Error(`Review the ${roleName} permission level. SharePoint did not verify its read and add permissions.`);
+    }
+    const grants = [
+      { principalId: Number(basic.Id), roleId: Number(addRole.Id) },
+      { principalId: Number(engineers.Id), roleId: Number(addRole.Id) },
+      { principalId: Number(managers.Id), roleId: Number(contribute.Id) },
+    ];
+    if (!info.HasUniqueRoleAssignments) await this.post(`${scope}/breakroleinheritance(copyRoleAssignments=true,clearSubscopes=false)`);
+    for (const grant of grants) {
+      if (!this.matchesBaseline(current, [grant])) await this.post(`${scope}/roleassignments/addroleassignment(principalid=${grant.principalId},roledefid=${grant.roleId})`);
+    }
+    if (!this.matchesBaseline(await this.assignments(scope), grants)) throw new Error('SharePoint did not verify the glossary grants. Retry glossary setup.');
   }
   async baselineGrants() {
     const roles = await this.pages('/_api/web/roledefinitions?$select=Id,Name,RoleTypeKind,BasePermissions');

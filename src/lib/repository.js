@@ -33,7 +33,15 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.updates = data.updates.map(row => ({ ...row, version: row.version || '1' })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
+  async load() {
+    const data = clone(this.data);
+    data.projects = data.projects.map((row) => ({ ...row, currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit }));
+    data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) }));
+    for (const row of [...data.updates, ...data.risks]) row.version ||= '1';
+    data.users = normalizeDirectory(data.users, data.projects);
+    data.tasks = normalizeTaskOrganizations(data.tasks, data.projects);
+    return data;
+  }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
@@ -51,6 +59,7 @@ class LocalStore {
   }
   async listUpdateAttachments(update) { return localAttachments(`updates/${update.id}`); }
   async addUpdateAttachment(update, file) { validateAttachment(file); await localAttachments(`updates/${update.id}`, file); }
+  async deleteUpdateAttachment(update, name) { await localAttachments(`updates/${update.id}`, undefined, name); }
   async downloadUpdateAttachment(update, name) { const file = (await this.listUpdateAttachments(update)).find(item => item.name === name); if (!file) throw new Error('This update document is unavailable.'); return file.blob; }
   async listReferenceEntries() { return clone(this.data.references); }
   async saveReferenceEntry(row, file) {
@@ -86,15 +95,25 @@ class LocalStore {
     const current = this.data.updates.find(item => item.id === row.id);
     return this.upsert('updates', { ...row, version: String(Number(current ? current.version || 1 : 0) + 1) }, 'update');
   }
-  async editUpdate(row) {
-    const current = this.data.updates.find(item => item.id === row.id);
+  checkHistoryVersion(collection, row) {
+    const current = this.data[collection].find(item => item.id === row.id);
     if (!current || String(current.version || '1') !== row.version) throw new Error('This update changed or was deleted. Reopen the project to refresh.');
+  }
+  async editUpdate(row) {
+    this.checkHistoryVersion('updates', row);
     return this.saveUpdate(row);
   }
   async deleteUpdate(row) {
-    const current = this.data.updates.find(item => item.id === row.id);
-    if (!current || String(current.version || '1') !== row.version) throw new Error('This update changed or was deleted. Reopen the project to refresh.');
+    this.checkHistoryVersion('updates', row);
     return this.recycle('updates', undefined, row.id);
+  }
+  async editRisk(row) {
+    this.checkHistoryVersion('risks', row);
+    return this.saveRisk({ ...row, version: String(Number(row.version) + 1) });
+  }
+  async deleteRisk(row) {
+    this.checkHistoryVersion('risks', row);
+    return this.recycle('risks', undefined, row.id);
   }
   async saveRisk(row) { return this.upsert('risks', row, 'risk'); }
   async saveAcronym(row) { return this.upsert('acronyms', row, 'acronym'); }

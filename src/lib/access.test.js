@@ -16,6 +16,26 @@ function fixture(role) {
 }
 
 describe('three-role access model', () => {
+  it.each(['Viewer', 'Project Engineer', 'Manager'])('allows %s to add distinct glossary entries and reserves changes and removal for managers', async role => {
+    const { store, state, raw } = fixture(role);
+    const existing = { id: 'old', spId: 31, acronym: 'CSS', term: 'Specification' };
+    state.acronyms = [existing];
+    const saved = await store.saveAcronym({ id: 'new', acronym: ' npsl ', term: ' Standards Lab ', definition: ' Lab ' });
+    expect(saved).toEqual({ id: 'new', acronym: 'NPSL', term: 'Standards Lab', definition: 'Lab' });
+    await expect(store.saveAcronym({ id: 'dup', acronym: ' css ', term: 'Duplicate' })).rejects.toThrow('already in the glossary');
+    await expect(store.saveAcronym({ id: 'empty', acronym: 'NEW', term: ' ' })).rejects.toThrow('full term');
+    if (role === 'Manager') {
+      await store.recycle('acronyms', existing.spId, existing.id);
+      expect(raw.recycle).toHaveBeenCalledWith('acronyms', 31, 'old');
+    } else {
+      for (const forged of [{ id: 'old' }, { id: 'new', spId: 31 }]) {
+        await expect(store.saveAcronym({ ...forged, acronym: 'MOD', term: 'Modified' })).rejects.toThrow('Only managers');
+      }
+      await expect(store.recycle('acronyms', existing.spId, existing.id)).rejects.toThrow('Only managers');
+      expect(raw.recycle).not.toHaveBeenCalled();
+    }
+    expect(raw.saveAcronym).toHaveBeenCalledTimes(1);
+  });
   it('recognizes claims identities and gives viewers all project reads without edit privileges', async () => {
     const { store, state, raw } = fixture('Viewer');
     expect(isManager(user, [{ email: user.email.toUpperCase(), role: 'Manager' }])).toBe(true);
@@ -273,4 +293,25 @@ it('retains an unchanged historical task reference and prevents saveUpdate bypas
   expect(await store.editUpdate(update)).toMatchObject({ taskId: 'removed', taskTitle: 'Historical task' });
   expect(await store.editUpdate({ ...update, taskId: '' })).toMatchObject({ taskId: '', taskTitle: '' });
   await expect(store.saveUpdate(update)).rejects.toThrow('Use Edit update');
+});
+
+it.each(['Manager', 'Project Engineer'])('scopes %s risk edits and update attachment removal to their allowed projects', async role => {
+  const { store, raw, state, update } = updateFixture(role);
+  const risk = { id: 'r', spId: 31, projectKey: 'own', ownerName: 'Original owner', probability: 'Low', title: 'Risk', version: '"2"' };
+  state.risks.push(risk, { ...risk, id: 'other-risk', projectKey: 'other' });
+  raw.editRisk = vi.fn(async row => row); raw.deleteRisk = vi.fn(); raw.deleteUpdateAttachment = vi.fn();
+  await expect(store.editRisk({ ...risk, title: ' Revised ', mitigation: ' New plan ', ownerName: 'Forged', projectKey: 'other', spId: 41 })).resolves.toMatchObject({ ...risk, title: 'Revised', mitigation: 'New plan' });
+  await store.deleteRisk(risk);
+  expect(raw.deleteRisk).toHaveBeenCalledExactlyOnceWith(risk);
+  await expect(store.deleteUpdateAttachment(update.id, 'existing.pdf', 'old')).rejects.toThrow('changed');
+  await store.deleteUpdateAttachment(update.id, 'existing.pdf', update.version);
+  expect(raw.deleteUpdateAttachment).toHaveBeenCalledExactlyOnceWith(update, 'existing.pdf');
+  for (const method of ['editRisk', 'deleteRisk']) {
+    await expect(store[method]({ ...risk, version: 'old' })).rejects.toThrow('changed');
+    if (role === 'Project Engineer') await expect(store[method]({ ...state.risks[1], projectKey: 'own' })).rejects.toThrow('Only managers');
+  }
+  state.users = directory('Viewer');
+  await expect(store.editRisk(risk)).rejects.toThrow('Only managers');
+  await expect(store.deleteRisk(risk)).rejects.toThrow('Only managers');
+  await expect(store.deleteUpdateAttachment(update.id, 'existing.pdf')).rejects.toThrow('Only managers');
 });

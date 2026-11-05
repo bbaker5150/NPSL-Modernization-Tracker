@@ -1,6 +1,6 @@
 # Private bug reports and feature requests
 
-The bug icon immediately left of the theme control opens feedback for every tracker role. The bottom action row contains one **Send feedback** button, with **Owner inbox** immediately to its left for verified site owners. Site administrators, users with effective site-level Manage Permissions (the tracker’s existing owner definition), and members of the site's associated Owners group qualify. Owner access is rechecked whenever the dialog opens; verification failures are shown and can be retried by reopening it. Tracker Manager status alone does not grant access.
+The bug icon next to the theme control opens feedback for every Tracker role. **Feedback History** lets site owners and Tracker Managers read and edit submitted bug reports and feature requests. Site owners can also delete individual reports or clear the history. Viewers and Project Engineers can submit reports privately.
 
 Feedback uses a dedicated `Modernization-Tracker - Feedback` SharePoint list (or `<customPrefix> Tracker - Feedback` for a custom namespace), separate from portfolio loads, exports, and migration backups. The HTML deployment cannot write to SharePoint until a signed-in owner performs setup.
 
@@ -9,10 +9,10 @@ Feedback uses a dedicated `Modernization-Tracker - Feedback` SharePoint list (or
 1. Deploy the updated HTML and open the feedback icon while signed in as a site owner with **Manage Lists** and **Manage Permissions** on the hosting web.
 2. When the list is missing, **Set up private feedback** appears automatically. No list changes occur just from opening the dialog.
 3. Check the selected submission groups. Include all groups containing tracker users. Scoped deployments preselect existing `Tracker Users`, `Tracker Project Engineers`, and `Tracker Managers` groups. Legacy deployments also preselect the associated Members group. Other existing SharePoint groups can be selected for additional users.
-4. Select **Create private feedback list**. The application creates the list, breaks inheritance before granting submission access, creates the fields, and verifies a custom submission-only permission level. The associated site Owners group receives Full Control. Selected groups receive Add Items and the API/page access permissions, without View Items, Edit Items, Delete Items, or Manage Permissions. The temporary direct creator grant is removed.
+4. Select **Create private feedback list**. The application creates the list, breaks inheritance, creates the fields, and verifies the list grants. The associated Owners group receives Full Control. Submission groups receive Add Items and the required API/page access. The Tracker Managers group receives permission to view and edit reports. The temporary direct creator grant is removed.
 5. On success, the dialog reports that the list is ready in **Site Contents** and enables the inbox and submission controls. The list is visible in Site Contents to accounts with access, while ordinary users cannot read its contents.
 
-Setup uses the current SharePoint identity and existing groups; it does not create a new login or grant site-wide permissions. The associated Owners group is the reading principal. An owner recognized through direct or security-group site permissions still needs membership/access through that Owners group to read the uniquely secured list; site collection administrators retain their administrative access.
+For a deployed list, open the feedback dialog as a site owner and select **Enable manager history access**. This updates the existing list in place. It verifies the status column and grants review access specifically to the SharePoint **Tracker Managers** group. In deployments that store manager roles in the application directory, ensure those Managers also belong to the SharePoint group for this list.
 
 If setup is interrupted, reopening feedback offers **Finish setup** for an app-created pending list. Only an empty list bearing the app's setup marker can be resumed; existing populated or unrelated lists are never overwritten. An unsafe pre-existing submission role is rejected. Access-denied responses are not treated as missing storage. If the creator-grant removal or another late step fails, inspect the existing list with a site administrator before collecting feedback.
 
@@ -22,7 +22,7 @@ The original `scripts/setup-feedback.ps1` remains an optional administrator alte
 
 ## Deployment acceptance checks
 
-Using separate Viewer, Project Engineer, and non-owner Manager accounts, verify both report types submit successfully, while direct SharePoint REST GET requests to the list's `/items` endpoint and individual items are denied. Verify authors cannot read their own items or edit/delete them, and that an owner can see all submissions in the inbox. Never grant Read, Contribute, or “read own items” to submission groups. Verify that the list does not inherit general site permissions.
+Submit a report as a Viewer and a Project Engineer. Verify that both accounts can submit and that SharePoint denies their requests to read or edit reports. As a non-owner Tracker Manager, open **Feedback History**, edit the Viewer’s report and check the saved status. Verify SharePoint denies the Manager a delete. As an owner, confirm a different report can be deleted individually.
 
 Automated tests exercise provisioning and permission checks against a simulated SharePoint API; they do not establish live tenant behavior. If the tenant rejects add-only submission, keep the list private and use a server-side submission endpoint instead of granting read access.
 
@@ -36,17 +36,15 @@ The list uses the same App name - Content convention as the other tracker lists.
 
 ## Managing individual submissions
 
-Each report in the owner inbox has **Edit** and **Delete** controls. Edit changes the type, summary, details and status (**New**, **In progress**, **Resolved**, **Closed**). **Save changes** updates only that report; **Cancel edit** discards the draft. The original submitter and submission date are preserved. Status is private to owners and does not send a notification to the reporter.
+In **Feedback History**, Managers and owners can change the type, summary, details and status (**New**, **In progress**, **Resolved**, **Closed**). **Save changes** updates that report. **Cancel edit** discards the draft. History retains the original submitter and submission date.
 
 Existing lists remain readable without a schema migration: reports without a status display **New**. The first owner save adds and verifies an optional `FeedbackStatus` choice column in the existing Feedback list, requiring Manage Lists for that initial upgrade. New lists include it during setup. The upgrade preserves existing records, naming and permissions. It never recreates the list or resets its ACLs.
 
-Each update rechecks site ownership and uses the record's SharePoint ETag to prevent overwriting another owner's changes. Failed saves preserve the draft and display an error; stale versions must be reloaded before retrying. **Delete** confirms the selected report by title, then moves only that item to the SharePoint recycle bin. Other reports remain in the shared inbox. Non-owner users retain submission-only access.
+Each update rechecks the reviewer’s access and uses the record’s SharePoint ETag to detect concurrent edits. Failed saves preserve the draft and display an error. A site owner can use **Delete** to confirm one report by title and move it to the SharePoint recycle bin.
 
-Verify in SharePoint that an owner can edit one report, reopen the inbox to see its saved status, cancel deletion without changes, and delete that report while another remains. Check that non-owner accounts cannot update or recycle items through direct REST calls. Automated tests cover these flows with simulated SharePoint responses and local browser previews; live tenant acceptance is still required.
+## Clearing feedback history
 
-## Clearing the owner inbox
-
-Inside the inbox, the redundant Owner inbox navigation button is hidden. **Clear inbox** opens an in-app confirmation for the submissions currently loaded. It clears the shared inbox for all owners by moving those list items to the SharePoint recycle bin; it does not delete the list or change its permissions. New submissions received after the inbox was loaded are not included. Site owners can restore recycled items through SharePoint’s normal recycle-bin controls.
+Site owners can clear the displayed submissions after confirming in the dialog. Tracker moves those items to the SharePoint recycle bin. A report submitted after the history was loaded stays in the list. Site owners can restore recycled items through SharePoint.
 
 Owner permission is rechecked when clearing begins. Ordinary users and non-owner tracker Managers cannot clear submissions. A partial failure stops the operation and reports how many items were cleared; uncertain writes are not automatically retried. Reopen the inbox to see the current state before retrying.
 
@@ -60,4 +58,4 @@ Protocol reference: [Microsoft CSOM update example](https://learn.microsoft.com/
 
 ## Tracker Users access group
 
-Scoped feedback setup now preselects Tracker Users, Tracker Project Engineers and Tracker Managers. It requires the existing Tracker Users group before a new setup and does not fall back to the suite-wide Metrology App User group. Existing configured lists are not recreated or assigned new ACLs on startup. Grant Tracker Users the existing ModernizationFeedback Submit Only level on the existing list, preserving owner-only reads. Normal project permission repair never touches Feedback. A user in Tracker Users must be able to submit without reading any reports.
+Scoped feedback setup uses Tracker Users, Tracker Project Engineers and Tracker Managers. Keep **ModernizationFeedback Submit Only** for Tracker Users. Use the feedback dialog’s manager access action for review permissions on an existing list. Project permission repair operates separately.

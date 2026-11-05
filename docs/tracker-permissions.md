@@ -8,13 +8,17 @@ Use these exact SharePoint group names. Both elevated-role groups need **Read** 
 
 | Group | App role | Tracker list permissions |
 | --- | --- | --- |
-| Tracker Users | Basic access for every role. Invitations and Viewer role saves verify membership. | Read on all seven lists |
-| Tracker Project Engineers | Project Engineer | Read on all seven lists; individual Contribute grants on assigned projects and their content |
+| Tracker Users | Basic access for every role. Invitations and Viewer role saves verify membership. | Read on all seven lists and permission to add entries on Acronyms |
+| Tracker Project Engineers | Project Engineer | Read on all seven lists, permission to add entries on Acronyms, and individual Contribute grants on assigned projects and their content |
 | Tracker Managers | Manager | Tracker Project Access Manager (Contribute plus Manage Permissions) on Projects, Tasks, Updates, Risks; Contribute on Users, Acronyms, ReferenceDocuments |
 
 Tracker Managers owns the Project Engineers group. To let managers onboard users, a site owner must also set Tracker Managers as the owner of Tracker Users; otherwise a site owner must complete baseline enrollment. The site owner owns Tracker Managers. Allow group membership editing only by the group owner and disable join/leave requests. SharePoint enforces these settings: an ordinary tracker manager cannot promote someone to Manager unless also authorized to manage that group. The app never grants site Members membership in scoped mode.
 
 Keep site Owners with Full Control. Do not give the entire engineers group list-wide Contribute.
+
+On an existing site, open **Users and managers → Tracker permissions → Set up glossary access** as a site owner. This grants glossary creation on the Acronyms list to Tracker Users and Tracker Project Engineers. Managers need Contribute on that list to maintain entries. Verify the setup by adding a new term as a Viewer, then removing it as a Manager.
+
+The private Feedback list has separate permissions. As a site owner, open the bug/feature dialog and select **Enable manager history access** to let Tracker Managers review and edit reports on the existing list. [Feedback setup](feedback.md)
 
 ## Startup access errors and schema setup
 
@@ -90,7 +94,7 @@ Before removing transitional access, test with non-owner accounts:
 
 | Account | Expected behavior |
 | --- | --- |
-| Viewer | Open page/HTML, read tracker and reference documents; cannot save records |
+| Viewer | Read projects and documents, add a glossary term and submit private feedback. Only Managers can remove the term. |
 | Assigned engineer | Update assigned project health, stage and status. Track existing tasks, maintain updates and manage task attachments. Task creation and deletion are manager actions. |
 | Tracker manager | Manage tracker records and invite Viewer/Engineer; manager promotion follows group ownership |
 | Former engineer | After reassignment/demotion, cannot edit the old project's records through the app **or direct REST** |

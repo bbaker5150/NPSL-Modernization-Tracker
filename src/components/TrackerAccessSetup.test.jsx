@@ -43,3 +43,24 @@ it('exposes an explicit repair action without running it when rendered', async (
     expect(job.run).toHaveBeenCalledOnce();
   } finally { await act(async () => root.unmount()); }
 });
+
+it('lets a site owner repair only glossary access and retry a failed grant', async () => {
+  const node = document.createElement('div');
+  const root = createRoot(node);
+  const snapshot = { busy: false, status: '', error: '' };
+  const job = { subscribe: () => () => {}, getSnapshot: () => snapshot, run: vi.fn() };
+  const store = { scopedAccess: true, trackerAccessJob: job, prepareGlossaryAccess: vi.fn()
+    .mockRejectedValueOnce(new Error('Check the Acronyms list permissions.')).mockResolvedValueOnce({}) };
+  try {
+    await act(async () => root.render(<TrackerAccessSetup store={store} />));
+    expect(node.querySelector('[aria-label="Glossary access"]')).toBeNull();
+    await act(async () => root.render(<TrackerAccessSetup store={{ ...store, sessionSiteOwner: true }} />));
+    const section = node.querySelector('[aria-label="Glossary access"]');
+    expect(store.prepareGlossaryAccess).not.toHaveBeenCalled();
+    await act(async () => section.querySelector('button').click());
+    expect(section.querySelector('[role="alert"]').textContent).toContain('Acronyms list');
+    await act(async () => section.querySelector('button').click());
+    expect(section.querySelector('[role="status"]').textContent).toContain('verified');
+    expect(job.run).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});

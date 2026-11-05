@@ -810,6 +810,7 @@ button.update-task-reference { cursor: pointer; }
 .update-documents { font-size: 12px; }
 .update-documents ul, .update-pending-files { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
 .update-documents li button { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.update-documents li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .update-documents details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; color: var(--muted); }
 .update-documents summary { cursor: pointer; }
 .update-documents input { max-width: 100%; margin: 12px 0; }
