@@ -27,8 +27,8 @@ jobs:
           if [ -f /etc/apt/apt-mirrors.txt ]; then
             printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           fi
-          npm install --no-save playwright
-          npx playwright install --with-deps chromium
+          # npm ci already installed the exact Playwright version from the lockfile.
+          npx --no-install playwright install --with-deps chromium
       - run: npm run smoke:singlefile
       - uses: actions/upload-artifact@v5
         if: always()
