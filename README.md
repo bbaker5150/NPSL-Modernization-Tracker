@@ -16,8 +16,8 @@ A single-file, SharePoint-backed web application for visualizing modernization w
 ## Tasking and roles
 
 - Portfolio projects uses a searchable register. Needs Attention counts outstanding tasks by PMA 260B, NPSL (Calibration Lab), and NPSL Metrology Engineering Division. Organization is a task field; older tasks inherit their project's previous organization until edited.
-- Managers have full project/task access and maintain users, roles, assignments, and original deadlines.
-- Project Engineers read and edit only their assigned projects and related tasks, including documents, estimates, status, deferrals, and justifications. Project target completion and original task deadlines remain manager-only. The previous owner editing checkbox is retired.
+- Managers assign projects by SharePoint email. Saving an assignment fills in the resolved name and enrolls a new user or Viewer as a Project Engineer. An existing Manager keeps the Manager role.
+- Project Engineers can update health, stage and status on assigned projects. They can complete existing tasks, edit tracking details and manage task documents. Managers control the project definition, assignee and target date. Only managers can create, rename or delete tasks and set the original due and assigned dates.
 - Viewers read all projects and documents without editing. Task assignment alone does not grant Project Engineer project access.
 - Existing project owners with legacy User/SME roles become Project Engineers automatically, matched by login/email rather than display name. Existing Managers stay Managers; other legacy accounts become Viewers. A manager's next app startup persists directory migration; an owner's own startup persists their migrated role. Explicit later Viewer assignments are respected. Owners missing from the directory register as Project Engineers when they first open the app.
 - Deferrals require a date after the original deadline and a justification. Not Required requires justification. The original due date is retained.
@@ -92,13 +92,13 @@ See [SHAREPOINT_DEPLOYMENT.md](SHAREPOINT_DEPLOYMENT.md) for the list schema and
 
 Pipeline order is Requirement (MSA), Acquisition (TMRR), Procurement (EMD), Deployment (P&D). Both legacy and DAWIA terms appear together. Existing Development and Production/Procurement tasks map to Procurement (EMD); Operation and Sustainment maps to Deployment (P&D). Records, titles, owners and deadlines are retained; managers can move individual tasks if needed.
 
-Project owners and managers can choose **Progress calculation** in the project drawer. Phase mode (default) counts phases whose existing tasks are all resolved; empty phases are not resolved. Task mode is exactly Complete tasks divided by **all existing tasks**, independent of their phase; Not Required is not counted as Complete. A project with no tasks reports 0%. Owners can add tasks to their own projects early; assignment, due dates, project creation, and changes to existing task definitions remain manager-controlled.
+Project owners and managers can choose **Progress calculation** in the project drawer. Phase mode (default) counts phases whose existing tasks are all resolved; empty phases are not resolved. Task mode is exactly Complete tasks divided by **all existing tasks**, independent of their phase; Not Required is not counted as Complete. A project with no tasks reports 0%. Managers create projects and tasks. Assigned engineers can record progress on existing work.
 
 Needs attention shows only unfinished projects with outstanding tasks. Complete, Not Required, and legacy Not Applicable tasks are excluded even when they retain old deferral information.
 
 ### Status-focused review and progress views
 
-- `In Progress – At Program Office` identifies work awaiting action outside NPSL. It does not override project health; managers set health independently. Project status is no longer exposed in the editor or drawer, and legacy status fields are retained only for storage compatibility.
+- `In Progress – At Program Office` identifies work awaiting action outside NPSL. Managers and assigned engineers can set project health, current stage and project status independently of task progress in **Edit project**.
 - Needs attention groups outstanding tasks by status in independently collapsible sections. Resolved tasks remain excluded.
 - The project progress chevron switches both the calculation and the markers between phases and tasks. Task mode labels the next outstanding task and shows one numbered marker per existing task; only Complete tasks receive a completed marker. Owners and managers save this preference; other assigned users can switch their own current view.
 - The Portfolio projects Progress header has a separate view selector that compares every row using the same phase or task calculation without rewriting project preferences.
@@ -108,7 +108,7 @@ The brand returns to Portfolio home, and Active projects opens the pipeline boar
 
 Excel exports follow the current view and portfolio filters, preserve access scope, and include a compact Projects register, grouped Needs Attention, supporting detail sheets, and summary navigation links. SharePoint display names are shortened for reading without changing stored account identities. The pipeline selector centers each phase name above a neutral track and shows its project count in a circle below.
 
-Needs Attention offers collapsible status or project groups, searchable task cards, and sorting by effective deadline, assignee, or hours. Notes and deferral justifications are collapsed by default. Complete and Not Required tasks are excluded. The task editor includes Assigned / creation date: managers and assigned project engineers may set it, new tasks default to today's UTC date, and legacy tasks stay blank until entered. This date is separate from Start Date and does not reset on reassignment. SharePoint provisioning adds AssignedDate and task Organization fields; schema-edit permissions are required for these additive updates.
+Needs Attention offers collapsible status or project groups, searchable task cards, and sorting by effective deadline, assignee, or hours. Notes and deferral justifications are collapsed by default. Complete and Not Required tasks are excluded. Managers can set the assigned / creation date. New tasks default to today's UTC date, and legacy tasks stay blank until a manager enters a date. This date is separate from Start Date and does not reset on reassignment. SharePoint provisioning adds AssignedDate and task Organization fields; schema-edit permissions are required for these additive updates.
 
 ### Task documents and estimated hours
 

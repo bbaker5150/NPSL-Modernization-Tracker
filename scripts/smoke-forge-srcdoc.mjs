@@ -122,16 +122,13 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
-  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).fill('SME Test');
-  await frame.getByRole('option', { name: /SME Test User/ }).waitFor();
-  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).press('ArrowDown');
-  await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).press('Enter');
-  if (await frame.getByLabel('Engineer email', { exact: true }).inputValue() !== 'sme@example.test') errors.push('Owner selection did not populate email');
+  await frame.getByLabel('Engineer email', { exact: true }).fill('sme@example.test');
+  await frame.locator('.modal output[aria-label="Project engineer"]').filter({ hasText: 'SME Test User' }).waitFor();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
-      const layout = await frame.getByRole('combobox', { name: 'Project engineer', exact: true }).evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
+      const layout = await frame.getByLabel('Engineer email', { exact: true }).evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
       if (!layout || await frame.locator('.modal input[type="checkbox"]').count()) errors.push('Project engineer field is cramped or retired checkbox remains');
     }
   }

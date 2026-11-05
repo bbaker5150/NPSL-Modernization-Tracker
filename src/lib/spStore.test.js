@@ -83,6 +83,25 @@ describe('SharePoint store', () => {
     expect(values).toMatchObject({ Organization: 'NPSL Metrology Engineering Division', OwnerCanEdit: '1' });
   });
 
+  it('sends only tracking columns for engineer edits so concurrent manager changes survive', async () => {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod', scopedAccess: true });
+    store.post = vi.fn(async () => ({ value: [] }));
+    const project = { id: 'p', spId: 4, projectKey: 'project', title: 'Earlier name', ownerKey: 'earlier-assignee', health: 'On Track', status: 'In Progress', currentStageKey: 'procurement', progressMode: 'tasks' };
+    await store.saveProjectTracking(project);
+    await store.saveProjectTracking(project, { progressModeOnly: true });
+    const task = { id: 't', spId: 9, projectKey: 'project', title: 'Earlier name', dueDate: '2026-08-01', assignedDate: '2026-06-01', phaseKey: 'requirement', status: 'Blocked', notes: 'Waiting', deferredDate: '2026-10-12' };
+    await store.saveTask(task, { trackingOnly: true });
+    const values = store.post.mock.calls.map(([, { body }]) => Object.fromEntries(body.formValues.map(({ FieldName, FieldValue }) => [FieldName, FieldValue])));
+    expect(values[0]).toEqual({ Health: 'On Track', ProjectStatus: 'In Progress', CurrentStageKey: 'procurement' });
+    expect(values[1]).toEqual({ ProgressMode: 'tasks' });
+    expect(values[2]).toMatchObject({ TaskStatus: 'Blocked', Notes: 'Waiting', DeferredDate: '10/12/2026' });
+    for (const protectedField of ['Title', 'TaskTitle', 'RecordId', 'ProjectKey', 'DueDate', 'AssignedDate', 'PhaseKey', 'SortOrder', 'SourceStartLabel', 'DataIssue']) {
+      expect(values[2]).not.toHaveProperty(protectedField);
+    }
+    await expect(store.saveTask({ ...task, spId: null }, { trackingOnly: true })).rejects.toThrow('existing tasks');
+    expect(store.post).toHaveBeenCalledTimes(3);
+  });
+
   it('creates acronyms in the shared SharePoint glossary list', async () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/mod' });
     store.create = vi.fn(async () => 81);

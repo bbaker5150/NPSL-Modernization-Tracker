@@ -99,7 +99,6 @@
 .attention-page button:focus-visible, .attention-page summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 @media (max-width: 1100px) { .attention-task-list { grid-template-columns: 1fr; } }
 @media (max-width: 650px) {
-  .project-engineer-spacer { display: none; }
   .attention-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attention-summary > div { padding: 16px; }
   .attention-toolbar > .search-box { flex-basis: 100%; }
@@ -443,7 +442,8 @@ p { color: var(--muted); line-height: 1.65; }
 .field-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .field { display: grid; gap: 6px; }
 .field-wide { grid-column: 1 / -1; }
-.field > span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.field > span, .field > label { color: var(--muted); font-size: 9px; font-weight: 700; }
+.field output { align-self: center; overflow-wrap: anywhere; }
 .field input, .field select, .field textarea { width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); transition: .15s ease; }
 .project-owner-field { min-width: 0; align-content: start; }
 .project-owner-label { color: var(--muted); font-size: 9px; font-weight: 700; }

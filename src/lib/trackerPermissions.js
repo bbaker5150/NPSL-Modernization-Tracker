@@ -42,7 +42,7 @@ export class TrackerPermissions {
     const title = TRACKER_GROUPS[role];
     if (!title) throw new Error('Select a valid tracker role.');
     const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
-    if (!positiveId(group?.Id)) throw new Error(`Create the SharePoint group ${title} before assigning this role.`);
+    if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`Verify the SharePoint group ${title} before assigning this role.`);
     return group;
   }
   async membership(group, login) {
@@ -64,6 +64,38 @@ export class TrackerPermissions {
     } catch (error) {
       throw new Error(`Could not verify membership in ${title}. Membership may already be saved. Ask a site owner to verify the group and allow Tracker Managers to view and manage its membership, then retry. No invitation email was requested. ${error.message}`);
     }
+  }
+  async ensureElevatedMembership(person, group, member) {
+    if (!member) {
+      try { await this.post(`/_api/web/sitegroups(${group.Id})/users`, { body: { LoginName: person.loginName } }); }
+      catch (error) { throw new Error(`Could not add membership in ${group.Title}. Ask its group owner or a site owner. ${error.message}`); }
+    }
+    if (!(await this.membership(group, person.loginName))) throw new Error(`SharePoint did not verify ${group.Title} membership. Retry the role change.`);
+  }
+
+  async ensureAssignmentRole(person, savedRole, siteAdmin) {
+    const managers = await this.group('Manager');
+    let isManager = siteAdmin || Boolean(await this.membership(managers, person.loginName));
+    if (!isManager) {
+      // Site owners can manage Tracker without belonging to Tracker Managers.
+      try {
+        const response = unwrap(await this.get(`/_api/web/getusereffectivepermissions(@u)?@u='${quote(person.loginName)}'`));
+        const low = (response?.GetUserEffectivePermissions || response)?.Low;
+        if (!['number', 'string'].includes(typeof low) || !/^\d+$/.test(String(low)) || Number(low) > 0xffffffff) throw new Error('SharePoint did not verify site permissions for the selected project engineer.');
+        isManager = (Number(low) & 33554432) !== 0;
+      } catch (error) {
+        // Delegated group owners may only inspect list-level permissions. Keep
+        // a saved Manager role in that case; assignment never adds to Managers.
+        if (error.status !== 403) throw error;
+        isManager = savedRole === 'Manager';
+      }
+    }
+    if (!isManager && savedRole === 'Manager') throw new Error('The saved Manager role differs from this account’s SharePoint permissions. Verify its Manager role in Users and managers before assigning the project.');
+    await this.ensureAppMembership(person);
+    if (isManager) return 'Manager';
+    const engineers = await this.group('Project Engineer');
+    await this.ensureElevatedMembership(person, engineers, await this.membership(engineers, person.loginName));
+    return 'Project Engineer';
   }
   async syncGroups(person, role, { beforeChange, ensureViewerMembership = false } = {}) {
     if (!person.loginName) throw new Error('Select a resolved SharePoint identity.');
@@ -90,11 +122,7 @@ export class TrackerPermissions {
         if (await this.membership(entry.group, person.loginName)) throw new Error('Membership is still present.');
       } catch (error) { throw new Error(`Could not remove membership in ${entry.group.Title}. Its group owner must complete this role change. ${error.message}`); }
     }
-    if (target && !target.member) {
-      try { await this.post(`/_api/web/sitegroups(${target.group.Id})/users`, { body: { LoginName: person.loginName } }); }
-      catch (error) { throw new Error(`Could not add membership in ${target.group.Title}. Ask its group owner or a site owner. ${error.message}`); }
-    }
-    if (target && !(await this.membership(target.group, person.loginName))) throw new Error(`SharePoint did not verify ${target.group.Title} membership. Retry the role change.`);
+    if (target) await this.ensureElevatedMembership(person, target.group, target.member);
     return target?.group || null;
   }
   async revokeEngineerAccess(person, memberships = []) {
@@ -307,8 +335,8 @@ export class TrackerPermissions {
     if (engineer && !project.archived) {
       const group = await this.group('Project Engineer');
       const member = await this.membership(group, engineer.loginName);
-      if (!member) throw new Error(`Save ${engineer.title}'s Project Engineer role before assigning project access.`);
-      principalId = member.Id;
+      if (!positiveId(member?.Id)) throw new Error(`Save ${engineer.title}'s Project Engineer role before assigning project access.`);
+      principalId = Number(member.Id);
     }
     const roleId = await this.contributionRole();
     onProgress(`Updating access: ${project.title || project.projectKey}`);

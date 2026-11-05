@@ -27,6 +27,16 @@ describe('repository selection and SharePoint identity', () => {
     expect(data.acronyms.find((entry) => entry.acronym === 'CSS')?.term).toBe('Calibration Standard Specification');
   });
 
+  it.each([['Viewer', 'Project Engineer'], ['Manager', 'Manager']])('applies an explicit preview assignment to a saved %s', async (role, expected) => {
+    window.MOD_TRACKER_CONFIG = { forceLocal: true };
+    const { store } = createRepository();
+    const person = { id: 'engineer', loginName: 'local-engineer', email: 'engineer@example.test', title: 'Engineer', role };
+    await store.saveUser(person);
+    const saved = await store.saveProject({ id: 'project', projectKey: 'p', ownerKey: 'wrong' }, person.loginName);
+    expect(saved).toMatchObject({ ownerName: person.title, ownerKey: person.loginName, ownerEmail: person.email });
+    expect((await store.load()).users).toEqual([{ ...person, role: expected }]);
+  });
+
   it('enables scoped access on metsoft and disables testing promotion without changing ISEA export behavior', () => {
     window.MOD_TRACKER_CONFIG = { webUrl: 'https://flankspeed.sharepoint-mil.us/sites/metsoft', testingManagerPassword: 'admin123' };
     const repo = createRepository();

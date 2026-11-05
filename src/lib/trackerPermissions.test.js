@@ -126,6 +126,20 @@ describe('project ACLs and inherited creation', () => {
     store.post.mockResolvedValue({});
     await expect(permissions.applyScope('/scope', 12, 3)).rejects.toThrow('did not verify');
   });
+  it('looks up the assigned claims account for project grants even when another engineer shares their email', async () => {
+    const { permissions } = fixture();
+    const assigned = { ...person, email: 'shared@example.com' };
+    const colleague = { ...assigned, loginName: 'i:0#.f|membership|other@example.com' };
+    permissions.group = vi.fn(async () => ({ Id: 7 }));
+    permissions.membership = vi.fn(async () => ({ Id: 11 }));
+    permissions.contributionRole = vi.fn(async () => 3);
+    permissions.applyScope = vi.fn();
+    permissions.folder = vi.fn(async key => ({ path: `/${key}/project`, scope: `/${key}/items(50)` }));
+    permissions.pages = vi.fn(async () => []);
+    await permissions.syncProject({ spId: 5, projectKey: 'p', ownerKey: assigned.loginName, ownerEmail: assigned.email }, [colleague, assigned]);
+    expect(permissions.membership).toHaveBeenCalledExactlyOnceWith({ Id: 7 }, assigned.loginName);
+    expect(permissions.applyScope.mock.calls.every(([, principalId]) => principalId === 11)).toBe(true);
+  });
   it('reconciles legacy and archived children but lets new children inherit from the folder', async () => {
     const { permissions } = fixture();
     permissions.group = vi.fn(async () => ({}));

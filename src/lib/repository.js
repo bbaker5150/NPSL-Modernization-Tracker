@@ -1,4 +1,4 @@
-import { normalizeDirectory } from './identity';
+import { assignmentDirectoryUser, normalizeDirectory } from './identity';
 export { isOwnedByUser, userIdentityKey } from './identity';
 import { localAttachments, validateAttachment, validateAttachmentName } from './taskAttachments';
 import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations } from '../data/workflow';
@@ -33,7 +33,7 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: normalizePhaseKey(row.currentStageKey), organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.updates = data.updates.map(row => ({ ...row, version: row.version || '1' })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
+  async load() { const data = clone(this.data); data.projects = data.projects.map((row) => ({ ...row, currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit })); data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) })); data.updates = data.updates.map(row => ({ ...row, version: row.version || '1' })); data.users = normalizeDirectory(data.users, data.projects); data.tasks = normalizeTaskOrganizations(data.tasks, data.projects); return data; }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }
@@ -71,7 +71,16 @@ class LocalStore {
   async searchPeople(query) { const text = query.trim().toLowerCase(); return this.data.users.filter((row) => `${row.title} ${row.email}`.toLowerCase().includes(text)).map(({ title, email, loginName }) => ({ title, email, loginName: loginName || email })); }
   async resolvePerson(loginName) { const person = this.data.users.find((row) => (row.loginName || row.email) === loginName); if (!person) throw new Error('Preview mode can only select saved tracker users.'); return { title: person.title, email: person.email || '', loginName }; }
   async saveUser(row) { return this.upsert('users', row, 'user'); }
-  async saveProject(row) { return this.upsert('projects', row, 'project'); }
+  async saveProject(row, assignedLogin) {
+    if (assignedLogin !== undefined) {
+      const person = await this.resolvePerson(assignedLogin);
+      const entry = assignmentDirectoryUser(this.data.users, person);
+      if (!entry) throw new Error('Choose a saved Tracker user for the project engineer in preview mode.');
+      if (!['Manager', 'Project Engineer'].includes(entry.role)) await this.saveUser({ ...entry, role: 'Project Engineer' });
+      row = { ...row, ownerName: person.title, ownerEmail: person.email || '', ownerKey: person.loginName };
+    }
+    return this.upsert('projects', row, 'project');
+  }
   async saveTask(row) { return this.upsert('tasks', row, 'task'); }
   async saveUpdate(row) {
     const current = this.data.updates.find(item => item.id === row.id);
@@ -125,7 +134,7 @@ export function createStarterTasks(projectKey, owner = {}) {
   return [...workflowData.taskTemplates]
     .sort((a, b) => a.order - b.order)
     .map((task, index) => ({
-      id: uid('task'),
+      id: `task-${projectKey}-starter-${task.order}`,
       projectKey,
       title: task.title,
       phaseKey: task.phaseKey,

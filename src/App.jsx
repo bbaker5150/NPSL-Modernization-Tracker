@@ -68,7 +68,7 @@ function enrichProject(project, allTasks) {
     organization: [...new Set(tasks.filter((task) => !isClosedTask(task)).map((task) => task.organization))].filter(Boolean).join(', ') || 'No outstanding tasking',
     tasks,
     ...projectProgress(tasks, project.progressMode || 'phases'),
-    currentStageKey: nextTask?.phaseKey || finalPhase?.key || project.currentStageKey,
+    currentStageKey: project.currentStageKey || nextTask?.phaseKey || finalPhase?.key || 'requirement',
     nextMilestone: nextTask?.title || project.nextMilestone || 'Final Report',
     nextMilestoneDate: nextTask?.dueDate || project.nextMilestoneDate,
     blockedCount: tasks.filter((task) => task.status === 'Blocked').length,
@@ -222,17 +222,107 @@ function Modal({ title, subtitle, onClose, children, actions, wide = false }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true"><header><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></header><div className="modal-body">{children}</div>{actions && <footer>{actions}</footer>}</section></div>;
 }
 
-function ProjectEditor({ project, user, users, manager, onClose, onSave }) {
-  const [ownerUnresolved, setOwnerUnresolved] = useState(false);
-  const [draft, setDraft] = useState({ title: '', measurementArea: '', description: '', ownerName: 'Unassigned', ownerEmail: '', ownerKey: '', priority: 'Medium', health: 'Needs Review', status: 'Planned', currentStageKey: 'requirement', targetFinish: '', ...project });
-  const set = (key) => (event) => setDraft((row) => ({ ...row, [key]: event.target.value }));
-  function claim() { setOwnerUnresolved(false); setDraft((row) => ({ ...row, ownerName: user.title, ownerEmail: user.email, ownerKey: userIdentityKey(user) })); }
-  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} subtitle="Update the portfolio record and ownership." onClose={onClose} actions={<><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!draft.title.trim() || ownerUnresolved} onClick={() => onSave({ ...draft, id: draft.id || uid('project'), projectKey: draft.projectKey || uid('project-key'), percentComplete: draft.percentComplete || 0, nextMilestone: draft.nextMilestone || 'Define project plan', nextMilestoneDate: draft.nextMilestoneDate || '' })}>Save project</button></>}>
-    <div className="field-grid"><Field label="Project name"><input value={draft.title} onChange={set('title')} /></Field><Field label="Measurement area"><input value={draft.measurementArea} onChange={set('measurementArea')} /></Field><div aria-hidden="true" className="project-engineer-spacer" /><SavedUserPicker label="Project engineer" disabled={!manager} users={users.filter((entry) => ['Project Engineer', 'Manager'].includes(entry.role))} value={draft.ownerName} onSelect={(entry) => { setOwnerUnresolved(false); setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email || '', ownerKey: userIdentityKey(entry) })); }} onQuery={(name) => { setOwnerUnresolved(!!name.trim()); setDraft((row) => ({ ...row, ownerName: name, ownerKey: '', ownerEmail: '' })); }} /><Field label="Engineer email"><div className="input-action"><input aria-label="Engineer email" disabled={!manager} type="email" readOnly value={draft.ownerEmail || ''} placeholder="Unassigned" />{manager && <button type="button" onClick={claim}>Assign me</button>}</div></Field><Field label="Priority"><select value={draft.priority} onChange={set('priority')}>{PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Health"><select value={draft.health} onChange={set('health')}>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Current stage"><select value={draft.currentStageKey} onChange={set('currentStageKey')}>{workflowData.phases.map((phase) => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field><Field label="Target completion"><input disabled={!manager} type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field><Field label="Description" wide><textarea rows="4" value={draft.description} onChange={set('description')} /></Field></div>
+const PROJECT_STATUSES = ['Planned', 'In Progress', 'On Hold', 'Complete', 'Cancelled'];
+const isEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+async function findEngineerByEmail(store, email) {
+  const matchesEmail = person => isOwnedByUser({ ownerEmail: email }, person);
+  const matches = (await store.searchPeople(email)).filter(matchesEmail);
+  if (matches.length > 1) throw new Error('More than one account matches this email. Enter the engineer’s unique sign-in email.');
+  const person = await store.resolvePerson(matches[0]?.loginName || email);
+  if (!person.title || !person.loginName || !matchesEmail(person)) {
+    throw new Error('The resolved SharePoint account does not match this email. Check the address and try again.');
+  }
+  return person;
+}
+
+export function ProjectEditor({ project, user, store, manager, displayedStage, onClose, onSave }) {
+  const [draft, setDraft] = useState(() => project ? { ...project } : {
+    id: uid('project'), projectKey: uid('project-key'), title: '', measurementArea: '', description: '',
+    ownerName: 'Unassigned', ownerEmail: '', ownerKey: '', priority: 'Medium', health: 'Needs Review',
+    status: 'Planned', currentStageKey: '', targetFinish: '', percentComplete: 0,
+    nextMilestone: 'Define project plan', nextMilestoneDate: '',
+  });
+  const [assignment, setAssignment] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const set = key => event => setDraft(row => ({ ...row, [key]: event.target.value }));
+  useEffect(() => {
+    if (assignment?.state !== 'pending') return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      let result;
+      try {
+        const person = await findEngineerByEmail(store, assignment.email.trim());
+        result = { state: 'resolved', email: person.email || assignment.email.trim(), person };
+      } catch (error) {
+        result = { ...assignment, state: 'error', error: error.message };
+      }
+      if (active) setAssignment(current => current === assignment ? result : current);
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  }, [assignment, store]);
+
+  function changeEmail(value) {
+    setSaveError('');
+    const email = value.trim();
+    if (!email) setAssignment({ state: 'empty', email: '' });
+    else if (isEmail(email)) setAssignment({ state: 'pending', email: value });
+    else setAssignment({ state: 'typing', email: value });
+  }
+
+  const unresolved = ['typing', 'pending', 'error'].includes(assignment?.state);
+  const automaticStage = project && !project.currentStageKey && workflowData.phases.find(phase => phase.key === displayedStage);
+  const legacyLogin = (draft.ownerKey || '').split('|').pop();
+  const displayedEmail = assignment?.email ?? (draft.ownerEmail || (isEmail(legacyLogin) ? legacyLogin : ''));
+  const displayedName = assignment ? assignment.person?.title || '' : draft.ownerName || '';
+  const statusOptions = [...new Set([...PROJECT_STATUSES, ...(draft.status ? [draft.status] : [])])];
+
+  async function save() {
+    if (saving || unresolved || !draft.title?.trim()) return;
+    setSaving(true);
+    setSaveError('');
+    const person = assignment?.person;
+    const row = assignment ? {
+      ...draft, ownerName: person?.title || 'Unassigned', ownerEmail: person?.email || assignment.email,
+      ownerKey: person ? userIdentityKey(person) : '',
+    } : draft;
+    try { await onSave(row, person?.loginName); }
+    catch (error) { setSaveError(error.message || 'Could not save the project. Try again.'); }
+    finally { setSaving(false); }
+  }
+
+  const close = () => { if (!saving) onClose(); };
+  return <Modal title={project?.id ? 'Edit project' : 'Add modernization project'} onClose={close} actions={<>
+    <button className="button secondary" disabled={saving} onClick={close}>Cancel</button>
+    <button className="button primary" disabled={saving || !draft.title?.trim() || unresolved} onClick={save}>{saving ? 'Saving…' : 'Save project'}</button>
+  </>}>
+    <div className="field-grid">
+      <Field label="Project name"><input disabled={!manager || saving} value={draft.title || ''} onChange={set('title')} /></Field>
+      <Field label="Measurement area"><input disabled={!manager || saving} value={draft.measurementArea || ''} onChange={set('measurementArea')} /></Field>
+      <div className="field">
+        <label htmlFor="project-engineer-email">Engineer email</label>
+        <div className={manager ? 'input-action' : ''}>
+          <input id="project-engineer-email" type="email" autoComplete="off" placeholder="Unassigned" disabled={!manager || saving} value={displayedEmail} onChange={event => changeEmail(event.target.value)} />
+          {manager && <button type="button" disabled={saving} onClick={() => setAssignment({ state: 'resolved', person: user, email: user.email || '' })}>Assign me</button>}
+        </div>
+        {assignment?.state === 'typing' && <small>Enter the complete SharePoint email address.</small>}
+        {assignment?.state === 'pending' && <small role="status">Looking up engineer…</small>}
+        {assignment?.state === 'error' && <small className="inline-error" role="alert">{assignment.error}</small>}
+      </div>
+      <Field label="Project engineer"><output aria-label="Project engineer">{displayedName || (unresolved ? 'Awaiting verified email' : 'Unassigned')}</output></Field>
+      <Field label="Priority"><select disabled={!manager || saving} value={draft.priority || 'Medium'} onChange={set('priority')}>{PRIORITIES.map(item => <option key={item}>{item}</option>)}</select></Field>
+      <Field label="Health"><select disabled={saving} value={draft.health || 'Needs Review'} onChange={set('health')}>{HEALTHS.map(item => <option key={item}>{item}</option>)}</select></Field>
+      <Field label="Project status"><select disabled={saving} value={draft.status || 'Planned'} onChange={set('status')}>{statusOptions.map(item => <option key={item}>{item}</option>)}</select></Field>
+      <Field label="Current stage"><select disabled={saving} value={draft.currentStageKey || ''} onChange={set('currentStageKey')}><option value="">Follow work breakdown{automaticStage ? ` (${automaticStage.name})` : ''}</option>{workflowData.phases.map(phase => <option value={phase.key} key={phase.key}>{phase.name}</option>)}</select></Field>
+      <Field label="Target completion"><input disabled={!manager || saving} type="date" value={draft.targetFinish || ''} onChange={set('targetFinish')} /></Field>
+      <Field label="Description" wide><textarea disabled={!manager || saving} rows="4" value={draft.description || ''} onChange={set('description')} /></Field>
+    </div>
+    {saveError && <p role="alert" className="inline-error">{saveError}</p>}
   </Modal>;
 }
 
-function TaskEditor({ task, manager, canSetDeadlines = manager, canDeleteDocuments = false, readOnly = false, store, saved = true, users = [], onClose, onSave, onDelete }) {
+function TaskEditor({ task, manager, canDeleteDocuments = false, readOnly = false, store, saved = true, users = [], onClose, onSave, onDelete }) {
   const [draft, setDraft] = useState({ ...task, organization: normalizeOrganization(task.organization), assignedDate: task.assignedDate || (!saved ? todayIso() : '') });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -273,14 +363,14 @@ function TaskEditor({ task, manager, canSetDeadlines = manager, canDeleteDocumen
   return <Modal title={readOnly ? 'Task details' : persisted ? 'Update task' : 'Add task'} subtitle={workflowData.phases.find((phase) => phase.key === task.phaseKey)?.name} onClose={saving ? () => {} : onClose} actions={<>{manager && persisted && onDelete && <button className="button secondary" disabled={saving} onClick={async () => { if (await onDelete(draft)) onClose(); }}>Delete task</button>}<button className="button secondary" disabled={saving} onClick={onClose}>{readOnly ? 'Close' : 'Cancel'}</button>{!readOnly && <button className="button primary" disabled={saving || ownerUnresolved} onClick={save}>{saving ? 'Saving task and documents…' : 'Save task'}</button>}</>}>
     {error && <p className="inline-error" role="alert">{error}</p>}
     <fieldset className="field-grid task-fields" disabled={readOnly || saving}>
-      <Field label="Task name" wide><input aria-label="Task name" value={draft.title} onChange={set('title')} /></Field>
+      <Field label="Task name" wide><input aria-label="Task name" disabled={!manager} value={draft.title} onChange={set('title')} /></Field>
       <Field label="Status"><select value={status} onChange={set('status')}>{TASK_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></Field>
       <Field label="Organization"><select value={draft.organization} onChange={event => setDraft(row => ({ ...row, organization: event.target.value, subAssignment: '' }))}>{ORGANIZATIONS.map((item) => <option key={item}>{item}</option>)}</select></Field>
       {draft.organization === METCAL_ORGANIZATION && <Field label="METCAL responsibility"><select aria-label="METCAL responsibility" value={draft.subAssignment || ''} onChange={set('subAssignment')}><option value="">Not yet assigned</option>{METCAL_TEAMS.map(team => <option key={team}>{team}</option>)}</select></Field>}
       <SavedUserPicker label="Task owner" users={users} disabled={readOnly || saving} value={draft.ownerName} onQuery={(name) => { setOwnerUnresolved(!!name.trim()); setDraft((row) => ({ ...row, ownerName: name, ownerEmail: '', ownerKey: '' })); }} onSelect={(entry) => { setOwnerUnresolved(false); setDraft((row) => ({ ...row, ownerName: entry.title, ownerEmail: entry.email || '', ownerKey: userIdentityKey(entry) })); }} />
       <Field label="Est. Hours"><input aria-label="Est. Hours" type="number" min="0" step="any" value={draft.estimatedHours ?? ''} onChange={set('estimatedHours')} /></Field>
-      <Field label="Original due date"><input aria-label="Original due date" type="date" disabled={!canSetDeadlines} value={draft.dueDate || ''} onChange={set('dueDate')} />{!canSetDeadlines && <small className="field-hint">Set by a manager</small>}</Field>
-      <Field label="Assigned / creation date"><input aria-label="Assigned / creation date" disabled={!canSetDeadlines} type="date" value={draft.assignedDate || ''} onChange={set('assignedDate')} />{!canSetDeadlines && <small className="field-hint">Set by a manager</small>}</Field>
+      <Field label="Original due date"><input aria-label="Original due date" type="date" disabled={!manager} value={draft.dueDate || ''} onChange={set('dueDate')} />{!manager && <small className="field-hint">Set by a manager</small>}</Field>
+      <Field label="Assigned / creation date"><input aria-label="Assigned / creation date" disabled={!manager} type="date" value={draft.assignedDate || ''} onChange={set('assignedDate')} />{!manager && <small className="field-hint">Set by a manager</small>}</Field>
       <Field label="Deferred date"><input aria-label="Deferred date" type="date" value={draft.deferredDate || ''} onChange={set('deferredDate')} /></Field>
       <Field label="Deferral justification" wide><textarea value={draft.deferredJustification || ''} onChange={set('deferredJustification')} /></Field>
       {status === 'Not Required' && <Field label="Not required justification" wide><textarea value={draft.notRequiredJustification || ''} onChange={set('notRequiredJustification')} /></Field>}
@@ -386,17 +476,17 @@ function ProjectDrawer({ project, user, manager, readOnly, store, users, onDelet
     store.listProjectAttachments(project.projectKey).then((rows) => { if (active) setProjectAttachments(rows); }).catch(() => { if (active) setProjectAttachments([]); });
     return () => { active = false; };
   }, [project.projectKey, store, taskEditor, documentRevision]);
-  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="project-drawer" role="dialog" aria-modal="true"><header className="drawer-header"><div className="drawer-title-row"><div><span className="section-kicker">{project.measurementArea}</span><h2>{project.title}</h2><div className="drawer-badges"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><Badge>{project.organization}</Badge><Badge>{project.priority} priority</Badge></div></div><div className="drawer-header-actions">{managesProject && <div ref={menuRef} className="project-menu-wrap"><button className="icon-button" aria-label="Project settings" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Icon name="more" className="vertical-more" /></button>{menuOpen && <div className="project-menu-popover"><button onClick={() => { setMenuOpen(false); onEdit(project); }}>Edit project</button>{(manager || !store.scopedAccess) && <button onClick={() => { setMenuOpen(false); onDelete(project); }}>Delete project</button>}</div>}</div>}<button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div></div>
+  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="project-drawer" role="dialog" aria-modal="true"><header className="drawer-header"><div className="drawer-title-row"><div><span className="section-kicker">{project.measurementArea}</span><h2>{project.title}</h2><div className="drawer-badges"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><Badge>{project.organization}</Badge><Badge>{project.priority} priority</Badge></div></div><div className="drawer-header-actions">{managesProject && <div ref={menuRef} className="project-menu-wrap"><button className="icon-button" aria-label="Project settings" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Icon name="more" className="vertical-more" /></button>{menuOpen && <div className="project-menu-popover"><button onClick={() => { setMenuOpen(false); onEdit(project); }}>Edit project</button>{manager && <button onClick={() => { setMenuOpen(false); onDelete(project); }}>Delete project</button>}</div>}</div>}<button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div></div>
     <div className="drawer-progress"><div className="progress-caption"><span>{progress.percentComplete}% complete</span><strong>{progressMode === 'tasks' ? (currentTask?.title || (projectTasks.length ? 'No outstanding tasks' : 'No tasks yet')) : phase?.name}</strong><ProgressChoice value={progressMode} onChange={(mode) => { setProgressMode(mode); if (managesProject) onProgressMode(project.id, mode); }} /></div><Progress value={progress.percentComplete} /><p className="progress-detail">{progress.progressDetail}</p></div>
     <div className="marker-scroll"><div className={`mini-pipeline ${progressMode === 'tasks' ? 'task-markers' : ''}`} style={{ gridTemplateColumns: `repeat(${Math.max(1, markers.length)}, minmax(32px, 1fr))`, minWidth: progressMode === 'tasks' ? `${markers.length * 37}px` : undefined }} aria-label={progressMode === 'tasks' ? 'Task progress markers' : 'Phase progress markers'}>{markers.map((item, index) => <span key={item.key} className={item.done ? 'done' : item.current ? 'current' : ''} title={item.label} aria-label={item.label} aria-current={item.current && !item.done ? 'step' : undefined}>{index + 1}</span>)}</div></div>
     <nav className="drawer-tabs">{[['overview', 'Overview'], ['tasks', `Work breakdown (${projectTasks.length})`], ['updates', `Updates (${projectUpdates.length + projectRisks.length})`]].map(([key, label]) => <button className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{label}</button>)}</nav></header>
     <div className="drawer-content">
-      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Project engineer</span><strong>{displayName(project.ownerName)}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section><section className="detail-block project-documents"><TaskDocuments projectKey={project.projectKey} store={store} readOnly canDelete={managesProject} refreshKey={taskEditor?.id} onChange={() => setDocumentRevision((value) => value + 1)} /></section></div>}
-      {tab === 'tasks' && <div className="phase-task-list">{workflowData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; const stageDocuments = projectAttachments.filter((file) => stageTasks.some((task) => task.id === file.taskId)); const documentSummary = stageDocuments.map((file) => `${file.taskTitle}: ${file.name}`).join("\n"); const allNotRequired = stageTasks.length > 0 && stageTasks.every((task) => ['Not Required', 'Not Applicable'].includes(task.status)); return <section key={stage.key} className={`task-stage ${allNotRequired ? 'phase-not-required' : ''}`}><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><div className="phase-header-actions">{!!stageDocuments.length && <span className="phase-document-indicator" tabIndex={0} title={documentSummary} aria-label={`Documents uploaded to ${stage.name}: ${documentSummary}`}><Icon name="paperclip" size={15} /></span>}<Badge>{done}/{stageTasks.length}</Badge>{managesProject && <button className="icon-button add-task-button" aria-label={`Add task to ${stage.name}`} title={`Add task to ${stage.name}`} onClick={() => setTaskEditor({ id: uid('task'), projectKey: project.projectKey, title: '', phaseKey: stage.key, order: Math.max(0, ...projectTasks.map((task) => task.order || 0)) + 1, status: 'Not Started', ownerName: project.ownerName, ownerKey: project.ownerKey, ownerEmail: project.ownerEmail, dueDate: '' })}><Icon name="plus" size={16} /></button>}{managesProject && <button type="button" className={`phase-required-button ${allNotRequired ? 'active' : ''}`} disabled={!stageTasks.length} aria-label={`${allNotRequired ? 'Restore' : 'Mark'} ${stage.name} ${allNotRequired ? '' : 'not required'}`.trim()} onClick={() => { if (allNotRequired) onSetPhaseRequired(project, stage.key, false); else { setPhaseReason(stage.key); setReason(''); } }}><Icon name={allNotRequired ? 'refresh' : 'ban'} size={13} />{allNotRequired ? 'Restore phase' : 'Not required'}</button>}</div></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="phase-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button disabled={readOnly || !managesProject} className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} ${task.title}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
+      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Project engineer</span><strong>{displayName(project.ownerName)}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Project status</span><strong>{project.status || 'Planned'}</strong></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section><section className="detail-block project-documents"><TaskDocuments projectKey={project.projectKey} store={store} readOnly canDelete={managesProject} refreshKey={taskEditor?.id} onChange={() => setDocumentRevision((value) => value + 1)} /></section></div>}
+      {tab === 'tasks' && <div className="phase-task-list">{workflowData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; const stageDocuments = projectAttachments.filter((file) => stageTasks.some((task) => task.id === file.taskId)); const documentSummary = stageDocuments.map((file) => `${file.taskTitle}: ${file.name}`).join("\n"); const allNotRequired = stageTasks.length > 0 && stageTasks.every((task) => ['Not Required', 'Not Applicable'].includes(task.status)); return <section key={stage.key} className={`task-stage ${allNotRequired ? 'phase-not-required' : ''}`}><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><div className="phase-header-actions">{!!stageDocuments.length && <span className="phase-document-indicator" tabIndex={0} title={documentSummary} aria-label={`Documents uploaded to ${stage.name}: ${documentSummary}`}><Icon name="paperclip" size={15} /></span>}<Badge>{done}/{stageTasks.length}</Badge>{manager && <button className="icon-button add-task-button" aria-label={`Add task to ${stage.name}`} title={`Add task to ${stage.name}`} onClick={() => setTaskEditor({ id: uid('task'), projectKey: project.projectKey, title: '', phaseKey: stage.key, order: Math.max(0, ...projectTasks.map((task) => task.order || 0)) + 1, status: 'Not Started', ownerName: project.ownerName, ownerKey: project.ownerKey, ownerEmail: project.ownerEmail, dueDate: '' })}><Icon name="plus" size={16} /></button>}{managesProject && <button type="button" className={`phase-required-button ${allNotRequired ? 'active' : ''}`} disabled={!stageTasks.length} aria-label={`${allNotRequired ? 'Restore' : 'Mark'} ${stage.name} ${allNotRequired ? '' : 'not required'}`.trim()} onClick={() => { if (allNotRequired) onSetPhaseRequired(project, stage.key, false); else { setPhaseReason(stage.key); setReason(''); } }}><Icon name={allNotRequired ? 'refresh' : 'ban'} size={13} />{allNotRequired ? 'Restore phase' : 'Not required'}</button>}</div></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="phase-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button disabled={readOnly || !managesProject} className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} ${task.title}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
       {tab === 'updates' && <ProjectUpdates key={project.projectKey} project={project} tasks={projectTasks} updates={projectUpdates} risks={projectRisks} store={store} canPost={managesProject && !readOnly} onPost={onAddUpdate} onEdit={onEditUpdate} onDelete={onDeleteUpdate} onRefresh={onRefreshUpdates} onTask={setTaskEditor} />}
     </div>
     {phaseReason && <Modal title="Why is this phase not required?" onClose={() => setPhaseReason(null)} actions={<><button className="button secondary" onClick={() => setPhaseReason(null)}>Cancel</button><button className="button primary" disabled={!reason.trim()} onClick={() => { onSetPhaseRequired(project, phaseReason, true, reason.trim()); setPhaseReason(null); }}>Apply to phase</button></>}><Field label="Phase justification"><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></Field></Modal>}
-    {taskEditor && <TaskEditor task={taskEditor} canSetDeadlines={manager} manager={managesProject} canDeleteDocuments={managesProject} readOnly={readOnly} store={store} saved={projectTasks.some((row) => row.id === taskEditor.id)} canDefine={managesProject && !projectTasks.some((row) => row.id === taskEditor.id)} users={users} onClose={() => setTaskEditor(null)} onSave={onSaveTask} onDelete={managesProject && projectTasks.some((row) => row.id === taskEditor.id) ? onDeleteTask : undefined} />}
+    {taskEditor && <TaskEditor task={taskEditor} manager={manager} canDeleteDocuments={managesProject} readOnly={readOnly} store={store} saved={projectTasks.some((row) => row.id === taskEditor.id)} users={users} onClose={() => setTaskEditor(null)} onSave={onSaveTask} onDelete={manager ? onDeleteTask : undefined} />}
   </aside></div>;
 }
 
@@ -447,36 +537,30 @@ export function App() {
   const enriched = useMemo(() => data.projects.map((project) => enrichProject(project, data.tasks)), [data.projects, data.tasks]);
   const openProject = enriched.find((project) => project.id === openProjectId);
 
-  async function saveProject(project) {
-    const source = data;
-    const prepared = { ...project, ownerName: project.ownerName?.trim() || 'Unassigned' };
-    const creating = !prepared.spId && !source.projects.some((row) => row.id === prepared.id);
-    const previous = source.projects.find((row) => row.id === prepared.id);
-    const template = creating ? createStarterTasks(prepared.projectKey, prepared) : [];
-    const updateProjects = (state, saved, starterTasks = []) => ({
-      ...state,
-      projects: state.projects.some((row) => row.id === saved.id) ? state.projects.map((row) => row.id === saved.id ? saved : row) : [...state.projects, saved],
-      tasks: starterTasks.length ? [...state.tasks.filter((row) => !starterTasks.some((task) => task.id === row.id)), ...starterTasks] : state.tasks,
-    });
-
-    setData((state) => updateProjects(state, prepared));
-    setOpenProjectId(prepared.id);
-    setProjectEditor(null);
-    setToast({ tone: 'info', message: creating ? `${prepared.title} saved. Setting up its work breakdown…` : `Saving ${prepared.title}…` });
+  async function saveProject(project, assignedLogin) {
+    const creating = !projectEditor?.id;
     try {
-      const saved = await repo.store.saveProject(prepared);
-      const starterTasks = [];
-      if (template.length) {
-        for (let index = 0; index < template.length; index += 10) {
-          starterTasks.push(...await Promise.all(template.slice(index, index + 10).map((task) => repo.store.saveTask(task))));
+      const persisted = creating && data.projects.find(row => row.id === project.id);
+      const saved = await repo.store.saveProject(persisted?.spId ? { ...project, spId: persisted.spId } : project, assignedLogin);
+      if (creating) {
+        const template = createStarterTasks(saved.projectKey, saved);
+        const existingIds = new Set(data.tasks.map(task => task.id));
+        const missing = template.filter(task => !existingIds.has(task.id));
+        for (let index = 0; index < missing.length; index += 10) {
+          const writes = await Promise.allSettled(missing.slice(index, index + 10).map(task => repo.store.saveTask(task)));
+          const failed = writes.find(write => write.status === 'rejected');
+          if (failed) throw failed.reason;
         }
       }
       setData(await repo.store.load());
+      setOpenProjectId(saved.id);
+      setProjectEditor(null);
       setToast({ message: `${saved.title} is ready.` });
-    } catch (caught) {
-      try { setData(await repo.store.load()); } catch { setData(source); }
-      setOpenProjectId('');
-      setToast({ tone: 'bad', message: caught.message || `${prepared.title} could not be saved.` });
+    } catch (error) {
+      // A group, project or starter task may already be saved. Refresh the list
+      // for a retry while keeping the same editor, record IDs and entered values.
+      try { setData(await repo.store.load()); } catch { /* keep the current view */ }
+      throw error;
     }
   }
 
@@ -673,8 +757,8 @@ export function App() {
       </main>
     </div>
     {openProject && <ProjectDrawer readOnly={!canManageProject(openProject, user, data.users)} store={repo.store} key={openProject.id} project={openProject} user={user} manager={manager} users={data.users || []} onDeleteTask={deleteTask} onProgressMode={async (id, mode) => { try { const saved = await repo.store.saveProgressMode(id, mode); setData((state) => ({ ...state, projects: state.projects.map((row) => row.id === saved.id ? saved : row) })); } catch (error) { setToast({ tone: 'bad', message: error.message }); } }} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={(project) => setProjectEditor(data.projects.find((row) => row.id === project.id))} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onEditUpdate={editUpdate} onDeleteUpdate={deleteUpdate} onRefreshUpdates={refreshUpdates} onDelete={deleteProject} />}
-    {projectEditor && (manager || canManageProject(projectEditor, user, data.users)) && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} users={data.users || []} manager={manager} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
-    {taskEditor && <TaskEditor task={taskEditor} canSetDeadlines={manager} manager={canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} canDeleteDocuments={canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} readOnly={!canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} store={repo.store} users={data.users || []} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
+    {projectEditor && (manager || canManageProject(projectEditor, user, data.users)) && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} store={repo.store} displayedStage={openProject?.currentStageKey} manager={manager} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
+    {taskEditor && <TaskEditor task={taskEditor} manager={manager} onDelete={manager ? deleteTask : undefined} canDeleteDocuments={canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} readOnly={!canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} store={repo.store} users={data.users || []} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
     <Toast toast={toast} onClose={() => setToast(null)} />
   </div>;
 }

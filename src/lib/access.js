@@ -22,6 +22,22 @@ export function visibleData(data, user) {
   const keys = new Set(projects.map((project) => project.projectKey));
   return { ...data, projects, tasks: data.tasks.filter((row) => keys.has(row.projectKey)), updates: data.updates.filter((row) => keys.has(row.projectKey)), risks: data.risks.filter((row) => keys.has(row.projectKey)) };
 }
+
+const engineerProjectFields = ['health', 'currentStageKey', 'status'];
+const engineerTaskFields = [
+  'status', 'organization', 'subAssignment', 'ownerName', 'ownerEmail', 'ownerKey',
+  'estimatedHours', 'startDate', 'deferredDate', 'deferredJustification',
+  'notRequiredJustification', 'blockedReason', 'notes',
+];
+
+function applyEditableFields(saved, draft, fields) {
+  const next = { ...saved };
+  for (const field of fields) {
+    if (Object.hasOwn(draft, field)) next[field] = draft[field];
+  }
+  return next;
+}
+
 export function validateTask(task) {
   if (task.subAssignment && (normalizeOrganization(task.organization) !== METCAL_ORGANIZATION || !METCAL_TEAMS.includes(task.subAssignment))) throw new Error('Select a valid METCAL responsibility.');
   if (!task.title?.trim()) throw new Error('Enter a task name.');
@@ -74,7 +90,12 @@ export function authorizedStore(raw, config = {}) {
         return raw.shareSiteAccess(saved, role, appUrl);
       };
       if (['searchPeople', 'resolvePerson'].includes(property)) return async (value) => {
-        await requireManager();
+        // On scoped sites the live groups determine who may look up an
+        // assignee. Looking up an email shouldn't reload the whole portfolio.
+        if (raw.permissions) {
+          const { role } = await raw.permissions.currentRole(await raw.currentUser());
+          if (role !== 'Manager') throw new Error('Only managers can perform this action.');
+        } else await requireManager();
         return raw[property](value);
       };
       if (property === 'registerCurrentUser' || property === 'activateTestingManager') return async (password) => {
@@ -110,15 +131,17 @@ export function authorizedStore(raw, config = {}) {
         const project = data.projects.find((row) => row.id === id);
         if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can change progress calculation.');
         if (!['phases', 'tasks'].includes(mode)) throw new Error('Select a valid progress calculation.');
-        return raw.saveProject({ ...project, progressMode: mode });
+        const next = { ...project, progressMode: mode };
+        return raw.saveProjectTracking ? raw.saveProjectTracking(next, { progressModeOnly: true }) : raw.saveProject(next);
       };
       if (property === 'saveTask') return async (row) => {
         const { user, data, manager } = await context();
-        const existing = data.tasks.find((task) => task.id === row.id);
+        const existing = row.id && data.tasks.find((task) => task.id === row.id);
         const project = data.projects.find((project) => project.projectKey === (existing?.projectKey || row.projectKey));
         if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can edit tasks.');
-        let next = { ...row, projectKey: project.projectKey, spId: existing?.spId };
-        if (!manager) for (const field of ['dueDate', 'assignedDate']) next[field] = existing?.[field] || '';
+        if (!manager && !existing) throw new Error('Only managers can create tasks.');
+        const next = manager ? { ...row, projectKey: project.projectKey, spId: existing?.spId }
+          : applyEditableFields(existing, row, engineerTaskFields);
         if (normalizeOrganization(next.organization || existing?.organization || project.organization) !== METCAL_ORGANIZATION) next.subAssignment = '';
         next.organization = normalizeOrganization(next.organization || existing?.organization || project.organization);
         next.status = normalizeTaskStatus(next.status);
@@ -126,7 +149,7 @@ export function authorizedStore(raw, config = {}) {
         validateTask(next);
         next.estimatedHours = next.estimatedHours === '' || next.estimatedHours == null ? null : Number(next.estimatedHours);
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';
-        return raw.saveTask(next);
+        return manager ? raw.saveTask(next) : raw.saveTask(next, { trackingOnly: true });
       };
       if (property === 'listProjectAttachments') return async (projectKey) => {
         const { user, data } = await context();
@@ -190,14 +213,21 @@ export function authorizedStore(raw, config = {}) {
         }
         return raw[property](update, file);
       };
-      if (property === 'saveTasks') return undefined;
+      if (property === 'saveTasks' || property === 'saveProjectTracking') return undefined;
       if (['saveProject', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
         const { data, user, manager } = await context();
         if (!manager && ['saveAcronym', 'saveUser'].includes(property)) throw new Error('Only managers can perform this action.');
-        if (!manager && property === 'saveProject') {
-          const current = data.projects.find((entry) => entry.id === args[0]?.id);
+        if (property === 'saveProject') {
+          const [draft] = args;
+          if (manager) {
+            args[0] = { ...draft, organization: normalizeOrganization(draft.organization) };
+            return raw.saveProject(...args);
+          }
+          const current = draft?.id && data.projects.find((entry) => entry.id === draft.id);
           if (!current || !canManageProject(current, user, data.users)) throw new Error('Only managers or assigned project engineers can edit this project.');
-          args[0] = { ...args[0], spId: current.spId, projectKey: current.projectKey, targetFinish: current.targetFinish || '', ownerName: current.ownerName, ownerEmail: current.ownerEmail, ownerKey: current.ownerKey };
+          // Only a manager's explicit assignment may trigger a role change.
+          const next = applyEditableFields(current, draft, engineerProjectFields);
+          return raw.saveProjectTracking ? raw.saveProjectTracking(next) : raw.saveProject(next);
         }
         if (!manager && property === 'saveRisk') {
           const current = data.risks.find((entry) => entry.id === args[0]?.id);
@@ -207,11 +237,10 @@ export function authorizedStore(raw, config = {}) {
         }
         if (!manager && property === 'recycle') {
           const [collection, spId, id] = args;
-          if (raw.scopedAccess && collection === 'projects') throw new Error('Only managers can delete a project and revoke its engineer access.');
+          if (collection === 'projects' || collection === 'tasks') throw new Error('Only managers can delete projects and tasks.');
           const rows = data[collection] || [];
           const row = rows.find((entry) => entry.id === id || (spId != null && entry.spId === spId));
-          const projectKey = collection === 'projects' ? row?.projectKey : row?.projectKey;
-          const project = data.projects.find((entry) => entry.projectKey === projectKey);
+          const project = data.projects.find((entry) => entry.projectKey === row?.projectKey);
           if (!row || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can delete project content.');
           args[1] = row.spId; args[2] = row.id;
         }
@@ -229,7 +258,6 @@ export function authorizedStore(raw, config = {}) {
           if (data.users?.some((entry) => entry.id !== row.id && isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, row))) throw new Error('This user is already in the directory.');
           if (row.role !== 'Manager' && isOwnedByUser({ ownerKey: row.loginName, ownerEmail: row.email }, user)) throw new Error('Ask another manager to change your role.');
         }
-        if (property === 'saveProject') args[0] = { ...args[0], organization: normalizeOrganization(args[0].organization) };
         return raw[property](...args);
       };
       const value = target[property];

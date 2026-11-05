@@ -15,7 +15,7 @@ function identityAliases(value) {
   return [...aliases];
 }
 
-export function isOwnedByUser(record, user) {
+function hasIdentityAlias(record, user) {
   const userAliases = new Set([
     ...identityAliases(userIdentityKey(user)),
     ...identityAliases(user?.loginName),
@@ -26,6 +26,30 @@ export function isOwnedByUser(record, user) {
     ...identityAliases(record?.ownerEmail),
   ];
   return recordAliases.some((alias) => userAliases.has(alias));
+}
+
+export function isOwnedByUser(record, user) {
+  const ownerLogin = String(record?.ownerKey || '').trim().toLowerCase();
+  const login = String(user?.loginName || '').trim().toLowerCase();
+  // Distinct resolved accounts may share an email address. Use aliases only
+  // when one side has no claims login, as on older imported records.
+  if (ownerLogin.includes('|') && login.includes('|')) return ownerLogin === login;
+  return hasIdentityAlias(record, user);
+}
+
+// A display name or a shared mailbox cannot establish which account should
+// receive permissions. Accept older records keyed by the same login or email.
+export function matchesAssignmentLogin(login, person) {
+  const key = String(login || '').trim().toLowerCase();
+  return key === userIdentityKey(person) || (!key.includes('|') && isOwnedByUser({ ownerKey: key }, person));
+}
+export function assignmentDirectoryUser(users, person) {
+  const matches = users.filter(row => hasIdentityAlias({ ownerKey: row.loginName, ownerEmail: row.email }, person));
+  const entry = matches[0];
+  if (matches.length > 1 || (entry?.loginName && !matchesAssignmentLogin(entry.loginName, person))) {
+    throw new Error('The selected account matches conflicting Tracker directory identities. Ask a manager to check the logins before assigning this project.');
+  }
+  return entry;
 }
 
 // Only legacy roles migrate. An explicitly saved Viewer remains read-only,

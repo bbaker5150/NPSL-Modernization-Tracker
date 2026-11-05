@@ -104,6 +104,16 @@ try {
   await page.screenshot({ path: 'test-artifacts/project-engineer-editor.png' });
   await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
+  assert.equal(await frame.getByRole('button', { name: /Add task to/ }).count(), 0);
+  await frame.locator('.phase-task').first().click();
+  for (const label of ['Task name', 'Original due date', 'Assigned / creation date']) {
+    assert.ok(await frame.getByLabel(label, { exact: true }).isDisabled());
+  }
+  assert.equal(await frame.getByRole('button', { name: 'Delete task', exact: true }).count(), 0);
+  assert.ok(await frame.getByLabel('Notes', { exact: true }).isEditable());
+  await role('Manager');
+  await frame.locator('.project-table-row:not(.table-header)').filter({ hasText: 'Electrical standards' }).click();
+  await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.getByRole('button', { name: /Add task to/ }).first().click();
   await frame.getByLabel('Task name', { exact: true }).fill('New task with documents');
   const notesField = frame.getByLabel('Notes', { exact: true });
@@ -114,7 +124,7 @@ try {
   await notesField.fill('Short note.');
   assert.ok(await assertNotesFit('shortened notes') < expandedHeight);
   await notesField.fill(longNotes);
-  assert.ok(await frame.getByLabel('Original due date').isDisabled());
+  assert.ok(await frame.getByLabel('Original due date').isEditable());
   assert.equal(await frame.getByLabel('Pipeline stage', { exact: true }).count(), 0);
   await frame.getByRole('combobox', { name: 'Task owner', exact: true }).fill('Other');
   await frame.getByRole('option', { name: /Other Engineer/ }).click();
@@ -127,7 +137,7 @@ try {
   assert.equal(saved.phaseKey, 'requirement');
   assert.equal(saved.dueDate, '');
   assert.equal(saved.notes, longNotes);
-  await boot();
+  await role('Project Engineer');
   await frame.locator('.project-table-row:not(.table-header)').first().click();
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
   await frame.getByText('New task with documents', { exact: true }).click();
