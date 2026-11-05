@@ -1,4 +1,5 @@
 import { ROLES } from '../data/workflow';
+import { TRACKER_USERS_GROUP } from '../lib/trackerGroups';
 import React, { useEffect, useRef, useState } from 'react';
 import { invitationUrl, trackerPageUrl } from '../lib/peoplePicker';
 
@@ -43,7 +44,7 @@ export function PeopleInvite({ store, config, onSave, localPreview }) {
   }
   return <section className="panel people-invite" aria-label="Invite people">
     <h2>Invite people</h2><p>Find a person, choose their role, then verify their Tracker access and send an invitation email.</p>
-    {!localPreview && store.scopedAccess && <p>Inviting someone adds them to Metrology App User for basic app access. Their selected Tracker role controls what they can do in Tracker.</p>}
+    {!localPreview && store.scopedAccess && <p>Inviting someone adds them to {TRACKER_USERS_GROUP} for access to Modernization Tracker. Their selected Tracker role controls what they can do in Tracker.</p>}
     {localPreview && <p>Preview mode searches saved tracker users. Organization search is available in SharePoint.</p>}
     <label className="field"><span>Find a person</span><input type="search" autoComplete="off" value={query} disabled={busy} placeholder="Name or email (at least 2 characters)" onChange={(event) => { setQuery(event.target.value); setSelected(null); setAdded(null); setAccess(null); setError(''); }} /></label>
     {searching && <p role="status">Searching people…</p>}

@@ -34,7 +34,7 @@ try {
       requests.push({ method: request.method(), path, select: url.searchParams.get('$select') });
       if (request.method() !== 'GET') { unexpected.push(`Unexpected write: ${request.method()} ${path}`); return send({ error: { message: 'Viewer cannot write setup or data' } }, 403); }
       if (path.toLowerCase().endsWith('/effectivebasepermissions')) return send({ Low: '1', High: '0' });
-      if (path.endsWith('/currentuser/groups')) return send({ value: [{ Id: 20, Title: 'Metrology App User' }] });
+      if (path.endsWith('/currentuser/groups')) return send({ value: [{ Id: 20, Title: 'Tracker Users' }] });
       if (path.endsWith('/currentuser')) return send(user);
       if (path.endsWith('/associatedownergroup')) return send({ Id: 99 });
       if (path.endsWith('/lists')) {

@@ -1,5 +1,5 @@
 # Run in an authenticated PnP.PowerShell session as a site owner.
-# Example: ./scripts/setup-feedback.ps1 -SubmitterGroups 'Metrology App User','Tracker Project Engineers','Tracker Managers'
+# Example: ./scripts/setup-feedback.ps1 -SubmitterGroups 'Tracker Users','Tracker Project Engineers','Tracker Managers'
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string[]]$SubmitterGroups,

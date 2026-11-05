@@ -68,6 +68,7 @@ jobs:
           node scripts/smoke-feedback.mjs
           node scripts/smoke-project-updates.mjs
           node scripts/smoke-viewer-startup.mjs
+          node scripts/smoke-tracker-invitations.mjs
 
       - name: Generate checksum
         id: checksum

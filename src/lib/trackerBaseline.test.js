@@ -3,7 +3,7 @@ import { TrackerPermissions } from './trackerPermissions';
 import { SharePointStore } from './spStore';
 
 const groups = [
-  { Id: 20, Title: 'Metrology App User' },
+  { Id: 20, Title: 'Tracker Users' },
   { Id: 21, Title: 'Tracker Project Engineers' },
   { Id: 22, Title: 'Tracker Managers' },
 ];
@@ -56,7 +56,7 @@ it('does not claim success if SharePoint ignores a baseline grant', async () => 
 it.each(['group', 'role'])('stops before ACL changes if required %s configuration is missing', async missing => {
   const { permissions, store } = fixture();
   const get = store.get.getMockImplementation();
-  store.get.mockImplementation(path => missing === 'group' && path.includes('Metrology%20App%20User') ? Promise.reject(new Error('Group missing')) : missing === 'role' && path.includes('/roledefinitions?') ? { value: [roles[0]] } : get(path));
+  store.get.mockImplementation(path => missing === 'group' && path.includes('Tracker%20Users') ? Promise.reject(new Error('Group missing')) : missing === 'role' && path.includes('/roledefinitions?') ? { value: [roles[0]] } : get(path));
   await expect(permissions.syncProject({ spId: 1, projectKey: 'p' }, [])).rejects.toThrow();
   expect(store.post).not.toHaveBeenCalled();
 });
@@ -119,4 +119,17 @@ it('rejects a custom manager role that lacks Manage Permissions', async () => {
   store.get.mockImplementation(path => path.includes('/roledefinitions?') ? { value: [roles[0], { ...roles[1], BasePermissions: { Low: '15' } }] } : get(path));
   await expect(permissions.applyScope('/project', null, 3)).rejects.toThrow('Contribute plus Manage Permissions');
   expect(store.post).not.toHaveBeenCalled();
+});
+
+it('uses Tracker Users as the baseline and preserves unrelated existing suite grants', async () => {
+  const { permissions, store, acl } = fixture();
+  acl('/project').push(row(100, 2)); // Existing Metrology App User grant: manual cleanup is separate.
+  const baseline = await permissions.baselineGrants();
+  expect(baseline).toContainEqual({ principalId: 20, roleId: 2 });
+  expect(store.get.mock.calls.some(([path]) => path.includes("getbyname('Tracker%20Users')"))).toBe(true);
+  expect(store.get.mock.calls.some(([path]) => path.includes('Metrology%20App%20User'))).toBe(false);
+  await permissions.applyScope('/project', null, 3, baseline);
+  expect(acl('/project')).toContainEqual(row(20, 2));
+  expect(acl('/project')).toContainEqual(row(100, 2));
+  expect(store.post.mock.calls.some(([path]) => path.includes('principalid=100'))).toBe(false);
 });

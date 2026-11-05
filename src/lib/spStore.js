@@ -6,6 +6,7 @@ import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normaliz
 import { getCurrentUser, SharePointError, spGet, spPost } from './spContext';
 import { defaultAcronyms } from '../data/defaultAcronyms';
 import { TrackerPermissions } from './trackerPermissions';
+import { TRACKER_USERS_GROUP } from './trackerGroups';
 import { TrackerAccessJob } from './trackerAccessJob';
 import { isOwnedByUser } from './identity';
 
@@ -511,10 +512,10 @@ export class SharePointStore {
     catch (error) { throw new Error(`The tracker page could not be checked. Confirm its direct URL and your access. ${error.message}`); }
     if (page.Exists !== true) throw new Error('The tracker page was not found. Use its direct published URL.');
     if (page.Level !== 1) throw new Error('Publish or republish the tracker page in SharePoint before inviting users. The current page is a draft or checked out.');
-    // Explicit invitations enroll all roles in the shared app baseline.
-    // Viewer still has no dedicated role group.
     let group;
     if (this.permissions) {
+      // Scoped invitations enroll all roles in the Tracker-only access group.
+      // Elevated role membership remains separate from basic access.
       group = await this.permissions.syncGroups(person, role);
       const baseline = await this.permissions.ensureAppMembership(person);
       group ||= baseline;
@@ -582,7 +583,7 @@ export class SharePointStore {
     }
     const result = response?.d?.ShareObject || response?.ShareObject || response?.d || response;
     if (result?.StatusCode !== 0 || result?.ErrorMessage) throw new Error(result?.ErrorMessage || 'SharePoint did not confirm the invitation email request.');
-    return { access: group?.Title || (this.permissions ? 'Viewer (existing app access)' : 'Site Members'), emailRequested: true };
+    return { access: group?.Title || (this.permissions ? TRACKER_USERS_GROUP : 'Site Members'), emailRequested: true };
   }
 
   async searchPeople(query) {

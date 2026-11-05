@@ -1,5 +1,6 @@
 import { TrackerLists, displayListTitle } from './trackerLists';
 import { FEEDBACK_STATUS_XML } from './feedbackFields';
+import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(value.replace(/'/g, "''"));
 const id = value => Number.isInteger(Number(value)) && Number(value) > 0;
@@ -69,7 +70,8 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       const owners = unwrap(await store.get('/_api/web/associatedownergroup?$select=Id,Title'));
       if (!id(owners?.Id)) throw new Error('Configure the site’s associated Owners group before setting up feedback.');
       const groups = (await pages('/_api/web/sitegroups?$select=Id,Title&$top=500')).filter(group => id(group.Id) && group.Id !== owners.Id);
-      const defaults = ['Metrology App User', 'Tracker Project Engineers', 'Tracker Managers'];
+      const defaults = [TRACKER_USERS_GROUP, ...Object.values(TRACKER_GROUPS)];
+      if (store.scopedAccess && !groups.some(group => group.Title === TRACKER_USERS_GROUP)) throw new Error(`Create the SharePoint group ${TRACKER_USERS_GROUP} before setting up Tracker feedback.`);
       if (!store.scopedAccess) {
         const members = unwrap(await store.get('/_api/web/associatedmembergroup?$select=Id,Title'));
         if (members?.Title) defaults.push(members.Title);

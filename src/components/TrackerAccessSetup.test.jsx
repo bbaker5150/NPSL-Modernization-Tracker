@@ -37,7 +37,7 @@ it('exposes an explicit repair action without running it when rendered', async (
   const job = { subscribe: () => () => {}, getSnapshot: () => snapshot, run: vi.fn() };
   try {
     await act(async () => root.render(<TrackerAccessSetup store={{ scopedAccess: true, trackerAccessJob: job }} />));
-    expect(node.textContent).toContain('Repair shared Read and manager access');
+    expect(node.textContent).toContain('Basic access comes from Tracker Users');
     expect(job.run).not.toHaveBeenCalled();
     await act(async () => node.querySelector('button').click());
     expect(job.run).toHaveBeenCalledOnce();

@@ -8,7 +8,7 @@ Feedback uses a dedicated `Modernization-Tracker - Feedback` SharePoint list (or
 
 1. Deploy the updated HTML and open the feedback icon while signed in as a site owner with **Manage Lists** and **Manage Permissions** on the hosting web.
 2. When the list is missing, **Set up private feedback** appears automatically. No list changes occur just from opening the dialog.
-3. Check the selected submission groups. Include all groups containing tracker users. Scoped deployments preselect existing `Metrology App User`, `Tracker Project Engineers`, and `Tracker Managers` groups. Legacy deployments also preselect the associated Members group. Other existing SharePoint groups can be selected for additional users.
+3. Check the selected submission groups. Include all groups containing tracker users. Scoped deployments preselect existing `Tracker Users`, `Tracker Project Engineers`, and `Tracker Managers` groups. Legacy deployments also preselect the associated Members group. Other existing SharePoint groups can be selected for additional users.
 4. Select **Create private feedback list**. The application creates the list, breaks inheritance before granting submission access, creates the fields, and verifies a custom submission-only permission level. The associated site Owners group receives Full Control. Selected groups receive Add Items and the API/page access permissions, without View Items, Edit Items, Delete Items, or Manage Permissions. The temporary direct creator grant is removed.
 5. On success, the dialog reports that the list is ready in **Site Contents** and enables the inbox and submission controls. The list is visible in Site Contents to accounts with access, while ordinary users cannot read its contents.
 
@@ -57,3 +57,7 @@ Submission uses SharePoint CSOM `/_vti_bin/client.svc/ProcessQuery` with AddItem
 The application confirms success only when CSOM returns an explicit `ErrorInfo: null`. Errors inside an HTTP 200 response are failures too. Only an explicit missing-list error during GetByTitle can try a legacy name. Timeouts, HTTP errors and generic “Item does not exist” responses never retry creation automatically. Before resubmitting a report affected by the old error, ask an owner to check whether it already arrived. No read permissions are added to submission groups.
 
 Protocol reference: [Microsoft CSOM update example](https://learn.microsoft.com/en-us/openspecs/sharepoint_protocols/ms-csomspt/ec9d185e-97c4-49e6-bbb3-8de04445db47). Automated coverage checks the request, digest/cookies, response handling and no-retry behavior; it does not replace submitting as an actual add-only SharePoint user.
+
+## Tracker Users access group
+
+Scoped feedback setup now preselects Tracker Users, Tracker Project Engineers and Tracker Managers. It requires the existing Tracker Users group before a new setup and does not fall back to the suite-wide Metrology App User group. Existing configured lists are not recreated or assigned new ACLs on startup. Grant Tracker Users the existing ModernizationFeedback Submit Only level on the existing list, preserving owner-only reads. Normal project permission repair never touches Feedback. A user in Tracker Users must be able to submit without reading any reports.

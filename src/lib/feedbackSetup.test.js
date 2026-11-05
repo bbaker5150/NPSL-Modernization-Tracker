@@ -8,7 +8,7 @@ export function setupFixture() {
     if (path.includes('/lists?')) return { value: state.list ? [structuredClone(state.list)] : [] };
     if (path.includes('/EffectiveBasePermissions')) return { Low: '4294967295' };
     if (path.includes('/associatedownergroup')) return { Id: 10, Title: 'Site Owners' };
-    if (path.includes('/sitegroups?')) return { value: [{ Id: 10, Title: 'Site Owners' }, { Id: 20, Title: 'Metrology App User' }, { Id: 21, Title: 'Tracker Project Engineers' }, { Id: 22, Title: 'Tracker Managers' }] };
+    if (path.includes('/sitegroups?')) return { value: [{ Id: 10, Title: 'Site Owners' }, { Id: 20, Title: 'Tracker Users' }, { Id: 21, Title: 'Tracker Project Engineers' }, { Id: 22, Title: 'Tracker Managers' }] };
     if (path.includes('/roledefinitions/getbyname')) return state.roles.find(role => role.Name);
     if (path.includes('/roledefinitions?')) return { value: structuredClone(state.roles) };
     if (path.includes('/roleassignments?')) return { value: state.assignments.map(assignment => ({ ...assignment, RoleDefinitionBindings: assignment.RoleDefinitionBindings.map(role => path.includes('BasePermissions') ? state.roles.find(entry => entry.Id === role.Id) : role) })) };
@@ -99,5 +99,25 @@ it('refuses ambiguous feedback aliases before renaming or provisioning', async (
   raw.post.mockClear(); const get = raw.get.getMockImplementation();
   raw.get.mockImplementation(path => path.includes('/lists?') ? { value: [state.list, { ...state.list, Id: '22222222-2222-2222-2222-222222222222', Title: 'ModernizationFeedback' }] } : get(path));
   await expect(feedbackSetup(raw, 'ModernizationFeedback', async () => true).status()).rejects.toThrow('Multiple tracker list aliases');
+  expect(raw.post).not.toHaveBeenCalled();
+});
+
+it('selects Tracker Users for new feedback setup even when the suite group exists', async () => {
+  const { raw, setup } = setupFixture();
+  const get = raw.get.getMockImplementation();
+  raw.get.mockImplementation(async path => {
+    const body = await get(path);
+    return path.includes('/sitegroups?') ? { value: [...body.value, { Id: 30, Title: 'Metrology App User' }] } : body;
+  });
+  const options = await setup.options();
+  expect(options.groups.some(group => group.Title === 'Metrology App User')).toBe(true);
+  expect(options.selected).toEqual([20, 21, 22]);
+  expect(raw.post).not.toHaveBeenCalled();
+});
+it('requires Tracker Users before offering scoped feedback setup without a suite fallback', async () => {
+  const { raw, setup } = setupFixture();
+  const get = raw.get.getMockImplementation();
+  raw.get.mockImplementation(path => path.includes('/sitegroups?') ? { value: [{ Id: 30, Title: 'Metrology App User' }] } : get(path));
+  await expect(setup.options()).rejects.toThrow('Create the SharePoint group Tracker Users');
   expect(raw.post).not.toHaveBeenCalled();
 });
