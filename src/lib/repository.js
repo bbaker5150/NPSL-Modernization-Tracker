@@ -112,11 +112,10 @@ export function createRepository() {
   if ((inSharePoint || config.forceSharePoint === true) && config.forceLocal !== true) {
     const scopedAccess = config.scopedAccess ?? /^\/sites\/metsoft\/?$/i.test(new URL(webUrl).pathname);
     if (scopedAccess) config.testingManagerPassword = false;
-    // Explicit deployment folder supplied by the metsoft owner. Do not guess
-    // an assets location for other sites or embedded srcdoc hosts.
+    // On metsoft the HTML lives in Documents (internal URL: Shared Documents).
     const invitationAssetFolders = config.invitationAssetFolders ??
       (webUrl.replace(/\/$/, '').toLowerCase() === 'https://flankspeed.sharepoint-mil.us/sites/metsoft'
-        ? ['/sites/metsoft/SiteAssets/Modernization Tracker'] : []);
+        ? ['/sites/metsoft/Shared Documents/Modernization Tracker'] : []);
     return { mode: 'sharepoint', store: new SharePointStore({ webUrl, prefix: config.listPrefix || 'Modernization', scopedAccess, invitationAssetUrls: config.invitationAssetUrls ?? [], invitationAssetFolders }), config };
   }
   return { mode: 'local', store: new LocalStore(), config };

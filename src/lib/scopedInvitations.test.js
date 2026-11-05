@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SharePointError } from './spContext';
 import { CONTAINERS, SharePointStore } from './spStore';
 
 const webUrl = 'https://tenant.sharepoint-mil.us/sites/metsoft';
@@ -126,16 +127,6 @@ describe('scoped invitations without site-wide Read', () => {
     );
     expect(store.post).not.toHaveBeenCalled();
   });
-  it('checks the configured folder without granting access or changing inheritance', async () => {
-    const store = setup({ assets: [] });
-    store.invitationAssetFolders = ['/sites/metsoft/SiteAssets/Modernization Tracker'];
-    await store.shareSiteAccess(person, 'Viewer', page);
-    expect(store.get.mock.calls.some(([p]) => decodeURIComponent(p).includes("GetFolderByServerRelativePath(decodedurl='/sites/metsoft/SiteAssets/Modernization Tracker')/ListItemAllFields/getusereffectivepermissions"))).toBe(true);
-    const denied = setup({ assets: [], deny: 'GetFolderByServerRelativePath' });
-    denied.invitationAssetFolders = store.invitationAssetFolders;
-    await expect(denied.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('Tracker assets folder');
-    expect(denied.post).not.toHaveBeenCalled();
-  });
   it('validates the configured assets without inventing paths for embedded deployments', async () => {
     const store = setup({ assets: [] });
     await store.shareSiteAccess(person, 'Viewer', page);
@@ -143,6 +134,67 @@ describe('scoped invitations without site-wide Read', () => {
     const foreign = setup({ assets: ['https://outside.example/asset.html'] });
     await expect(foreign.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('on this SharePoint site');
     expect(foreign.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('scoped invitation asset folders', () => {
+  const folderPath = '/sites/metsoft/Shared Documents/Modernization Tracker';
+  const folderApi = '/GetFolderByServerRelativePath';
+
+  it.each([
+    [folderPath, folderPath],
+    [`${webUrl}/Shared%20Documents/Modernization%20Tracker/`, folderPath],
+    ['/sites/metsoft/Shared%20Documents/Owner%27s%20%231%20%2B%20100%25%20%2520', "/sites/metsoft/Shared Documents/Owner's #1 + 100% %20"],
+  ])('checks the exact configured folder for %s before requesting the email', async (configured, expectedPath) => {
+    const store = setup({ assets: [] });
+    store.invitationAssetFolders = [configured];
+    await store.shareSiteAccess(person, 'Viewer', page);
+    const folderChecks = store.get.mock.calls.filter(([path]) => path.includes(folderApi));
+    expect(folderChecks).toHaveLength(1);
+    const url = new URL(webUrl + folderChecks[0][0]);
+    // Decode once at the transport boundary, as SharePoint does. Literal
+    // percent, hash and apostrophe characters must identify the same folder.
+    expect(decodeURIComponent(url.pathname)).toBe(`/sites/metsoft/_api/web${folderApi}(decodedurl='${expectedPath.replace(/'/g, "''")}')/ListItemAllFields/getusereffectivepermissions(@u)`);
+    expect(url.searchParams.get('@u')).toBe(`'${person.loginName}'`);
+    const index = store.get.mock.calls.indexOf(folderChecks[0]);
+    expect(store.get.mock.invocationCallOrder[index]).toBeLessThan(store.post.mock.invocationCallOrder[0]);
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/SP.Web.ShareObject']);
+  });
+
+  it('identifies an unavailable folder separately from missing Read and retries after correction', async () => {
+    const store = setup({ assets: [], member: false });
+    const oldFolder = '/sites/metsoft/SiteAssets/Modernization Tracker';
+    store.invitationAssetFolders = [oldFolder];
+    const get = store.get.getMockImplementation();
+    let canReadFolder = false;
+    store.get.mockImplementation(path => {
+      if (path.includes(folderApi)) {
+        if (decodeURIComponent(path).includes(oldFolder)) throw new SharePointError('Cannot find resource for the request', 404);
+        if (!canReadFolder) return { GetUserEffectivePermissions: { Low: '1' } };
+      }
+      return get(path);
+    });
+    const missing = await store.shareSiteAccess(person, 'Viewer', page).catch(error => error);
+    expect(missing).toBeInstanceOf(Error);
+    expect(missing.message).toContain(oldFolder);
+    expect(missing.message).toContain('verified Tracker Users membership');
+    expect(missing.message).toContain('No invitation email was requested');
+    expect(missing.message).toContain('invitationAssetFolders');
+    expect(missing.message).not.toContain('lacks the required Read');
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users']);
+    store.invitationAssetFolders = [folderPath];
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow(/Shared Documents\/Modernization Tracker.*lacks the required Read/);
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users']);
+    canReadFolder = true;
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).resolves.toMatchObject({ emailRequested: true });
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users', '/_api/SP.Web.ShareObject']);
+  });
+  it('requires a configured folder to belong to the same SharePoint site', async () => {
+    const store = setup({ assets: [] });
+    store.invitationAssetFolders = ['/sites/another/Shared Documents/Modernization Tracker'];
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('on this SharePoint site');
+    expect(store.get.mock.calls.some(([path]) => path.includes(folderApi))).toBe(false);
+    expect(store.post).not.toHaveBeenCalled();
   });
 });
 

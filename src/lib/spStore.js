@@ -491,7 +491,7 @@ export class SharePointStore {
     return response.blob();
   }
 
-  async verifyInvitationRead(scope, loginName, required, label, missingReadAction) {
+  async verifyInvitationRead(scope, loginName, required, label, { missingReadAction, notFoundAction } = {}) {
     const membership = this.permissions ? TRACKER_USERS_GROUP : 'site Members group';
     const status = `Tracker access could not be verified for ${label}. SharePoint verified ${membership} membership. No invitation email was requested.`;
     let low;
@@ -502,6 +502,9 @@ export class SharePointStore {
       low = (typeof raw === 'string' && /^\d+$/.test(raw)) || typeof raw === 'number' ? Number(raw) : NaN;
       if (!Number.isInteger(low) || low < 0 || low > 0xffffffff) throw new Error('SharePoint returned an invalid effective permission result.');
     } catch (error) {
+      if (error.status === 404 && notFoundAction) {
+        throw new Error(`${status} SharePoint could not find this folder for your account (404). ${notFoundAction}`);
+      }
       throw new Error(`${status} Ask a site owner to check the selected account’s effective permissions, then retry the invitation. ${error.message}`);
     }
     if ((low & required) !== required) {
@@ -553,14 +556,18 @@ export class SharePointStore {
     await this.verifyInvitationRead(`${fileApi}/ListItemAllFields`, person.loginName, 33, 'the published Tracker page');
     if (this.permissions) {
       for (const container of CONTAINERS) {
-        await this.verifyInvitationRead(await this.listApi(container.key), person.loginName, 1, displayListTitle(this.prefix, container.key),
-          `A site owner should open List settings → Permissions for this list, grant ${TRACKER_USERS_GROUP} Read on this list if missing, then retry the invitation.`);
+        await this.verifyInvitationRead(await this.listApi(container.key), person.loginName, 1, displayListTitle(this.prefix, container.key), {
+          missingReadAction: `A site owner should open List settings → Permissions for this list, grant ${TRACKER_USERS_GROUP} Read on this list if missing, then retry the invitation.`,
+        });
       }
       if (!Array.isArray(this.invitationAssetFolders)) throw new Error('Configure invitationAssetFolders as an array of Tracker folder URLs. No invitation email was requested.');
       for (const value of [...new Set(this.invitationAssetFolders)]) {
         const folder = new URL(normalizeInvitationUrl(value, this.webUrl));
-        const path = `/_api/web/GetFolderByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(folder.pathname).replace(/\/$/, ''))}')/ListItemAllFields`;
-        await this.verifyInvitationRead(path, person.loginName, 33, `Tracker assets folder ${folder.pathname}`);
+        const folderPath = decodeURIComponent(folder.pathname).replace(/\/$/, '');
+        const path = `/_api/web/GetFolderByServerRelativePath(decodedurl='${escapeOData(folderPath)}')/ListItemAllFields`;
+        await this.verifyInvitationRead(path, person.loginName, 33, `Tracker assets folder ${folderPath}`, {
+          notFoundAction: 'Ask a site owner to confirm the library and folder path in invitationAssetFolders and that your account can open that folder, then retry the invitation.',
+        });
       }
       if (!Array.isArray(this.invitationAssetUrls)) throw new Error('Configure invitationAssetUrls as an array of Tracker file URLs. No invitation email was requested.');
       for (const value of [...new Set(this.invitationAssetUrls)]) {

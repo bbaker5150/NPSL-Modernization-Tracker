@@ -38,7 +38,7 @@ describe('repository selection and SharePoint identity', () => {
 
   it('uses the confirmed metsoft assets folder and respects deployment overrides', () => {
     window.MOD_TRACKER_CONFIG = { webUrl: 'https://flankspeed.sharepoint-mil.us/sites/metsoft' };
-    expect(createRepository().store.invitationAssetFolders).toEqual(['/sites/metsoft/SiteAssets/Modernization Tracker']);
+    expect(createRepository().store.invitationAssetFolders).toEqual(['/sites/metsoft/Shared Documents/Modernization Tracker']);
     window.MOD_TRACKER_CONFIG.invitationAssetFolders = ['/sites/metsoft/SiteAssets/Other'];
     window.MOD_TRACKER_CONFIG.invitationAssetUrls = ['/sites/metsoft/SiteAssets/Other/app.html'];
     expect(createRepository().store.invitationAssetFolders).toEqual(window.MOD_TRACKER_CONFIG.invitationAssetFolders);

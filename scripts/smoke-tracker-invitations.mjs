@@ -5,7 +5,9 @@ import { chromium } from 'playwright';
 const schema = JSON.parse(await fs.readFile('scripts/fixtures/pre-update-editing-schema.json', 'utf8'));
 schema.updates.push('EditedAt', 'EditorName', 'EditorKey');
 const artifact = await fs.readFile('build-singlefile/modernization-project-tracker.html', 'utf8');
-const webUrl = 'https://tenant.sharepoint-mil.us/sites/metsoft';
+// All requests are intercepted below. Use the deployment URL to exercise its default folder.
+const webUrl = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
+const assetsFolder = '/sites/metsoft/Shared Documents/Modernization Tracker';
 const trackerPage = `${webUrl}/SitePages/Modernization-Tracker.aspx`;
 const html = artifact.replace('<head>', `<head><script>window.MOD_TRACKER_CONFIG=${JSON.stringify({ webUrl, appUrl: trackerPage, forceSharePoint: true, scopedAccess: true })}</script>`);
 const suffixes = ['Projects', 'Tasks', 'Updates', 'Risks', 'Acronyms', 'Users', 'Reference Documents'];
@@ -61,6 +63,9 @@ try {
         const filter = url.searchParams.get('$filter') || '';
         return send({ value: group.users.filter(user => !filter || filter.includes(user.LoginName)) });
       }
+      if (decoded.includes('GetFolderByServerRelativePath') && !decoded.includes(`decodedurl='${assetsFolder}'`)) {
+        return send({ error: { message: 'Folder not found' } }, 404);
+      }
       if (path.includes('/getusereffectivepermissions')) return send({ GetUserEffectivePermissions: { Low: groups[0].users.some(user => user.LoginName === invitee.LoginName) ? '33' : '0' } });
       if (path.includes('GetFileByServerRelativePath')) return send({ Exists: true, Level: 1 });
       if (path.endsWith('/roledefinitions')) return send({ value: [{ Id: 124, RoleTypeKind: 2 }] });
@@ -105,6 +110,7 @@ try {
       if (scenario === 'invite') {
         await form.getByRole('status').filter({ hasText: 'SharePoint accepted the invitation email request' }).waitFor();
         assert.equal(groups[0].users.filter(user => user.LoginName === invitee.LoginName).length, 1);
+        assert.ok(requests.some(({ path }) => path.includes(`GetFolderByServerRelativePath(decodedurl='${assetsFolder}')/ListItemAllFields/getusereffectivepermissions`)));
         const emails = writes.filter(write => write.path === '/_api/SP.Web.ShareObject');
         assert.equal(emails.length, 1);
         assert.equal(emails[0].body.url, trackerPage);
