@@ -8,11 +8,11 @@ Use these exact SharePoint group names. Both elevated-role groups need **Read** 
 
 | Group | App role | Tracker list permissions |
 | --- | --- | --- |
-| Metrology App User | Viewer by default; explicit invitations enroll users | Read on all seven lists |
+| Tracker Users | Viewer by default; explicit invitations enroll users | Read on all seven lists |
 | Tracker Project Engineers | Project Engineer | Read on all seven lists; individual Contribute grants on assigned projects and their content |
 | Tracker Managers | Manager | Tracker Project Access Manager (Contribute plus Manage Permissions) on Projects, Tasks, Updates, Risks; Contribute on Users, Acronyms, ReferenceDocuments |
 
-Tracker Managers owns the Project Engineers group. To let managers onboard users, a site owner must also set Tracker Managers as the owner of Metrology App User; otherwise a site owner must complete baseline enrollment. The site owner owns Tracker Managers. Allow group membership editing only by the group owner and disable join/leave requests. SharePoint enforces these settings: an ordinary tracker manager cannot promote someone to Manager unless also authorized to manage that group. The app never grants site Members membership in scoped mode.
+Tracker Managers owns the Project Engineers group. To let managers onboard users, a site owner must also set Tracker Managers as the owner of Tracker Users; otherwise a site owner must complete baseline enrollment. The site owner owns Tracker Managers. Allow group membership editing only by the group owner and disable join/leave requests. SharePoint enforces these settings: an ordinary tracker manager cannot promote someone to Manager unless also authorized to manage that group. The app never grants site Members membership in scoped mode.
 
 Keep site Owners with Full Control. Do not give the entire engineers group list-wide Contribute.
 
@@ -27,10 +27,10 @@ This startup guard does not change role groups, list ACLs, or invitation checks.
 ## Manager and engineer permission checklist
 
 1. Retain Owners with Full Control. Keep standard Read and Contribute unchanged.
-2. Keep the exact group names above. Set Tracker Managers as owner of Tracker Project Engineers. Set Tracker Managers as owner of Metrology App User if managers should enroll invitees. Ensure managers can view its membership. A site owner controls Tracker Managers. Restrict membership editing to group owners, disable join/leave requests, and ensure authorized managers can read the memberships needed by role synchronization.
+2. Keep the exact group names above. Set Tracker Managers as owner of Tracker Project Engineers. Set Tracker Managers as owner of Tracker Users if managers should enroll invitees. Ensure managers can view its membership. A site owner controls Tracker Managers. Restrict membership editing to group owners, disable join/leave requests, and ensure authorized managers can read the memberships needed by role synchronization.
 3. Create or verify **Tracker Project Access Manager** by copying Contribute and adding Manage Permissions (plus dependencies SharePoint selects). Assign this custom level only on Projects, Tasks, Updates, and Risks, never to Tracker Managers across the whole site. This intentionally delegates permissions administration on these lists to trusted managers.
-4. On all seven lists, establish unique permissions if needed, preserve Owners, and grant Metrology App User and Project Engineers Read. Grant Managers the custom level on the four project-content lists and standard Contribute on Users, Acronyms, and Reference Documents. Never grant the engineers group list-wide Contribute/Edit.
-5. Give Metrology App User and both elevated-role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Verify access to these resources before removing site grants. Retain SharePoint-generated Limited Access.
+4. On all seven lists, establish unique permissions if needed, preserve Owners, and grant Tracker Users and Project Engineers Read. Grant Managers the custom level on the four project-content lists and standard Contribute on Users, Acronyms, and Reference Documents. Never grant the engineers group list-wide Contribute/Edit.
+5. Give Tracker Users and both elevated-role groups Read on the published Tracker ASPX and its Site Assets folder; the HTML and dependencies can inherit from that folder. Homepage access is separately managed. Verify access to these resources before removing site grants. Retain SharePoint-generated Limited Access.
 6. Use Tracker's normal Users and managers workflow to assign roles, then assign an engineer to a project. The app synchronizes direct Contribute on that project and its task/update/risk scopes. Existing deployments need their project folders/ACLs intact; report incomplete-setup errors rather than broadening engineer access. Use the restored Tracker permissions panel after deploying the shared-baseline repair update.
 7. Audit existing unique project/child scopes and other user memberships. Copied broad grants survive removal at a parent list. Preserve intended individual engineer grants while reviewing unwanted access.
 8. Test as non-owner Viewer, Engineer A, Engineer B, and Manager. Verify Read, assigned-project changes and attachment operations, denial of edits to another engineer's project, role/assignment changes, and revocation after reassignment. Invitations require group-management, permission-inspection, and page-sharing rights. If a manager cannot inspect or share a resource, a site owner must complete the invitation; the app does not broaden permissions. A successful UI test does not prove the direct REST permissions: verify those too.
@@ -59,7 +59,7 @@ Setup preserves existing group grants, Read, Full Control, and other manually as
 
 ## Resource-scoped invitation checks
 
-On metsoft/scoped deployments, explicit invitations add the recipient to the existing Metrology App User group (for any selected role), verify membership, then verify Read access to the published page, all seven Tracker lists, and configured asset folders/files. They do not check or grant site-wide Read/Edit or add site Members. The legacy non-scoped deployment retains its prior site/Members checks.
+On metsoft/scoped deployments, explicit invitations add the recipient to the existing Tracker Users group (for any selected role), verify membership, then verify Read access to the published page, all seven Tracker lists, and configured asset folders/files. They do not check or grant site-wide Read/Edit or add site Members. The legacy non-scoped deployment retains its prior site/Members checks.
 
 For `https://flankspeed.sharepoint-mil.us/sites/metsoft`, the owner-confirmed default folder is `/sites/metsoft/SiteAssets/Modernization Tracker`. Keep the HTML and required files inheriting from this folder. A folder check does not prove access to children that have unique permissions. Use `MOD_TRACKER_CONFIG.invitationAssetUrls` to include any such file URLs, and `invitationAssetFolders` to override the default folder. Both accept arrays of same-site resource URLs; pass direct folder/file paths, not `Forms/AllItems.aspx` library-view links. Other deployments have no inferred asset paths and should configure their dependencies explicitly.
 
@@ -112,27 +112,24 @@ The **ItemChildCount does not exist** HTTP 400 came from requesting computed col
 
 HTTP tests now run creation, canonical identity verification, and a repeated setup call for Tasks, Updates, and Risks, with the reported unsupported-property error enforced by the mock server. These tests verify the request contracts; they do not replace a live tenant check. After deploying this update, run **Apply tracker permissions** again to resume.
 
-## Retiring Tracker Viewers
+## Tracker Users and the Viewer role
 
-Viewer is the default app role and no longer has a dedicated SharePoint role group. Tracker manages elevated roles through Tracker Project Engineers and Tracker Managers, and explicit invitations enroll recipients in Metrology App User. Viewer role saves remove elevated memberships after any required direct engineer-grant cleanup; they never add or remove Metrology App User membership. Removing a person from the Tracker directory also leaves their shared app access intact. To revoke baseline access, an authorized group owner must remove shared membership, and a site owner must review any other grants separately.
+Tracker Users is the basic access group for this app and contains all intended Tracker users, including Managers and Project Engineers. It has Read on Tracker resources and submission-only access on private Feedback. Elevated groups determine Manager and Project Engineer roles. Viewer remains the default app role: a Viewer label is not a group-membership check or proof of SharePoint access.
 
-Before retiring the old group:
+Explicit invitations enroll recipients in Tracker Users before checking resource access and requesting their email. Role changes, directory deletion and startup do not add or remove basic membership, and do not send invitation emails. To revoke basic access, an authorized group owner must remove Tracker Users membership and review other grants separately. Startup remains read-only for ordinary users.
 
-1. Give Metrology App User Read on the homepage, Tracker ASPX, its Site Assets folder, and all seven Tracker lists. Include every intended user, including managers and engineers.
-2. Review existing unique project/item/folder permissions. Parent-list grants do not reach unique scopes automatically. Grant the shared group Read on those scopes while preserving assigned-engineer Contribute, manager permissions, and Owners.
-3. Deploy the updated HTML, then test a shared-group-only viewer, an assigned engineer, a manager, and demotion to Viewer using non-owner accounts.
-4. Once shared access is verified, remove the obsolete Tracker Viewers grants and optionally delete that group. The code does not delete the group or migrate its membership or ACLs automatically. Older deployed HTML still requires it, so update all active copies first.
+The new group must exist with its intended resource grants. Missing or denied membership stops the invitation with a Tracker Users error; there is no fallback to Metrology App User or site Members in scoped mode. Tracker does not create the access group, automatically change suite membership, or modify another app's resources. The older non-scoped deployment retains its existing Members-based invitation behavior.
 
-Explicit invitations now enroll recipients in Metrology App User before verifying page, list, and asset access and requesting their email. Existing members are reused, and retries do not add duplicate memberships. The group must already exist with the intended baseline Read grants; enrollment does not create the group or repair its resource permissions. Role changes and setup do not enroll users or send email.
+See [Tracker Users cutover](tracker-users-cutover.md) for deployment and acceptance. Old Metrology App User grants on Tracker scopes are preserved by normal project repair; remove those separately if the owner intends to revoke suite-wide access to Tracker. Keeping a person in the suite group or another broadly authorized group can still grant them other-app access.
 
 ### Allow managers to onboard app users
 
 As a site owner:
 
-1. Open **Site settings → People and groups**, select **Metrology App User**, then **Settings → Group Settings**.
-2. Set **Group owner** to **Tracker Managers** if those managers should be allowed to enroll people in the shared app group. This lets them manage access to every app/resource granted to that group.
+1. Open **Site settings → People and groups**, select **Tracker Users**, then **Settings → Group Settings**.
+2. Set **Group owner** to **Tracker Managers** if those managers should be allowed to enroll people in Tracker Users. Grant that group access only to Tracker resources.
 3. Keep **Who can edit the membership of the group?** set to **Group Owner**. Ensure managers can view membership (for example, **Everyone** under **Who can view the membership of the group?**). Keep automatic join/leave requests disabled.
-4. Confirm the group already has Read on the homepage, the Tracker page and assets, all seven lists, and the unique project scopes. Membership grants whatever permissions the group already has; invitation checks do not inspect homepage or Uncertalytics resources.
+4. Confirm the group already has Read on the Tracker page and assets, all seven lists, and the unique project scopes. Homepage access is managed separately. Membership grants whatever permissions the group already has; invitation checks do not inspect homepage or other-app resources.
 5. Deploy the updated HTML. As a non-owner manager, use **Users and managers → Invite people**, select **Viewer**, and choose **Invite and grant access**. Confirm membership and then test access as the invitee.
 
 Managers still need the existing ability to inspect recipient permissions and share the published page. If enrollment succeeds but access or email verification fails, membership remains saved and the UI offers **Retry invitation**. Fix the reported permission first; the retry rereads membership and access before requesting another email. A successful response confirms SharePoint accepted the email request, not delivery. An ambiguous network failure after submitting an email can still lead to a duplicate if explicitly retried. No emails are sent by normal task assignment or role saves.
@@ -143,7 +140,7 @@ The permission repair now resolves and verifies these existing groups and permis
 
 | Principal | Project, Tasks/Updates/Risks project folders, and uniquely secured child items |
 | --- | --- |
-| Metrology App User | Read |
+| Tracker Users | Read |
 | Tracker Project Engineers | Read |
 | Tracker Managers | Tracker Project Access Manager (Contribute plus Manage Permissions) |
 | Assigned project engineer | Direct Contribute on active assigned projects |
@@ -154,7 +151,7 @@ Deploy the updated single-file HTML, open Tracker as a site owner, then open **U
 
 The same baseline is applied when creating/saving a project or reconciling an assignment. Future child records created in a repaired project folder inherit its grants. Existing legacy items outside those folders receive explicit repairs. This does not reset inheritance across the site or modify list-level/page/asset permissions. Keep Read on the seven lists and deployed pages/assets configured separately; keep manager list-level permissions and group ownership configured as above.
 
-After completion, test an App User, a manager, and two engineers. The App User should see all active projects and tasks; managers should manage the projects; each engineer should edit only their assigned project's content. Check a previously owner-only project and task in SharePoint to confirm the three baseline group grants. Tenant validation is still required; repository tests use mocked SharePoint responses.
+After completion, test a Tracker Users member with the Viewer role, a manager, and two engineers. The Viewer should see all active projects and tasks; managers should manage the projects; each engineer should edit only their assigned project's content. Check a previously owner-only project and task in SharePoint to confirm the three baseline group grants. Tenant validation is still required; repository tests use mocked SharePoint responses.
 
 ## Invitation page address in an embedded host
 

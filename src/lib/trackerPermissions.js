@@ -1,9 +1,7 @@
 import { isOwnedByUser } from './identity';
+import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
+export { TRACKER_GROUPS } from './trackerGroups';
 
-export const TRACKER_GROUPS = {
-  'Project Engineer': 'Tracker Project Engineers',
-  Manager: 'Tracker Managers',
-};
 const CHILDREN = ['tasks', 'updates', 'risks'];
 const suffixes = { projects: 'Projects', tasks: 'Tasks', updates: 'Updates', risks: 'Risks' };
 const unwrap = body => body?.d || body;
@@ -53,11 +51,11 @@ export class TrackerPermissions {
   }
   async ensureAppMembership(person) {
     if (!person.loginName?.trim()) throw new Error('Select a resolved SharePoint identity.');
-    const title = 'Metrology App User';
+    const title = TRACKER_USERS_GROUP;
     try {
       const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
       if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`The ${title} group is unavailable. Ask a site owner to create or verify it.`);
-      // Enrollment belongs only to explicit invitations, never role saves or
+      // Tracker enrollment belongs only to explicit invitations, never role saves or
       // task assignment. Read failures must not be treated as missing members.
       if (!(await this.membership(group, person.loginName))) {
         await this.post(`/_api/web/sitegroups(${group.Id})/users`, { body: { LoginName: person.loginName } });
@@ -152,7 +150,7 @@ export class TrackerPermissions {
       throw new Error('A site owner must configure Read and Tracker Project Access Manager (Contribute plus Manage Permissions) before repairing project access.');
     }
     const grants = [];
-    for (const [title, roleId] of [['Metrology App User', read.Id], [TRACKER_GROUPS['Project Engineer'], read.Id], [TRACKER_GROUPS.Manager, manager.Id]]) {
+    for (const [title, roleId] of [[TRACKER_USERS_GROUP, read.Id], [TRACKER_GROUPS['Project Engineer'], read.Id], [TRACKER_GROUPS.Manager, manager.Id]]) {
       const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
       if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`A site owner must configure the SharePoint group ${title} before repairing project access.`);
       grants.push({ principalId: Number(group.Id), roleId: Number(roleId) });

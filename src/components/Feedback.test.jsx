@@ -65,7 +65,7 @@ it('automatically offers setup to an owner when SharePoint storage is missing', 
   const store = { webUrl: 'https://example.test', scopedAccess: true, currentUser: async () => ({ id: 8, isSiteAdmin: true }), post: vi.fn(), get: vi.fn(async path => {
     if (path.includes('/associatedownergroup')) return { Id: 10, Title: 'Site Owners' };
     if (path.includes('/lists?')) return { value: [] };
-    if (path.includes('/sitegroups?')) return { value: [{ Id: 20, Title: 'Metrology App User' }] };
+    if (path.includes('/sitegroups?')) return { value: [{ Id: 20, Title: 'Tracker Users' }] };
     throw Object.assign(new Error('List not found'), { status: 404 });
   }) };
   const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);

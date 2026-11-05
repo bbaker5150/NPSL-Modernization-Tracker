@@ -30,19 +30,20 @@ function fixture() {
 const person = { id: 'u1', loginName: 'i:0#.f|membership|engineer@example.com', title: 'Engineer', role: 'Project Engineer' };
 
 describe('tracker group permissions', () => {
-  it('defaults a shared app member to Viewer without a Tracker Viewers group', async () => {
+  it('defaults a Tracker Users member to Viewer without a separate Viewer role group', async () => {
     const { permissions, store } = fixture();
-    store.get.mockImplementation(async path => path.includes('/groups') ? { value: [{ Title: 'Metrology App User' }] } : { Low: '0', High: '0' });
+    store.get.mockImplementation(async path => path.includes('/groups') ? { value: [{ Title: 'Tracker Users' }] } : { Low: '0', High: '0' });
     expect(await permissions.currentRole({})).toEqual({ siteOwner: false, role: 'Viewer' });
   });
-  it.each(['Viewer', null])('preserves shared membership for %s and never requires the retired group', async role => {
+  it.each(['Viewer', null])('preserves Tracker Users and unrelated shared membership for %s', async role => {
     const { permissions, groups, calls } = fixture();
-    groups.push({ Id: 99, Title: 'Metrology App User', members: [{ Id: 11, LoginName: person.loginName }] });
+    groups.push({ Id: 99, Title: 'Metrology App User', members: [{ Id: 11, LoginName: person.loginName }] }, { Id: 100, Title: 'Tracker Users', members: [{ Id: 11, LoginName: person.loginName }] });
     groups[0].members = [{ Id: 11, LoginName: person.loginName }];
     expect(await permissions.syncGroups(person, role)).toBeNull();
     expect(groups[0].members).toEqual([]);
     expect(groups[2].members).toHaveLength(1);
-    expect(JSON.stringify(calls)).not.toMatch(/Tracker%20Viewers|Metrology%20App%20User|sitegroups\(99\)/);
+    expect(groups[3].members).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toMatch(/Tracker%20Viewers|Metrology%20App%20User|Tracker%20Users|sitegroups\((99|100)\)/);
   });
 
   it('replaces tracker role membership, verifies it, and never touches site Members', async () => {
@@ -275,7 +276,7 @@ describe('scoped store integration', () => {
     const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
     store.listApi = vi.fn(async key => `/_api/web/lists/getbytitle('${key}')`);
     store.permissions.syncGroups = vi.fn(async () => ({ Id: 2, Title: 'Tracker Project Engineers' }));
-    store.permissions.ensureAppMembership = vi.fn(async () => ({ Id: 99, Title: 'Metrology App User' }));
+    store.permissions.ensureAppMembership = vi.fn(async () => ({ Id: 99, Title: 'Tracker Users' }));
     store.get = vi.fn(async path => {
       if (path.includes('sitegroups(2)/users')) return { value: [{ LoginName: person.loginName }] };
       if (path.includes('getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: '33' } };
