@@ -11,6 +11,9 @@ import { isOwnedByUser } from './identity';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
+// These audit columns enhance editing; older lists remain safe to read without them.
+const UPDATE_EDIT_FIELDS = new Set(['EditedAt', 'EditorName', 'EditorKey']);
+const optionalForReading = (key, name) => key === 'updates' && UPDATE_EDIT_FIELDS.has(name);
 
 export const CONTAINERS = [
   {
@@ -210,19 +213,27 @@ export class SharePointStore {
       const existing = new Set((body.value || body.d?.results || []).map((field) => field.InternalName));
       return { key: container.key, exists, missingFields: container.fields.filter((field) => !existing.has(field.name)).map((field) => field.name) };
     }));
-    return { ready: checks.every((check) => check.exists && check.missingFields.length === 0), checks };
+    this.schemaReadiness = { ready: checks.every(check => check.exists && check.missingFields.length === 0),
+      readable: checks.every(check => check.exists && check.missingFields.every(name => optionalForReading(check.key, name))), checks };
+    return this.schemaReadiness;
   }
 
-  async provision() {
+  async provision({ allowCompatibleRead = false } = {}) {
     // An unreadable/security-trimmed list can look missing to readiness().
     // Never turn that into schema writes by a viewer, engineer, or list manager.
     // Check actual site permissions, independently of the app/directory role.
-    const response = await this.get('/_api/web/EffectiveBasePermissions');
+    const compatible = allowCompatibleRead && this.schemaReadiness?.readable;
+    let response;
+    try { response = await this.get('/_api/web/EffectiveBasePermissions'); }
+    catch (error) { if (compatible) return []; throw error; }
     const permissions = response?.d || response;
     const low = Number((permissions?.EffectiveBasePermissions || permissions)?.Low);
     const setupPermissions = 2048 | 33554432; // Manage Lists + Manage Permissions
     if (!Number.isInteger(low) || low < 0 || low > 0xffffffff || (low & setupPermissions) !== setupPermissions) {
-      throw new Error('Tracker lists or required fields are unavailable to your account. Ask a site owner to check your Read access to all seven Tracker lists and confirm the configured site and list names. If setup is needed, an administrator with site-level Manage Lists and Manage Permissions must open the app. No setup changes were made; ordinary users do not need site-wide Edit.');
+      if (compatible) return []; // Existing data stays readable; no schema or ACL writes.
+      const issues = this.schemaReadiness?.checks.filter(check => !check.exists || check.missingFields.length).map(check =>
+        `${displayListTitle(this.prefix, check.key)}: ${check.exists ? `missing fields (${check.missingFields.join(', ')})` : 'list is missing or not visible to this account'}`);
+      throw new Error(`Tracker storage is not ready. ${issues?.length ? issues.join('; ') + '. ' : ''}A site owner with Manage Lists and Manage Permissions must check the listed storage or finish setup. No setup changes were made; ordinary users do not need site-wide Edit.`);
     }
     const steps = [];
     for (const container of CONTAINERS) {
@@ -263,11 +274,21 @@ export class SharePointStore {
         await addField(seedMarker);
       }
     }
+    this.schemaReadiness = null; // All columns were created; stop excluding upgrade fields.
     return steps;
   }
 
+  get updateEditingAvailable() {
+    return !this.schemaReadiness?.checks.some(check => check.key === 'updates' && check.missingFields.some(name => UPDATE_EDIT_FIELDS.has(name)));
+  }
+
+  availableReadFields(key, fields) {
+    const missing = this.schemaReadiness?.checks.find(check => check.key === key)?.missingFields || [];
+    return fields.filter(name => !optionalForReading(key, name) || !missing.includes(name));
+  }
+
   async listItems(key, fields, converter, includeArchived = false) {
-    const select = ['Id', 'Title', 'FileSystemObjectType', ...fields].join(',');
+    const select = ['Id', 'Title', 'FileSystemObjectType', ...this.availableReadFields(key, fields)].join(',');
     let path = `${apiFor(this.prefix, key)}/items?$select=${select}&$top=5000`;
     const rows = [];
     while (path) {
@@ -619,12 +640,20 @@ export class SharePointStore {
   async saveTask(row) { return row.spId ? (await this.update('tasks', row.spId, taskFields(row)), row) : { ...row, spId: await this.create('tasks', taskFields(row)) }; }
   async saveTasks(rows) { return Promise.all(rows.map((row) => this.saveTask(row))); }
   async saveUpdate(row) {
-    if (row.spId) { await this.update('updates', row.spId, updateFields(row)); return row; }
-    const spId = await this.create('updates', updateFields(row));
+    const fields = updateFields(row);
+    const available = new Set(this.availableReadFields('updates', Object.keys(fields)));
+    for (const name of UPDATE_EDIT_FIELDS) {
+      if (available.has(name)) continue;
+      if (fields[name]) throw new Error('A site owner must open the latest tracker to enable update editing before saving edit history.');
+      delete fields[name];
+    }
+    if (row.spId) { await this.update('updates', row.spId, fields); return row; }
+    const spId = await this.create('updates', fields);
     if (!Number.isInteger(spId) || spId <= 0) throw new Error('SharePoint did not confirm the new update. Refresh history before retrying.');
     return { ...row, spId };
   }
   async editUpdate(row) {
+    if (!this.updateEditingAvailable) throw new Error('A site owner must open the latest tracker to enable update editing. Your draft has been kept.');
     await this.changeUpdate(row, { Summary: row.summary, TaskId: row.taskId || '', TaskTitle: row.taskTitle || '', EditedAt: row.editedAt, EditorName: row.editorName, EditorKey: row.editorKey });
     // Keep the successful content visible if a subsequent reload fails, but
     // require a fresh version before another edit or deletion.

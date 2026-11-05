@@ -6,7 +6,7 @@ const webUrl = 'https://tenant.sharepoint-mil.us/sites/metsoft';
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 const startStorage = async store => {
   const readiness = await store.readiness();
-  if (!readiness.ready) await store.provision();
+  if (!readiness.ready) await store.provision({ allowCompatibleRead: true });
 };
 
 describe('startup schema permissions', () => {
@@ -29,7 +29,7 @@ describe('startup schema permissions', () => {
     store.listExists = vi.fn(async () => true);
     store.get = vi.fn(async path => path.endsWith('/EffectiveBasePermissions') ? { Low: '1' } : { value: [] });
     store.post = vi.fn();
-    await expect(startStorage(store)).rejects.toThrow('required fields are unavailable');
+    await expect(startStorage(store)).rejects.toThrow('Modernization-Tracker - Updates: missing fields');
     await expect(store.provision()).rejects.toThrow('No setup changes were made');
     expect(store.post).not.toHaveBeenCalled();
   });
@@ -58,4 +58,96 @@ describe('startup schema permissions', () => {
     await expect(request).rejects.not.toThrow('need Edit');
     await expect(request).rejects.not.toThrow('Storage panel');
   });
+});
+
+const auditFields = ['EditedAt', 'EditorName', 'EditorKey'];
+function upgradeFixture({ missing = auditFields, low = '1', missingList } = {}) {
+  const store = new SharePointStore({ webUrl });
+  const schemas = Object.fromEntries(CONTAINERS.map(container => [container.key, new Set(container.fields.map(field => field.name).filter(name => container.key !== 'updates' || !missing.includes(name)))]));
+  store.listExists = vi.fn(async key => key !== missingList);
+  store.get = vi.fn(async path => {
+    if (path.endsWith('/EffectiveBasePermissions')) return { Low: low };
+    const container = CONTAINERS.find(item => path.includes(`Modernization${item.suffix}')`));
+    if (!container) throw new Error(`Unexpected read: ${path}`);
+    if (path.includes('/fields?')) return { value: [...schemas[container.key]].map(InternalName => ({ InternalName })) };
+    if (path.includes('EnableAttachments')) return { EnableAttachments: true };
+    if (path.includes('/items?')) {
+      const select = new URL(path, webUrl).searchParams.get('$select').split(',');
+      const unknown = select.filter(name => !['Id', 'Title', 'FileSystemObjectType'].includes(name) && !schemas[container.key].has(name));
+      if (unknown.length) throw new Error(`Unknown columns: ${unknown.join(', ')}`);
+      return { value: container.key === 'updates' ? [{ Id: 3, RecordId: 'u', Summary: 'Existing history', AuthorName: 'Original author', 'odata.etag': '"1"' }] : [] };
+    }
+    throw new Error(`Unexpected read: ${path}`);
+  });
+  store.post = vi.fn(async (path, options) => {
+    if (path.includes('/fields/createfieldasxml')) {
+      schemas.updates.add(options.body.parameters.SchemaXml.match(/\bName="([^"]+)"/)[1]);
+    }
+    return {};
+  });
+  return { store, schemas };
+}
+it.each([auditFields, ['EditedAt'], ['EditorName', 'EditorKey']].map(missing => ({ missing })))('loads the pre-editing schema for a Viewer without setup writes ($missing)', async ({ missing }) => {
+  const { store } = upgradeFixture({ missing });
+  await startStorage(store);
+  const data = await store.load();
+  expect(data.updates[0]).toMatchObject({ summary: 'Existing history', authorName: 'Original author', editorName: '', editedAt: '' });
+  expect(store.updateEditingAvailable).toBe(false);
+  expect(store.post).not.toHaveBeenCalled();
+  for (const [path] of store.get.mock.calls.filter(([path]) => path.includes('ModernizationUpdates') && path.includes('/items?'))) {
+    const select = new URL(path, webUrl).searchParams.get('$select').split(',');
+    expect(select).toContain('Archived'); expect(select).toContain('AuthorKey');
+    expect(missing.every(name => !select.includes(name))).toBe(true);
+  }
+  // Direct setup still needs a site owner, independently of compatible reads.
+  await expect(store.provision()).rejects.toThrow('No setup changes were made');
+  expect(store.post).not.toHaveBeenCalled();
+});
+it('does not block compatible reads if optional setup-permission discovery is unavailable', async () => {
+  const { store } = upgradeFixture();
+  const get = store.get;
+  store.get = vi.fn(path => { if (path.endsWith('/EffectiveBasePermissions')) throw new Error('Permission discovery unavailable'); return get(path); });
+  await startStorage(store);
+  expect((await store.load()).updates[0].summary).toBe('Existing history');
+  expect(store.post).not.toHaveBeenCalled();
+});
+it('names missing required fields and missing lists instead of blaming all Viewer permissions', async () => {
+  const core = upgradeFixture({ missing: [...auditFields, 'Archived'] }).store;
+  await expect(startStorage(core)).rejects.toThrow('Modernization-Tracker - Updates: missing fields');
+  expect(core.schemaReadiness.readable).toBe(false);
+  expect(core.post).not.toHaveBeenCalled();
+  const invisible = upgradeFixture({ missingList: 'tasks' }).store;
+  await expect(startStorage(invisible)).rejects.toThrow('Modernization-Tracker - Tasks: list is missing or not visible');
+  expect(invisible.post).not.toHaveBeenCalled();
+});
+it('still propagates denied item reads instead of presenting an empty portfolio', async () => {
+  const { store } = upgradeFixture();
+  await startStorage(store);
+  store.get.mockRejectedValue(Object.assign(new Error('Read denied'), { status: 403 }));
+  await expect(store.load()).rejects.toMatchObject({ status: 403 });
+  expect(store.post).not.toHaveBeenCalled();
+});
+it('lets an actual site owner add only the missing edit fields and use them immediately', async () => {
+  const { store } = upgradeFixture({ low: String(2048 | 33554432) });
+  await startStorage(store);
+  expect(store.post).toHaveBeenCalledTimes(3);
+  expect(store.post.mock.calls.every(([path]) => path.includes('ModernizationUpdates') && path.endsWith('/fields/createfieldasxml'))).toBe(true);
+  expect(store.updateEditingAvailable).toBe(true);
+  await store.load();
+  const query = store.get.mock.calls.find(([path]) => path.includes('ModernizationUpdates') && path.includes('/items?'))[0];
+  expect(auditFields.every(name => new URL(query, webUrl).searchParams.get('$select').split(',').includes(name))).toBe(true);
+});
+it('keeps posting available but requires audit fields before editing existing history', async () => {
+  const { store } = upgradeFixture();
+  await startStorage(store);
+  store.create = vi.fn(async () => 7);
+  await store.saveUpdate({ id: 'new', projectKey: 'p', summary: 'New update', authorName: 'Engineer' });
+  const fields = store.create.mock.calls[0][1];
+  expect(fields).toMatchObject({ Summary: 'New update', AuthorName: 'Engineer' });
+  expect(auditFields.some(name => Object.hasOwn(fields, name))).toBe(false);
+  await expect(store.editUpdate({ id: 'u', spId: 3, version: '"1"', summary: 'Changed' })).rejects.toThrow('enable update editing');
+  await expect(store.saveUpdate({ id: 'u', editedAt: '2026-11-03T19:00:00Z' })).rejects.toThrow('before saving edit history');
+  expect(store.post).not.toHaveBeenCalled();
+  await store.deleteUpdate({ id: 'u', spId: 3, version: '"1"' });
+  expect(store.post).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('/items(3)'), expect.objectContaining({ body: { Archived: true } }));
 });
