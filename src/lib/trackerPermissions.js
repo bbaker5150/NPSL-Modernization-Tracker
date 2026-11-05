@@ -55,18 +55,17 @@ export class TrackerPermissions {
     try {
       const group = unwrap(await this.get(`/_api/web/sitegroups/getbyname('${quote(title)}')?$select=Id,Title`));
       if (!positiveId(group?.Id) || group.Title !== title) throw new Error(`The ${title} group is unavailable. Ask a site owner to create or verify it.`);
-      // Tracker enrollment belongs only to explicit invitations, never role saves or
-      // task assignment. Read failures must not be treated as missing members.
+      // A failed read must not be treated as a missing member.
       if (!(await this.membership(group, person.loginName))) {
         await this.post(`/_api/web/sitegroups(${group.Id})/users`, { body: { LoginName: person.loginName } });
       }
       if (!(await this.membership(group, person.loginName))) throw new Error('SharePoint did not confirm group membership.');
       return group;
     } catch (error) {
-      throw new Error(`Could not verify membership in ${title}. Membership may already be saved. Ask a site owner to verify the group and allow Tracker Managers to view and manage its membership, then retry the invitation. No invitation email was requested. ${error.message}`);
+      throw new Error(`Could not verify membership in ${title}. Membership may already be saved. Ask a site owner to verify the group and allow Tracker Managers to view and manage its membership, then retry. No invitation email was requested. ${error.message}`);
     }
   }
-  async syncGroups(person, role, { beforeChange } = {}) {
+  async syncGroups(person, role, { beforeChange, ensureViewerMembership = false } = {}) {
     if (!person.loginName) throw new Error('Select a resolved SharePoint identity.');
     // Read every membership before changing any. Failure is never interpreted as absence.
     const state = [];
@@ -79,6 +78,11 @@ export class TrackerPermissions {
     // Let role changes revoke engineer grants using the live memberships we
     // just read, before removing groups or granting the replacement role.
     if (beforeChange) await beforeChange(state);
+    // Existing Viewers can be repaired by saving their role again. Any
+    // transition from a live elevated group must preserve basic Tracker access.
+    if (role === 'Viewer' && (ensureViewerMembership || state.some(entry => entry.member))) {
+      await this.ensureAppMembership(person);
+    }
     // Remove stale privileged membership before granting the replacement role.
     for (const entry of state.filter(entry => entry.member && entry !== target)) {
       try {

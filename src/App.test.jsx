@@ -558,14 +558,19 @@ describe('application shell', () => {
     expect((await raw.load()).users[0].role).toBe('Viewer');
   });
 
-  it('selects a directory person, saves the verified user identity, and prepares an invitation', async () => {
+  it('reinvites the selected identity and clears the previous directory removal message', async () => {
     const prototype = Object.getPrototypeOf(createRepository().store);
     const candidate = { title: 'New Engineer', email: 'new@example.test', loginName: 'i:0#.f|membership|new@example.test' };
     vi.spyOn(prototype, 'searchPeople').mockResolvedValue([candidate]);
     const resolve = vi.spyOn(prototype, 'resolvePerson').mockResolvedValue(candidate);
     window.MOD_TRACKER_CONFIG.appUrl = 'https://tenant.sharepoint-mil.us/sites/mod/SitePages/Tracker.aspx';
+    await createRepository().store.saveUser({ ...candidate, id: 'former-manager', role: 'Manager' });
     await renderApp();
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
+    const previous = [...document.querySelectorAll('.directory-row')].find(row => row.textContent.includes(candidate.email));
+    await act(async () => previous.querySelector('button').click());
+    await act(async () => [...previous.querySelectorAll('button')].find(button => button.textContent === 'Delete User').click());
+    expect(document.body.textContent).toContain('removed from the tracker directory');
     await act(async () => changeValue(document.querySelector('.people-invite input[type="search"]'), 'New Engineer'));
     await act(async () => new Promise((done) => setTimeout(done, 400)));
     await act(async () => document.querySelector('.people-results button').click());
@@ -574,6 +579,7 @@ describe('application shell', () => {
     expect(resolve).toHaveBeenCalledWith(candidate.loginName);
     const saved = (await createRepository().store.load()).users.find((row) => row.loginName === candidate.loginName);
     expect(saved).toMatchObject({ ...candidate, role: 'Viewer' });
+    expect(document.body.textContent).not.toContain('removed from the tracker directory');
     expect(document.querySelector('.people-invite input[type="url"]')).toBeNull();
     expect(document.querySelector('.invitation-result')).toBeNull();
   });

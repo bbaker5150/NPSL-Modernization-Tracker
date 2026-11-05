@@ -491,15 +491,22 @@ export class SharePointStore {
     return response.blob();
   }
 
-  async verifyInvitationRead(scope, loginName, required, label) {
+  async verifyInvitationRead(scope, loginName, required, label, missingReadAction) {
+    const membership = this.permissions ? TRACKER_USERS_GROUP : 'site Members group';
+    const status = `Tracker access could not be verified for ${label}. SharePoint verified ${membership} membership. No invitation email was requested.`;
+    let low;
     try {
       const response = await this.get(`${scope}/getusereffectivepermissions(@u)?@u='${escapeOData(loginName)}'`);
       const permissions = response?.d?.GetUserEffectivePermissions || response?.GetUserEffectivePermissions || response?.d || response;
       const raw = permissions?.Low;
-      const low = (typeof raw === 'string' && /^\d+$/.test(raw)) || typeof raw === 'number' ? Number(raw) : NaN;
-      if (!Number.isInteger(low) || low < 0 || low > 0xffffffff || (low & required) !== required) throw new Error('Required Read access was not confirmed.');
+      low = (typeof raw === 'string' && /^\d+$/.test(raw)) || typeof raw === 'number' ? Number(raw) : NaN;
+      if (!Number.isInteger(low) || low < 0 || low > 0xffffffff) throw new Error('SharePoint returned an invalid effective permission result.');
     } catch (error) {
-      throw new Error(`Tracker access could not be verified for ${label}. Group membership may already be saved. Ask a site owner to check this resource's permissions. No invitation email was requested. ${error.message}`);
+      throw new Error(`${status} Ask a site owner to check the selected account’s effective permissions, then retry the invitation. ${error.message}`);
+    }
+    if ((low & required) !== required) {
+      const action = missingReadAction || 'Ask a site owner to check Read access on this resource, then retry the invitation.';
+      throw new Error(`${status} SharePoint reports that the selected account lacks the required Read access. ${action}`);
     }
   }
 
@@ -546,7 +553,8 @@ export class SharePointStore {
     await this.verifyInvitationRead(`${fileApi}/ListItemAllFields`, person.loginName, 33, 'the published Tracker page');
     if (this.permissions) {
       for (const container of CONTAINERS) {
-        await this.verifyInvitationRead(await this.listApi(container.key), person.loginName, 1, displayListTitle(this.prefix, container.key));
+        await this.verifyInvitationRead(await this.listApi(container.key), person.loginName, 1, displayListTitle(this.prefix, container.key),
+          `A site owner should open List settings → Permissions for this list, grant ${TRACKER_USERS_GROUP} Read on this list if missing, then retry the invitation.`);
       }
       if (!Array.isArray(this.invitationAssetFolders)) throw new Error('Configure invitationAssetFolders as an array of Tracker folder URLs. No invitation email was requested.');
       for (const value of [...new Set(this.invitationAssetFolders)]) {
@@ -678,17 +686,20 @@ export class SharePointStore {
   async syncUserAccess(person, role, users) {
     const existing = users.find(row => row.id === person.id);
     const next = [...users.filter(row => row.id !== person.id), ...(role ? [{ ...person, role }] : [])];
-    await this.permissions.syncGroups(person, role, { beforeChange: async memberships => {
-      const liveEngineer = memberships.some(entry => entry.name === 'Project Engineer' && entry.member);
-      const liveManagerDemotion = role === 'Viewer' && memberships.some(entry => entry.name === 'Manager' && entry.member);
-      const cleanNonEngineer = !existing || existing.role === 'Viewer' || (existing.role === 'Manager' && role === 'Manager');
-      // Viewer → Manager and ordinary non-engineer profile saves are group-only.
-      // Demotions, removals, legacy roles, and actual engineer membership still
-      // check existing grants, including those left by interrupted changes.
-      if (role !== 'Project Engineer' && (!role || !cleanNonEngineer || liveEngineer || liveManagerDemotion)) {
-        await this.permissions.revokeEngineerAccess(person, memberships);
-      }
-    } });
+    await this.permissions.syncGroups(person, role, {
+      ensureViewerMembership: role === 'Viewer' && Boolean(existing),
+      beforeChange: async memberships => {
+        const liveEngineer = memberships.some(entry => entry.name === 'Project Engineer' && entry.member);
+        const liveManagerDemotion = role === 'Viewer' && memberships.some(entry => entry.name === 'Manager' && entry.member);
+        const cleanNonEngineer = !existing || existing.role === 'Viewer' || (existing.role === 'Manager' && role === 'Manager');
+        // Viewer → Manager and ordinary non-engineer profile saves are group-only.
+        // Demotions, removals, legacy roles, and actual engineer membership still
+        // check existing grants, including those left by interrupted changes.
+        if (role !== 'Project Engineer' && (!role || !cleanNonEngineer || liveEngineer || liveManagerDemotion)) {
+          await this.permissions.revokeEngineerAccess(person, memberships);
+        }
+      },
+    });
     if (role === 'Project Engineer') {
       const projects = await this.permissionProjects();
       for (const project of projects.filter(project => isOwnedByUser(project, person))) await this.permissions.syncProject(project, next);

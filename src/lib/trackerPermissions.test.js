@@ -6,26 +6,28 @@ import { resetWebUrlCache } from './spContext';
 
 function fixture() {
   const groups = Object.entries(TRACKER_GROUPS).map(([role, Title], index) => ({ Id: index + 1, Title, role, members: [] }));
+  const trackerUsers = { Id: 100, Title: 'Tracker Users', members: [] };
+  const allGroups = () => [...groups, trackerUsers];
   const calls = [];
   const store = { webUrl: 'https://tenant.sharepoint.com/sites/metsoft', prefix: 'Modernization' };
   store.get = vi.fn(async path => {
     calls.push(['GET', path]);
-    const named = groups.find(group => path.includes(`getbyname('${encodeURIComponent(group.Title)}')`));
+    const named = allGroups().find(group => path.includes(`getbyname('${encodeURIComponent(group.Title)}')`));
     if (named) return { Id: named.Id, Title: named.Title };
     const member = path.match(/sitegroups\((\d+)\)\/users/);
-    if (member) return { value: groups.find(group => group.Id === Number(member[1])).members };
+    if (member) return { value: allGroups().find(group => group.Id === Number(member[1])).members };
     throw new Error(`Unexpected GET: ${path}`);
   });
   store.post = vi.fn(async (path, options) => {
     calls.push(['POST', path, options]);
-    const group = groups.find(group => path.includes(`sitegroups(${group.Id})`));
+    const group = allGroups().find(group => path.includes(`sitegroups(${group.Id})`));
     if (path.includes('/removebyid(')) group.members = [];
     else if (group && options?.body?.LoginName) group.members.push({ Id: 11, LoginName: options.body.LoginName });
     else throw new Error(`Unexpected POST: ${path}`);
   });
   const permissions = new TrackerPermissions(store);
   permissions.baselineGrants = vi.fn(async () => []);
-  return { store, groups, calls, permissions };
+  return { store, groups, trackerUsers, calls, permissions };
 }
 const person = { id: 'u1', loginName: 'i:0#.f|membership|engineer@example.com', title: 'Engineer', role: 'Project Engineer' };
 
@@ -36,14 +38,17 @@ describe('tracker group permissions', () => {
     expect(await permissions.currentRole({})).toEqual({ siteOwner: false, role: 'Viewer' });
   });
   it.each(['Viewer', null])('preserves Tracker Users and unrelated shared membership for %s', async role => {
-    const { permissions, groups, calls } = fixture();
-    groups.push({ Id: 99, Title: 'Metrology App User', members: [{ Id: 11, LoginName: person.loginName }] }, { Id: 100, Title: 'Tracker Users', members: [{ Id: 11, LoginName: person.loginName }] });
+    const { permissions, groups, trackerUsers, calls } = fixture();
+    groups.push({ Id: 99, Title: 'Metrology App User', members: [{ Id: 11, LoginName: person.loginName }] });
+    trackerUsers.members = [{ Id: 11, LoginName: person.loginName }];
     groups[0].members = [{ Id: 11, LoginName: person.loginName }];
     expect(await permissions.syncGroups(person, role)).toBeNull();
     expect(groups[0].members).toEqual([]);
     expect(groups[2].members).toHaveLength(1);
-    expect(groups[3].members).toHaveLength(1);
-    expect(JSON.stringify(calls)).not.toMatch(/Tracker%20Viewers|Metrology%20App%20User|Tracker%20Users|sitegroups\((99|100)\)/);
+    expect(trackerUsers.members).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toMatch(/Tracker%20Viewers|Metrology%20App%20User|sitegroups\(99\)/);
+    expect(calls.some(([method, path]) => method === 'POST' && path.includes('sitegroups(100)'))).toBe(false);
+    expect(calls.some(([, path]) => path.includes('Tracker%20Users'))).toBe(role === 'Viewer');
   });
 
   it('replaces tracker role membership, verifies it, and never touches site Members', async () => {
@@ -64,8 +69,9 @@ describe('tracker group permissions', () => {
     await expect(permissions.syncGroups(person, 'Manager')).rejects.toThrow('Tracker Managers');
   });
   it('does not grant a replacement role if removing the previous role fails', async () => {
-    const { permissions, groups, store } = fixture();
+    const { permissions, groups, trackerUsers, store } = fixture();
     groups[1].members = [{ Id: 11, LoginName: person.loginName }];
+    trackerUsers.members = [...groups[1].members];
     store.post.mockRejectedValue(new Error('403 Forbidden'));
     await expect(permissions.syncGroups(person, 'Viewer')).rejects.toThrow('Could not remove membership');
     expect(store.post).toHaveBeenCalledTimes(1);
@@ -242,7 +248,7 @@ describe('scoped store integration', () => {
     expect(store.permissions.syncProject).not.toHaveBeenCalled();
     expect(store.permissionProjects).not.toHaveBeenCalled();
     expect(store.permissions.revokeEngineerAccess).toHaveBeenCalledExactlyOnceWith(person, []);
-    expect(store.permissions.syncGroups).toHaveBeenCalledWith(person, null, { beforeChange: expect.any(Function) });
+    expect(store.permissions.syncGroups).toHaveBeenCalledWith(person, null, { beforeChange: expect.any(Function), ensureViewerMembership: false });
   });
   it('does not write on read-only startup and rejects testing promotion', async () => {
     const raw = {

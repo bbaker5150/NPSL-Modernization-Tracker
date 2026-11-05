@@ -8,7 +8,7 @@ Use these exact SharePoint group names. Both elevated-role groups need **Read** 
 
 | Group | App role | Tracker list permissions |
 | --- | --- | --- |
-| Tracker Users | Viewer by default; explicit invitations enroll users | Read on all seven lists |
+| Tracker Users | Basic access for every role. Invitations and Viewer role saves verify membership. | Read on all seven lists |
 | Tracker Project Engineers | Project Engineer | Read on all seven lists; individual Contribute grants on assigned projects and their content |
 | Tracker Managers | Manager | Tracker Project Access Manager (Contribute plus Manage Permissions) on Projects, Tasks, Updates, Risks; Contribute on Users, Acronyms, ReferenceDocuments |
 
@@ -52,7 +52,7 @@ Setup preserves existing group grants, Read, Full Control, and other manually as
 - Invitations and saved role edits synchronize and verify tracker group memberships. Stale tracker-role memberships are removed. Errors stop the operation; the app does not report a role as saved if group/ACL changes fail. SharePoint operations are not transactional, so a partial change requires retry/setup.
 - Viewer → Manager only updates Tracker groups and the verified directory role; it does not scan projects, create folders, or change task permissions. Saving an unchanged Viewer/Manager role also avoids project work. Both elevated-role group memberships are read first. If the account actually belongs to Project Engineers, the app still cleans up its old engineer grants even when its saved role says Viewer. Native confirmations remain for necessary group changes.
 - Assigning/reassigning an engineer applies Contribute to that project's item, task/update/risk folders, and existing child records. Former engineer grants are removed. Task attachments inherit their task item's permissions. Managers assigned as engineers already receive access through the Managers group.
-- Demotion/removal reads the four project-content lists and inspects their existing unique ACLs to find this user’s direct Contribute grants, including archived records and former assignments. It removes only matching grants, verifies each removal, and then updates tracker-group memberships. It never creates folders, breaks inheritance, adds grants or repairs other users during this cleanup. A Manager → Viewer change with no direct engineer grants needs only the Manager membership removal. Read checks do not request permission changes. Deleting a user does not remove unrelated site/Microsoft 365 memberships or other manually assigned permission levels.
+- Demotion/removal reads the four project-content lists and inspects their existing unique ACLs for this user’s direct Contribute grants, including archived records and former assignments. It revokes and verifies matching grants. For a demotion to Viewer, Tracker then verifies the person's membership in Tracker Users, adding them if needed, before removing their elevated membership and saving the Viewer role. Deleting a directory entry leaves basic membership and unrelated site grants in place.
 - The current user's effective app role comes from their tracker group membership (or site-owner permissions), not a writable AppRole string alone. Read-only users don't write to the Users list at startup. Testing password promotion is disabled in scoped mode, including direct calls to its handler.
 - Engineers can delete tasks/content but project deletion is manager-only in scoped mode because it revokes engineer ACLs. Engineers cannot change engineer assignment through the app. Project deadlines and other manager-only fields retain application restrictions. **SharePoint item permissions do not provide column-level security**: Contribute can edit the whole assigned record through SharePoint APIs. A trusted backend or separately secured records would be needed to enforce field-level restrictions outside the app.
 - Reference documents remain readable/downloadable for all roles and writable by managers.
@@ -66,6 +66,15 @@ For `https://flankspeed.sharepoint-mil.us/sites/metsoft`, the owner-confirmed de
 These checks inspect access; they do not repair ACLs, change inheritance, or grant permissions to the entire Site Assets library. Missing, denied, or malformed permission responses stop the invitation before email and identify the affected resource. Tracker role membership may already have been saved; repair the resource grant and retry the explicit invitation. List-level Read does not guarantee every uniquely secured item is readable; project scopes must retain their intended baseline reader grants.
 
 Role saves and assignment changes do not call ShareObject or send mail. Only the explicit invitation/retry requests the existing single page-targeted ShareObject email after verification. Managers need authority to inspect the target user's resource permissions and share the page; otherwise an owner must complete the invitation. Live tenant behavior has not been verified by mocked tests.
+
+### When an invitation stops at Updates
+
+By the time the invitation checks **Updates**, SharePoint has confirmed the selected account's membership in **Tracker Users**. The app stopped before requesting an email because it could not verify that the account could read items in this list.
+
+1. Check the full login or email in **Invite people** against the account in **Tracker Users**. A `.mil` and a `.civ` account can have the same display name. Select the intended account if they differ.
+2. As a site owner, open **Site contents → Modernization-Tracker - Updates → Settings → List settings → Permissions for this list**. Use **Check Permissions** for that account and verify that **Tracker Users** has **Read** on the list itself.
+3. If the group lacks Read, grant **Tracker Users** the standard **Read** level on **Updates**. If the list inherits site permissions, use **Stop Inheriting Permissions** on the list first and preserve existing grants. Project and folder access is managed separately. [Microsoft's list permission instructions](https://support.microsoft.com/en-us/sharepoint/lists/sharepoint-sharing-and-permissions/customize-permissions-for-a-sharepoint-list-or-library)
+4. Return to **Invite people → Retry invitation** for that account. The tracker checks membership and resource access again before requesting the email. If the owner confirms Read and the error persists, retry as an owner to check whether the original inviter can inspect the recipient's permissions.
 
 ## Email and final verification
 
@@ -116,7 +125,7 @@ HTTP tests now run creation, canonical identity verification, and a repeated set
 
 Tracker Users is the basic access group for this app and contains all intended Tracker users, including Managers and Project Engineers. It has Read on Tracker resources and submission-only access on private Feedback. Elevated groups determine Manager and Project Engineer roles. Viewer remains the default app role: a Viewer label is not a group-membership check or proof of SharePoint access.
 
-Explicit invitations enroll recipients in Tracker Users before checking resource access and requesting their email. Role changes, directory deletion and startup do not add or remove basic membership, and do not send invitation emails. To revoke basic access, an authorized group owner must remove Tracker Users membership and review other grants separately. Startup remains read-only for ordinary users.
+Explicit invitations enroll recipients in Tracker Users before checking resource access and requesting their email. Saving an existing directory entry as Viewer also adds and verifies missing Tracker Users membership. To repair an earlier demotion, edit the account, leave **Viewer** selected and choose **Save user**. A role save sends no email. When **Apply tracker permissions** reconciles a saved Viewer who still has an elevated membership, it verifies basic membership before removing the elevated one. To revoke basic access, an authorized group owner must remove Tracker Users membership and review other grants separately.
 
 The new group must exist with its intended resource grants. Missing or denied membership stops the invitation with a Tracker Users error; there is no fallback to Metrology App User or site Members in scoped mode. Tracker does not create the access group, automatically change suite membership, or modify another app's resources. The older non-scoped deployment retains its existing Members-based invitation behavior.
 

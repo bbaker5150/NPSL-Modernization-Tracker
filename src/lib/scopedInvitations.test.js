@@ -78,6 +78,25 @@ describe('scoped invitations without site-wide Read', () => {
     await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('No invitation email was requested');
     expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users']);
   });
+  it('identifies the Updates list grant and retries without reenrolling after list access is restored', async () => {
+    const store = setup({ member: false });
+    const get = store.get.getMockImplementation();
+    let updatesReadable = false;
+    store.get.mockImplementation(path => {
+      if (!updatesReadable && path.includes("getbytitle('updates')/getusereffectivepermissions")) {
+        return { GetUserEffectivePermissions: { Low: '32' } };
+      }
+      return get(path);
+    });
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow(
+      /Modernization-Tracker - Updates.*verified Tracker Users membership.*No invitation email was requested.*lacks the required Read access.*Permissions for this list.*grant Tracker Users Read on this list if missing.*retry the invitation/,
+    );
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users']);
+
+    updatesReadable = true;
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).resolves.toMatchObject({ emailRequested: true });
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual(['/_api/web/sitegroups(99)/users', '/_api/SP.Web.ShareObject']);
+  });
   it('verifies the page, all seven lists, and configured assets before one explicit email', async () => {
     const store = setup();
     await expect(store.shareSiteAccess(person, 'Viewer', page)).resolves.toMatchObject({ emailRequested: true });
@@ -92,15 +111,19 @@ describe('scoped invitations without site-wide Read', () => {
     expect(store.post).not.toHaveBeenCalled();
   });
   it.each([null, {}, ['33'], 'bad', -1, 1.5])('rejects malformed permission results: %j', async low => {
-    const store = setup({ deny: 'SitePages', low });
-    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('Required Read access was not confirmed');
+    const store = setup({ deny: "getbytitle('updates')", low });
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow(
+      /Modernization-Tracker - Updates.*check the selected account’s effective permissions.*invalid effective permission result/,
+    );
     expect(store.post).not.toHaveBeenCalled();
   });
   it('stops before email when a resource permission check is denied', async () => {
     const store = setup();
     const get = store.get.getMockImplementation();
     store.get.mockImplementation(path => path.includes("getbytitle('users')") ? Promise.reject(new Error('403 Access denied')) : get(path));
-    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow('Modernization-Tracker - Users');
+    await expect(store.shareSiteAccess(person, 'Viewer', page)).rejects.toThrow(
+      /Modernization-Tracker - Users.*verified Tracker Users membership.*check the selected account’s effective permissions.*403 Access denied/,
+    );
     expect(store.post).not.toHaveBeenCalled();
   });
   it('checks the configured folder without granting access or changing inheritance', async () => {
