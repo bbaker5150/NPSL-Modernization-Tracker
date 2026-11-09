@@ -4,6 +4,8 @@ import { TRACKER_GROUPS } from './trackerGroups';
 import { isManager } from './access';
 import { feedbackSetup } from './feedbackSetup';
 import { ensureFeedbackStatus, FEEDBACK_STATUSES } from './feedbackFields';
+import { attachmentDescriptor, feedbackFileUploader, feedbackFilePath, parseFeedbackAttachments, validateFeedbackFiles, MAX_FEEDBACK_FILE_BYTES } from './feedbackAttachments';
+import { feedbackAttachmentsSetup } from './feedbackAttachmentsSetup';
 // Feedback is deliberately separate from shared tracker data and exports.
 const unwrap = value => value?.d || value;
 const rows = value => value?.value || value?.d?.results || [];
@@ -49,16 +51,55 @@ export function createFeedback(store) {
     return { owner: false, review: manager };
   }
   const isOwner = async () => (await access()).owner;
+  const setup = feedbackSetup(store, title, isOwner);
+  const attachmentSetup = feedbackAttachmentsSetup(store, isOwner, () => catalog.path('feedback'), () => setup.status());
+  setup.attachmentsStatus = () => attachmentSetup.status();
+  setup.enableAttachments = progress => attachmentSetup.provision(progress);
+  const uploadFiles = feedbackFileUploader(store);
+  const uncertainReportFiles = new WeakSet();
+  const localFiles = new Map();
   return {
     local,
     access,
     isOwner,
-    setup: feedbackSetup(store, title, isOwner),
-    async submit(input) {
+    setup,
+    async submit(input, progress = () => {}) {
       const value = validateFeedback(input);
-      if (local) { preview.unshift({ ...value, status: 'New', etag: '1', id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return; }
+      const files = validateFeedbackFiles(input.attachments || []);
+      if (local) {
+        const attachments = files.map(file => { const attachment = attachmentDescriptor(file); localFiles.set(attachment.key, file); return attachment; });
+        preview.unshift({ ...value, attachments, status: 'New', etag: '1', id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return;
+      }
+      if (files.some(file => uncertainReportFiles.has(file))) throw new Error('A report using these files may already be in Feedback History. Ask an owner to check before starting another report. This draft has not been sent again.');
+      value.attachments = await uploadFiles(files, progress);
+      progress('Sending feedback…');
       const aliases = listTitleAliases(store.prefix, 'feedback');
-      await submitPrivateFeedback(store, [aliases[1], aliases[0], ...aliases.slice(2)], value);
+      try { await submitPrivateFeedback(store, [aliases[1], aliases[0], ...aliases.slice(2)], value); uploadFiles.committed(files); }
+      catch (error) {
+        // Reusing these immutable keys in a duplicate report would make deleting
+        // either report remove the other's files. Never replay an uncertain create.
+        if (error.submissionUncertain) files.forEach(file => uncertainReportFiles.add(file));
+        throw error;
+      }
+    },
+    async downloadAttachment(id, key) {
+      if (!(await access()).review) throw new Error('Only site owners and Tracker Managers can read feedback attachments.');
+      if (local ? typeof id !== 'string' || !id : !Number.isSafeInteger(id) || id <= 0) throw new Error('Select a valid feedback submission.');
+      const record = local ? preview.find(item => item.id === id) : unwrap(await store.get(`${await catalog.path('feedback')}/items(${id})?$select=*`));
+      const attachment = parseFeedbackAttachments(local ? record?.attachments : record?.FeedbackAttachments, { strict: true }).find(file => file.key === key);
+      if (!attachment) throw new Error('This attachment is no longer linked to the selected submission. Reopen Feedback History.');
+      if (local) return { blob: localFiles.get(key), attachment };
+      // Match normal Tracker downloads: embedded hosts may stall binary REST
+      // $value requests. The direct private file URL still enforces SharePoint ACLs.
+      const url = await feedbackFilePath(store, attachment, { download: true });
+      const response = await (store.fetchImpl || fetch)(url, { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
+      if (!response.ok) throw new Error(`The attachment could not be downloaded (${response.status}). Check your feedback library access with a site owner.`);
+      if (/text\/html/i.test(response.headers?.get('Content-Type') || '')) throw new Error('SharePoint returned a sign-in page instead of the attachment. Refresh your session and try again.');
+      const blob = await response.blob();
+      // Office property promotion can change library file bytes after upload.
+      // Bound downloads without treating the original size as an integrity hash.
+      if (!blob.size || blob.size > MAX_FEEDBACK_FILE_BYTES * 2) throw new Error('The stored attachment is empty or unexpectedly large. Ask a site owner to verify the file.');
+      return { blob: new Blob([blob], { type: attachment.type }), attachment };
     },
     async update(id, input, etag) {
       const { owner, review } = await access();
@@ -94,8 +135,17 @@ export function createFeedback(store) {
         try {
           if (local) {
             const index = preview.findIndex(item => item.id === id);
-            if (index !== -1) preview.splice(index, 1);
+            if (index !== -1) { preview[index].attachments?.forEach(file => localFiles.delete(file.key)); preview.splice(index, 1); }
           } else {
+            // Recycle linked files first. If one fails, retain the report and its
+            // manifest so the owner can find/recover every file before retrying.
+            let record;
+            try { record = unwrap(await store.get(`${path}/items(${id})?$select=*`)); }
+            catch (error) { if (error.status !== 404) throw error; }
+            for (const file of parseFeedbackAttachments(record?.FeedbackAttachments, { strict: true })) {
+              try { await store.post(`${await feedbackFilePath(store, file)}/recycle()`); }
+              catch (error) { if (error.status !== 404) throw new Error(`A linked attachment could not be recycled. The submission was kept; restore any already recycled files if needed. ${error.message}`); }
+            }
             try { await store.post(`${path}/items(${id})/recycle()`); }
             catch (error) { if (error.status !== 404) throw error; }
           }
@@ -117,7 +167,7 @@ export function createFeedback(store) {
       const result = []; let next = `${path}/items?$select=*,Author/Title&$expand=Author&$orderby=Created desc&$top=100`;
       while (next) {
         const body = await store.get(next, { Accept: 'application/json;odata=verbose' });
-        result.push(...rows(body).map(row => ({ id: row.Id, title: row.Title, kind: row.FeedbackKind, details: row.FeedbackDetails, status: row.FeedbackStatus || 'New', etag: row['@odata.etag'] || row['odata.etag'] || row.__metadata?.etag, created: row.Created, author: row.Author?.Title || 'Unknown' })));
+        result.push(...rows(body).map(row => ({ id: row.Id, title: row.Title, kind: row.FeedbackKind, details: row.FeedbackDetails, status: row.FeedbackStatus || 'New', etag: row['@odata.etag'] || row['odata.etag'] || row.__metadata?.etag, created: row.Created, author: row.Author?.Title || 'Unknown', attachments: parseFeedbackAttachments(row.FeedbackAttachments) })));
         const link = body['@odata.nextLink'] || body['odata.nextLink'] || body.d?.__next;
         if (!link) break;
         const url = new URL(link, `${store.webUrl}/`);

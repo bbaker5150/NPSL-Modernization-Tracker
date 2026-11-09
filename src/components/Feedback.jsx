@@ -4,6 +4,8 @@ import { Icon } from './Icon';
 import { createFeedback, validateFeedback } from '../lib/feedback';
 import { FeedbackSetup } from './FeedbackSetup';
 import { FEEDBACK_STATUSES } from '../lib/feedbackFields';
+import { validateFeedbackFiles } from '../lib/feedbackAttachments';
+import { FeedbackFileQueue, FeedbackSavedFiles } from './FeedbackFiles';
 
 export function Feedback({ store }) {
   const api = useMemo(() => createFeedback(store), [store]);
@@ -14,16 +16,23 @@ export function Feedback({ store }) {
   const [clearIds, setClearIds] = useState(null), [inboxMessage, setInboxMessage] = useState('');
   const [editing, setEditing] = useState(null), [deleteTitle, setDeleteTitle] = useState(null);
   const [ownerError, setOwnerError] = useState('');
+  const [files, setFiles] = useState([]), [sendProgress, setSendProgress] = useState(''), [attachmentSetup, setAttachmentSetup] = useState(null);
   const [setupState, setSetupState] = useState(null), [setupError, setSetupError] = useState(''), [setupMessage, setSetupMessage] = useState('');
   useEffect(() => {
-    setAccess({ owner: false, review: false }); setOwnerError(''); setSetupState(null); setSetupError(''); setSetupMessage(''); setClearIds(null); setInboxMessage(''); setEditing(null); setDeleteTitle(null);
+    setAccess({ owner: false, review: false }); setOwnerError(''); setSetupState(null); setSetupError(''); setSetupMessage(''); setClearIds(null); setInboxMessage(''); setEditing(null); setDeleteTitle(null); setAttachmentSetup(null);
     if (!open) return;
     let mounted = true;
     api.access().then(async value => {
       if (!mounted) return;
       setAccess(value);
       if (value.owner) {
-        try { const status = await api.setup.status(); if (mounted) setSetupState(status); }
+        try {
+          const status = await api.setup.status(); if (mounted) setSetupState(status);
+          if (status.ready) {
+            try { const attachments = await api.setup.attachmentsStatus(); if (mounted) setAttachmentSetup(attachments); }
+            catch (caught) { if (mounted) setAttachmentSetup({ ready: false, error: caught.message }); }
+          }
+        }
         catch (caught) { if (mounted) setSetupError(caught.message); }
       }
     }).catch(() => {
@@ -42,9 +51,17 @@ export function Feedback({ store }) {
     try { report = validateFeedback({ kind, title, details }); }
     catch (caught) { setError(caught.message); return; }
     active.current = true; setBusy(true); setError('');
-    try { await api.submit(report); setSent(true); setTitle(''); setDetails(''); }
+    try { await api.submit({ ...report, attachments: files }, setSendProgress); setSent(true); setTitle(''); setDetails(''); setFiles([]); }
     catch (caught) { setError(`${caught.message} Your draft is still here.`); }
-    finally { active.current = false; setBusy(false); }
+    finally { active.current = false; setBusy(false); setSendProgress(''); }
+  }
+  function addFiles(selected) {
+    if (busy || !selected.length) return;
+    try {
+      const next = [...files];
+      for (const file of selected) if (!next.some(existing => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified)) next.push(file);
+      validateFeedbackFiles(next); setFiles(next); setError('');
+    } catch (caught) { setError(caught.message); }
   }
   const setupBlocked = owner && (!setupState?.ready || !!setupError);
   async function inbox() {
@@ -101,18 +118,30 @@ export function Feedback({ store }) {
             finally { setBusy(false); }
           }}>Enable manager history access</button>
         </section>}
-        {owner && setupState && !setupState.ready && <FeedbackSetup setup={api.setup} state={setupState} busy={busy} onBusy={setBusy} onReady={state => { setSetupState(state); setError(''); setSetupMessage(`${state.title} is ready in Site Contents.`); }} />}
+        {owner && setupState?.ready && !setupState.managerReviewNeeded && attachmentSetup && !attachmentSetup.ready && <section className="feedback-setup">
+          <h3>Private screenshots and attachments</h3><p>Enable a separate private library for feedback files. Existing text submissions remain available.</p>
+          {attachmentSetup.error && <small>{attachmentSetup.error}</small>}
+          <button type="button" className="button secondary" disabled={busy} onClick={async () => {
+            setBusy(true); setError('');
+            try { setAttachmentSetup(await api.setup.enableAttachments(setSetupMessage)); setSetupMessage('Private feedback attachments are ready.'); }
+            catch (caught) { setSetupMessage(''); setError(caught.message); }
+            finally { setBusy(false); }
+          }}>Enable private attachments</button>
+        </section>}
+        {owner && setupState && !setupState.ready && <FeedbackSetup setup={api.setup} state={setupState} busy={busy} onBusy={setBusy} onReady={state => { setSetupState(state); setError(''); setSetupMessage(`${state.title} is ready in Site Contents.`); setAttachmentSetup({ ready: false }); }} />}
         {tab === 'inbox' && inboxMessage && <p role="status" aria-live="polite">{inboxMessage}</p>}
         {error && <p role="alert" className="inline-error">{error}</p>}
-        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in Feedback History.' : 'Your submission was added to Feedback History.'}</p></div> : <form noValidate onSubmit={submit} className="feedback-form">
+        {tab === 'submit' ? sent ? <div className="feedback-success" role="status"><Icon name="check" size={32} /><h3>Thank you for the feedback</h3><p>{api.local ? 'Your preview submission is in Feedback History.' : 'Your submission was added to Feedback History.'}</p></div> : <form noValidate onSubmit={submit} className="feedback-form" onPaste={event => { const pasted = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/')); if (!busy && pasted.length) { event.preventDefault(); addFiles(pasted); } }}>
           <fieldset disabled={busy}><legend>What would you like to share?</legend><div className="feedback-types">{[['Bug', 'bug', 'Report a bug', 'Something isn’t working as expected.'], ['Feature', 'idea', 'Request a feature', 'An idea to make your work easier.']].map(([value, icon, label, hint]) => <label key={value} className={kind === value ? 'selected' : ''}><input type="radio" name="feedback-kind" value={value} checked={kind === value} onChange={() => setKind(value)} /><Icon name={icon} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
           <label className="field">Summary<input autoFocus required maxLength={200} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} placeholder={kind === 'Bug' ? 'What went wrong?' : 'What would you like to do?'} /></label>
           <label className="field">{kind === 'Bug' ? 'What happened?' : 'Tell us about your idea'}<textarea required maxLength={10000} rows={7} value={details} disabled={busy} onChange={event => setDetails(event.target.value)} placeholder={kind === 'Bug' ? 'Include steps to reproduce, what you expected, and what happened instead.' : 'Describe the feature and how it would help your workflow.'} /></label>
+          <FeedbackFileQueue files={files} busy={busy} onAdd={addFiles} onRemove={index => setFiles(value => value.filter((_, current) => current !== index))} />
+          {sendProgress && <p role="status" aria-live="polite">{sendProgress}</p>}
           <small className="feedback-hint">Please don’t include passwords or sensitive information.</small>
         </form> : clearIds ? <section className="feedback-clear-confirm" aria-labelledby="feedback-clear-title">
           <Icon name="trash" size={28} />
           <h3 id="feedback-clear-title">{deleteTitle !== null ? 'Delete this submission?' : `Clear ${clearIds.length} submission${clearIds.length === 1 ? '' : 's'}?`}</h3>
-          {deleteTitle !== null ? <><strong>{deleteTitle}</strong><p>This removes this submission from Feedback History for all site owners and Tracker Managers. Other submissions will be kept.</p></> : <p>This clears the submissions currently shown for all site owners and Tracker Managers. New feedback received after this inbox was loaded will be kept.</p>}
+          {deleteTitle !== null ? <><strong>{deleteTitle}</strong><p>This removes this submission and its attachments from Feedback History for all site owners and Tracker Managers. Other submissions will be kept.</p></> : <p>This clears the submissions and attachments currently shown for all site owners and Tracker Managers. New feedback received after this inbox was loaded will be kept.</p>}
           <p>{api.local ? 'Local preview submissions will be removed.' : 'Submissions will move to the SharePoint recycle bin, where a site owner can restore them.'}</p>
         </section> : <section aria-label="Feedback submissions" aria-busy={busy}>
           {busy && items === null ? <p role="status">Loading submissions…</p> : items?.length === 0 ? <div className="feedback-success"><Icon name="note" size={32} /><h3>No feedback yet</h3><p>Bug reports and feature requests will appear here.</p></div> : items?.map(item => <article key={item.id} className="feedback-item" aria-label={item.title}>
@@ -128,6 +157,7 @@ export function Feedback({ store }) {
               <div className="feedback-item-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => { setEditing(null); setError(''); }}>Cancel edit</button><button type="button" className="button primary" disabled={busy} onClick={saveSubmission}>{busy ? 'Saving…' : 'Save changes'}</button></div>
             </form> : <>
               <p>{item.details}</p>
+              <FeedbackSavedFiles api={api} item={item} />
               <div className="feedback-item-footer"><span className="feedback-status" data-status={item.status}>{item.status}</span>
                 {review && <div className="feedback-item-actions">
                   <button type="button" className="button secondary" disabled={busy || !!editing || !item.etag} onClick={() => { setEditing({ ...item }); setError(''); setInboxMessage(''); }}>Edit</button>

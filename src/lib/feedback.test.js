@@ -89,7 +89,7 @@ it('recycles only the reviewed IDs, deduplicates them, and reports progress', as
   expect(await createFeedback(raw).clearInbox([1, 2, 1], progress)).toEqual({ clearedIds: [1, 2] });
   expect(raw.post.mock.calls.map(([path]) => path)).toEqual([1, 2].map(id => `/_api/web/lists(guid'11111111-1111-1111-1111-111111111111')/items(${id})/recycle()`));
   expect(progress).toHaveBeenLastCalledWith({ cleared: 2, total: 2 });
-  expect(raw.get.mock.calls.some(([path]) => path.includes('/items'))).toBe(false);
+  expect(raw.get.mock.calls.filter(([path]) => path.includes('/items')).map(([path]) => path)).toEqual([1, 2].map(id => `/_api/web/lists(guid'11111111-1111-1111-1111-111111111111')/items(${id})?$select=*`));
 });
 it.each([[0], [1, -2], ['1'], [1, '2)/recycle()'], []].map(ids => [ids]))('rejects invalid clear IDs %j before any writes', async ids => {
   const raw = store(true); await expect(createFeedback(raw).clearInbox(ids)).rejects.toThrow('valid feedback');
@@ -189,4 +189,84 @@ it('allows verified Tracker Managers to read and edit history, and rechecks memb
   await expect(api.update(5, validUpdate, '"2"')).rejects.toThrow('Only site owners');
   await expect(api.list()).rejects.toThrow('Only site owners');
   expect(raw.post).toHaveBeenCalledTimes(1);
+});
+
+it('uploads selected files before the report with no reads by an add-only submitter', async () => {
+  const raw = store();
+  await createFeedback(raw).submit({ kind: 'Bug', title: 'Screenshot attached', details: 'Steps', attachments: [new File(['pixels'], 'screen.png', { type: 'image/png' })] });
+  expect(raw.get).not.toHaveBeenCalled();
+  expect(raw.post).toHaveBeenCalledTimes(2);
+  const upload = new DOMParser().parseFromString(raw.post.mock.calls[0][1].body, 'text/xml');
+  expect(upload.querySelector('Actions > ObjectPath')).not.toBeNull();
+  const report = new DOMParser().parseFromString(raw.post.mock.calls[1][1].body, 'text/xml');
+  const fields = Object.fromEntries([...report.querySelectorAll('Actions > Method[Name=SetFieldValue]')].map(node => [...node.querySelectorAll('Parameter')].map(p => p.textContent)));
+  const [file] = JSON.parse(fields.FeedbackAttachments);
+  expect(file).toMatchObject({ name: 'screen.png', size: 6, type: 'image/png' });
+  expect(file.key).toBe(upload.querySelector('Property[Name=Url]').textContent);
+  expect(report.querySelector('Query, ObjectIdentityQuery')).toBeNull();
+});
+it('does not create a report after an unconfirmed upload and does not replay that upload', async () => {
+  const raw = store(); raw.post.mockRejectedValue(new Error('Timeout'));
+  const api = createFeedback(raw), report = { kind: 'Bug', title: 'Screenshot attached', details: 'Steps', attachments: [new File(['pixels'], 'screen.png')] };
+  await expect(api.submit(report)).rejects.toThrow('No report was sent');
+  await expect(api.submit(report)).rejects.toThrow('upload was not confirmed');
+  expect(raw.post).toHaveBeenCalledTimes(1);
+});
+it('keeps attachment downloads behind verified reviewer access and a submission manifest', async () => {
+  const raw = store(); raw.fetchImpl = vi.fn();
+  await expect(createFeedback(raw).downloadAttachment(1, 'anything.png')).rejects.toThrow('Only site owners');
+  expect(raw.fetchImpl).not.toHaveBeenCalled();
+  expect(raw.get.mock.calls.some(([path]) => path.includes('/items'))).toBe(false);
+});
+it('allows owner and verified manager attachment downloads and rejects arbitrary file keys', async () => {
+  const key = '11111111-1111-4111-8111-111111111111.png';
+  const attachment = { key, name: 'screen.png', size: 6, type: 'image/png' };
+  for (const owner of [true, false]) {
+    const raw = store(owner);
+    raw.get.mockImplementation(async path => {
+      if (path.includes('effectivebasepermissions')) return { Low: '1' };
+      if (path.includes('currentuser/groups')) return { value: [{ Id: 22, Title: 'Tracker Managers' }] };
+      if (path.includes('associatedownergroup')) return { Id: 7 };
+      if (path.includes('/lists?')) return feedbackList;
+      if (path.includes('/items(1)')) return { FeedbackAttachments: JSON.stringify([attachment]) };
+      if (path.includes('/RootFolder?')) return { ServerRelativeUrl: '/sites/tracker/FeedbackFiles' };
+      throw new Error('Unexpected read ' + path);
+    });
+    raw.fetchImpl = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['pixels with updated file properties']) });
+    const api = createFeedback(raw);
+    expect((await api.downloadAttachment(1, key)).attachment).toEqual(attachment);
+    expect(raw.fetchImpl).toHaveBeenCalledWith(`https://example.test/sites/tracker/FeedbackFiles/${key}`, expect.objectContaining({ credentials: 'include' }));
+    await expect(api.downloadAttachment(1, '22222222-2222-4222-8222-222222222222.png')).rejects.toThrow('no longer linked');
+    expect(raw.fetchImpl).toHaveBeenCalledTimes(1);
+  }
+});
+it('recycles linked files before the report and retains the report when a file cannot be recycled', async () => {
+  const raw = store(true), file = { key: '11111111-1111-4111-8111-111111111111.png', name: 'screen.png', size: 6, type: 'image/png' };
+  raw.get.mockImplementation(async path => path.includes('/items(1)') ? { FeedbackAttachments: JSON.stringify([file]) } : path.includes('/RootFolder?') ? { ServerRelativeUrl: '/sites/tracker/FeedbackFiles' } : feedbackList);
+  raw.post.mockRejectedValueOnce(new Error('Denied'));
+  await expect(createFeedback(raw).clearInbox([1])).rejects.toMatchObject({ clearedIds: [], message: expect.stringContaining('submission was kept') });
+  expect(raw.post).toHaveBeenCalledTimes(1);
+  expect(raw.post.mock.calls[0][0]).toContain('GetFileByServerRelativeUrl');
+  raw.post.mockResolvedValue({});
+  await createFeedback(raw).clearInbox([1]);
+  expect(raw.post.mock.calls[2][0]).toContain('/items(1)/recycle()');
+});
+
+it('blocks replay of an uncertain report using already uploaded files so two reports cannot share deletion ownership', async () => {
+  const raw = store(); raw.post.mockResolvedValueOnce([{ ErrorInfo: null }]).mockRejectedValueOnce(new Error('Report response timed out'));
+  const api = createFeedback(raw), file = new File(['pixels'], 'screen.png');
+  const report = { kind: 'Bug', title: 'Possible saved report', details: 'Steps', attachments: [file] };
+  await expect(api.submit(report)).rejects.toMatchObject({ submissionUncertain: true });
+  await expect(api.submit(report)).rejects.toThrow('has not been sent again');
+  await expect(api.submit({ ...report, title: 'Changed draft' })).rejects.toThrow('has not been sent again');
+  expect(raw.post).toHaveBeenCalledTimes(2);
+});
+
+it('gives new confirmed reports independent file ownership even when the same File object is selected twice', async () => {
+  const raw = store(), api = createFeedback(raw), file = new File(['pixels'], 'screen.png');
+  const report = { kind: 'Bug', title: 'Report', details: 'Steps', attachments: [file] };
+  await api.submit(report); await api.submit({ ...report, title: 'Another report' });
+  expect(raw.post).toHaveBeenCalledTimes(4);
+  const keys = [0, 2].map(index => new DOMParser().parseFromString(raw.post.mock.calls[index][1].body, 'text/xml').querySelector('Property[Name=Url]').textContent);
+  expect(keys[0]).not.toBe(keys[1]);
 });

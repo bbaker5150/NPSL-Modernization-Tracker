@@ -8,6 +8,9 @@ import { ReferenceDocuments } from './components/ReferenceDocuments';
 import { TrackerAccessSetup } from './components/TrackerAccessSetup';
 import { PeopleInvite } from './components/PeopleInvite';
 import { TaskDocuments } from './components/TaskDocuments';
+import { FilePicker } from './components/FilePicker';
+import { ProjectTeam, engineerInitials, projectTeamSearch, projectTeamText } from './components/ProjectTeam';
+import { engineerFields, projectEngineers } from './lib/projectEngineers';
 import { displayName } from './lib/displayName';
 import { METCAL_ORGANIZATION, METCAL_TEAMS, ORGANIZATIONS, ROLES, normalizeOrganization, organizationAttentionLabel, projectProgress } from './data/workflow';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -133,7 +136,7 @@ function ProjectCard({ project, onOpen, onDelete }) {
   return <article className="project-card" role="button" tabIndex="0" onClick={openProject} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openProject(); } }}>
     <div className="project-card-top"><div className="project-card-badges"><Badge tone={statusTone(project.health)} dot>{project.health}</Badge><Badge>{project.organization}</Badge></div><div ref={menuRef} className="project-menu-wrap" hidden={!onDelete}><button className="project-menu" aria-label={`Project actions for ${project.title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }}><Icon name="more" size={16} /></button>{menuOpen && onDelete && <div className="project-menu-popover"><button onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onDelete(project); }}>Delete project</button></div>}</div></div>
     <div><span className="eyebrow">{project.measurementArea}</span><h3>{project.title}</h3></div>
-    <div className="project-owner"><span className="avatar small">{project.ownerName === 'Unassigned' ? '?' : project.ownerName.slice(0, 1)}</span><span>{displayName(project.ownerName)}</span></div>
+    <div className="project-owner"><ProjectTeam project={project} /></div>
     <div className="project-phase"><span>Stage {phaseIndex(project.currentStageKey) + 1} of {workflowData.phases.length}</span><strong>{phase?.short}</strong></div>
     <Progress value={project.percentComplete} compact />
     <div className="project-card-bottom"><span>{project.percentComplete}% complete</span><span title={`Target completion: ${displayDate(project.targetFinish)}`}><Icon name="calendar" size={14} /> {project.targetFinish ? compactDate(project.targetFinish) : 'No target date'}</span></div>
@@ -178,11 +181,11 @@ function ProjectsTable({ projects, onOpen, register, setRegister }) {
   const sort = (key) => setRegister((state) => ({ ...state, sortKey: key, sortDirection: state.sortKey === key && state.sortDirection === 'asc' ? 'desc' : 'asc' }));
   const query = search.trim().toLowerCase();
   const healthOrder = new Map(HEALTHS.map((value, index) => [value, index]));
-  const values = (project, key) => ({ project: project.title, owner: displayName(project.ownerName), organization: project.organization, stage: phaseIndex(project.currentStageKey), health: healthOrder.get(project.health) ?? 99, progress: projectProgress(project.tasks, progressMode).percentComplete, milestone: project.nextMilestone })[key];
-  const rows = projects.filter((project) => (!health || project.health === health) && (!organization || project.tasks.some((task) => !isClosedTask(task) && task.organization === organization)) && (!query || [project.title, project.measurementArea, project.ownerName, displayName(project.ownerName), project.organization, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)))).sort((a, b) => { const left = values(a, sortKey); const right = values(b, sortKey); const result = typeof left === 'number' ? left - right : String(left || '').localeCompare(String(right || '')); return (sortDirection === 'desc' ? -1 : 1) * (result || a.title.localeCompare(b.title)); });
+  const values = (project, key) => ({ project: project.title, owner: projectTeamText(project), organization: project.organization, stage: phaseIndex(project.currentStageKey), health: healthOrder.get(project.health) ?? 99, progress: projectProgress(project.tasks, progressMode).percentComplete, milestone: project.nextMilestone })[key];
+  const rows = projects.filter((project) => (!health || project.health === health) && (!organization || project.tasks.some((task) => !isClosedTask(task) && task.organization === organization)) && (!query || [project.title, project.measurementArea, projectTeamSearch(project), project.organization, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)))).sort((a, b) => { const left = values(a, sortKey); const right = values(b, sortKey); const result = typeof left === 'number' ? left - right : String(left || '').localeCompare(String(right || '')); return (sortDirection === 'desc' ? -1 : 1) * (result || a.title.localeCompare(b.title)); });
   const heading = (key, label, className = '') => <button type="button" className={`table-sort ${className}`} onClick={() => sort(key)} aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>{label}{sortKey === key && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>}</button>;
-  return <div className="panel portfolio-register"><section className="portfolio-heading"><div><span className="section-kicker">Portfolio register</span><h2>Portfolio projects</h2><p>Detailed ownership, organization, health, stage, and milestone visibility.</p></div><div className="portfolio-filters"><label className="search-box"><Icon name="search" /><input aria-label="Search portfolio projects" placeholder="Search projects, owners, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><label className="select-wrap"><Icon name="filter" /><select aria-label="Filter by organization" value={organization} onChange={(event) => setOrganization(event.target.value)}><option value="">All organizations</option>{ORGANIZATIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="select-wrap"><Icon name="filter" /><select aria-label="Filter by health" value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></div></section>
-    <section className="table-panel"><div className="project-table" role="table"><div className="project-table-row table-header" role="row">{heading('project', 'Project')}{heading('owner', 'Project engineer')}{heading('organization', 'Organization')}{heading('stage', 'Stage')}{heading('health', 'Health')}<span className="progress-column-heading">{heading('progress', 'Progress')}<ProgressChoice label="Portfolio progress calculation" value={progressMode} onChange={setProgressMode} /></span>{heading('milestone', 'Next milestone')}<span /></div>{rows.map((project) => <button className="project-table-row" role="row" key={project.id} onClick={() => onOpen(project)}><span><strong>{project.title}</strong><small>{project.measurementArea}</small></span><span><span className="avatar tiny">{project.ownerName === 'Unassigned' ? '?' : (project.ownerName?.[0] || '?')}</span>{displayName(project.ownerName)}</span><span>{project.organization}</span><span>{workflowData.phases.find((phase) => phase.key === project.currentStageKey)?.short}</span><span><Badge tone={statusTone(project.health)} dot>{project.health}</Badge></span><span title={projectProgress(project.tasks, progressMode).progressDetail}><strong>{projectProgress(project.tasks, progressMode).percentComplete}%</strong><Progress value={projectProgress(project.tasks, progressMode).percentComplete} compact /></span><span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></span><span><Icon name="chevron" /></span></button>)}</div>{!rows.length && <p className="portfolio-no-results">No projects match the selected filters.</p>}</section>
+  return <div className="panel portfolio-register"><section className="portfolio-heading"><div><span className="section-kicker">Portfolio register</span><h2>Portfolio projects</h2><p>Detailed ownership, organization, health, stage, and milestone visibility.</p></div><div className="portfolio-filters"><label className="search-box"><Icon name="search" /><input aria-label="Search portfolio projects" placeholder="Search projects, engineers, milestones…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button onClick={() => setSearch('')} aria-label="Clear search"><Icon name="close" size={14} /></button>}</label><label className="select-wrap"><Icon name="filter" /><select aria-label="Filter by organization" value={organization} onChange={(event) => setOrganization(event.target.value)}><option value="">All organizations</option>{ORGANIZATIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="select-wrap"><Icon name="filter" /><select aria-label="Filter by health" value={health} onChange={(event) => setHealth(event.target.value)}><option value="">All health states</option>{HEALTHS.map((item) => <option key={item}>{item}</option>)}</select></label></div></section>
+    <section className="table-panel"><div className="project-table" role="table"><div className="project-table-row table-header" role="row">{heading('project', 'Project')}{heading('owner', 'Project engineers')}{heading('organization', 'Organization')}{heading('stage', 'Stage')}{heading('health', 'Health')}<span className="progress-column-heading">{heading('progress', 'Progress')}<ProgressChoice label="Portfolio progress calculation" value={progressMode} onChange={setProgressMode} /></span>{heading('milestone', 'Next milestone')}<span /></div>{rows.map((project) => <button className="project-table-row" role="row" key={project.id} onClick={() => onOpen(project)}><span><strong>{project.title}</strong><small>{project.measurementArea}</small></span><span><ProjectTeam project={project} /></span><span>{project.organization}</span><span>{workflowData.phases.find((phase) => phase.key === project.currentStageKey)?.short}</span><span><Badge tone={statusTone(project.health)} dot>{project.health}</Badge></span><span title={projectProgress(project.tasks, progressMode).progressDetail}><strong>{projectProgress(project.tasks, progressMode).percentComplete}%</strong><Progress value={projectProgress(project.tasks, progressMode).percentComplete} compact /></span><span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></span><span><Icon name="chevron" /></span></button>)}</div>{!rows.length && <p className="portfolio-no-results">No projects match the selected filters.</p>}</section>
   </div>;
 }
 
@@ -240,6 +243,10 @@ function engineerEmail(person) {
   return person?.email || (isEmail(signIn) ? signIn : '');
 }
 
+function sameEngineer(engineer, person) {
+  return isOwnedByUser({ ownerKey: engineer.loginName, ownerEmail: engineer.email }, person);
+}
+
 async function verifyEngineer(store, candidate, typedEmail) {
   const person = await store.resolvePerson(candidate?.loginName || typedEmail);
   if (!person?.title || !person.loginName ||
@@ -287,7 +294,14 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
           candidate = exact[0];
         }
         const person = await verifyEngineer(store, candidate, assignment.candidate ? '' : query);
-        finish({ state: 'resolved', email: person.email, person });
+        if (!active) return;
+        setDraft(current => {
+          const team = projectEngineers(current);
+          const existing = team.findIndex(engineer => sameEngineer(engineer, person));
+          const verified = { name: person.title, email: person.email, loginName: person.loginName };
+          return { ...current, ...engineerFields(existing < 0 ? [...team, verified] : team.map((engineer, index) => index === existing ? verified : engineer)) };
+        });
+        finish({ state: 'added', email: '', message: `${displayName(person.title)} is on the project team.` });
       } catch (error) {
         finish({ state: 'error', email: assignment.email, matches, error: error.message });
       }
@@ -306,23 +320,21 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
     else setAssignment({ state: 'typing', email: value });
   }
 
-  const unresolved = assignment && assignment.state !== 'empty' && assignment.state !== 'resolved';
+  const unresolved = assignment && assignment.state !== 'empty' && assignment.state !== 'added';
   const automaticStage = project && !project.currentStageKey && workflowData.phases.find(phase => phase.key === displayedStage);
-  const legacyLogin = (draft.ownerKey || '').split('|').pop();
-  const displayedEmail = assignment?.email ?? (draft.ownerEmail || (isEmail(legacyLogin) ? legacyLogin : ''));
-  const displayedName = assignment ? assignment.person?.title || '' : draft.ownerName || '';
+  const engineers = projectEngineers(draft);
   const statusOptions = [...new Set([...PROJECT_STATUSES, ...(draft.status ? [draft.status] : [])])];
 
   async function save() {
     if (saving || unresolved || !draft.title?.trim()) return;
     setSaving(true);
     setSaveError('');
-    const person = assignment?.person;
-    const row = assignment ? {
-      ...draft, ownerName: person?.title || 'Unassigned', ownerEmail: person?.email || assignment.email,
-      ownerKey: person ? userIdentityKey(person) : '',
-    } : draft;
-    try { await onSave(row, person?.loginName); }
+    const row = manager ? { ...draft, ...engineerFields(engineers) } : draft;
+    const teamChanged = manager && JSON.stringify(engineers) !== JSON.stringify(projectEngineers(project || {}));
+    try {
+      if (teamChanged) await onSave(row, engineers.map(engineer => engineer.loginName || engineer.email));
+      else await onSave(row);
+    }
     catch (error) { setSaveError(error.message || 'Could not save the project. Try again.'); }
     finally { setSaving(false); }
   }
@@ -335,24 +347,44 @@ export function ProjectEditor({ project, user, store, manager, displayedStage, o
     <div className="field-grid">
       <Field label="Project name"><input disabled={!manager || saving} value={draft.title || ''} onChange={set('title')} /></Field>
       <Field label="Measurement area"><input disabled={!manager || saving} value={draft.measurementArea || ''} onChange={set('measurementArea')} /></Field>
-      <div className="field">
-        <label htmlFor="project-engineer-email">Project Engineer’s email</label>
-        <PeopleCombobox id="project-engineer-email" value={displayedEmail} disabled={!manager || saving}
-          placeholder={manager ? 'Search by name or email' : 'Unassigned'} listLabel="Matching SharePoint users"
-          matches={assignment?.matches || []} emptyMessage={assignment?.state === 'choose' ? 'No people found. Try another name or email.' : ''}
-          onQuery={changeEmail} onSelect={candidate => {
+      <div className="field field-wide project-team-field">
+        <div className="project-team-heading"><span>Project engineers</span><span className="badge">{engineers.length} assigned</span></div>
+        {engineers.length ? <ul className="project-team-selection" aria-label="Assigned project engineers">{engineers.map((engineer, index) => <li className="project-engineer-chip" key={engineer.loginName || engineer.email || `${engineer.name}-${index}`}>
+          <span className="avatar small" aria-hidden="true">{engineerInitials(engineer)}</span>
+          <span className="project-engineer-identity"><strong>{displayName(engineer.name || engineer.email || engineer.loginName)}</strong><small>{engineer.email || engineer.loginName || 'Existing assignment'}</small></span>
+          {manager && <button type="button" className="icon-button project-engineer-remove" disabled={saving} aria-label={`Remove ${displayName(engineer.name || engineer.email || engineer.loginName)} from project`} title="Remove project engineer" onClick={() => {
             setSaveError('');
-            setAssignment({ state: 'verifying', candidate, email: engineerEmail(candidate) || assignment.email });
-          }}
-          renderOption={person => <><strong>{person.title}</strong><small>{engineerEmail(person) || person.loginName}</small>{person.detail && <small>{person.detail}</small>}</>}
-          action={manager && <button type="button" disabled={saving} onClick={() => setAssignment({ state: 'resolved', person: user, email: engineerEmail(user) })}>Assign me</button>}
-        />
-        {assignment?.state === 'typing' && <small>Enter at least two characters.</small>}
-        {assignment?.state === 'searching' && <small role="status">Searching SharePoint…</small>}
-        {assignment?.state === 'verifying' && <small role="status">Verifying account…</small>}
-        {assignment?.state === 'error' && <small className="inline-error" role="alert">{assignment.error}</small>}
+            setDraft(current => ({ ...current, ...engineerFields(projectEngineers(current).filter((_, position) => position !== index)) }));
+            setAssignment(current => current && !['empty', 'added'].includes(current.state) ? current : { state: 'added', email: '', message: `${displayName(engineer.name || engineer.email || engineer.loginName)} removed from the project team.` });
+            document.getElementById('project-engineer-email')?.focus();
+          }}><Icon name="close" size={14} /></button>}
+        </li>)}</ul> : <p className="project-team-empty">No project engineers assigned.</p>}
+        <div className="project-team-search">
+          <label htmlFor="project-engineer-email">Add project engineer</label>
+          <PeopleCombobox id="project-engineer-email" value={assignment?.email || ''} disabled={!manager || saving}
+            placeholder={manager ? 'Search by name or email' : 'Managed by a Tracker Manager'} listLabel="Matching SharePoint users"
+            matches={(assignment?.matches || []).filter(person => !engineers.some(engineer => sameEngineer(engineer, person)))} emptyMessage={assignment?.state === 'choose' ? 'No additional people found. Try another name or email.' : ''}
+            onQuery={changeEmail} onSelect={candidate => {
+              setSaveError('');
+              setAssignment({ state: 'verifying', candidate, email: engineerEmail(candidate) || assignment.email });
+            }}
+            renderOption={person => <><strong>{person.title}</strong><small>{engineerEmail(person) || person.loginName}</small>{person.detail && <small>{person.detail}</small>}</>}
+            action={manager && <button type="button" disabled={saving || engineers.some(engineer => sameEngineer(engineer, user))} onClick={() => {
+              setSaveError('');
+              setAssignment({ state: 'verifying', candidate: user, email: engineerEmail(user) });
+            }}>Assign me</button>}
+          />
+        </div>
+        <div className="project-team-feedback">
+          {!assignment || assignment.state === 'empty' ? <small>{manager ? 'Add one or more engineers. Each person can access and update this project’s progress.' : 'A Tracker Manager can change this project’s team.'}</small> : null}
+          {assignment?.state === 'added' && <small role="status">{assignment.message}</small>}
+          {assignment?.state === 'typing' && <small>Enter at least two characters.</small>}
+          {assignment?.state === 'searching' && <small role="status">Searching SharePoint…</small>}
+          {assignment?.state === 'verifying' && <small role="status">Verifying account…</small>}
+          {assignment?.state === 'error' && <small className="inline-error" role="alert">{assignment.error}</small>}
+          {manager && unresolved && <button type="button" className="text-button" disabled={saving} onClick={() => setAssignment({ state: 'empty', email: '' })}>Clear search</button>}
+        </div>
       </div>
-      <Field label="Project engineer"><output aria-label="Project engineer">{displayedName || (unresolved ? 'Awaiting verified email' : 'Unassigned')}</output></Field>
       <Field label="Priority"><select disabled={!manager || saving} value={draft.priority || 'Medium'} onChange={set('priority')}>{PRIORITIES.map(item => <option key={item}>{item}</option>)}</select></Field>
       <Field label="Health"><select disabled={saving} value={draft.health || 'Needs Review'} onChange={set('health')}>{HEALTHS.map(item => <option key={item}>{item}</option>)}</select></Field>
       <Field label="Project status"><select disabled={saving} value={draft.status || 'Planned'} onChange={set('status')}>{statusOptions.map(item => <option key={item}>{item}</option>)}</select></Field>
@@ -420,7 +452,7 @@ function TaskEditor({ task, manager, canDeleteDocuments = false, readOnly = fals
       <Field label="Notes" wide><AutoSizeTextarea aria-label="Notes" value={draft.notes || ''} onChange={set('notes')} /></Field>
     </fieldset>
     {persisted && store && <TaskDocuments taskId={draft.id} store={store} readOnly={readOnly || saving || pendingFiles.length > 0} canDelete={canDeleteDocuments && !saving} refreshKey={saving} />}
-    {!readOnly && (!persisted || pendingFiles.length > 0) && <section className="task-documents queued-documents"><h3>Documents</h3><label className="field"><span>Attach documents (up to 50 MB each)</span><input aria-label="Attach documents" className="document-upload" type="file" multiple disabled={saving} onChange={queueFiles} /></label><ul className="document-list">{pendingFiles.map((file) => <li key={file.name}><div className="document-name"><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Uploads when you save</small></div><button type="button" className="text-button" disabled={saving} onClick={() => setPendingFiles((rows) => rows.filter((row) => row !== file))}>Remove</button></li>)}</ul><p className="field-hint">Documents are uploaded with this task when you save.</p></section>}
+    {!readOnly && (!persisted || pendingFiles.length > 0) && <section className="task-documents queued-documents"><h3>Documents</h3><FilePicker label="Attach documents" hint="Up to 50 MB per file. Documents upload when you save the task." ariaLabel="Attach documents" multiple disabled={saving} onChange={queueFiles} /><ul className="document-list">{pendingFiles.map((file) => <li key={file.name}><div className="document-name"><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Uploads when you save</small></div><button type="button" className="text-button" disabled={saving} onClick={() => setPendingFiles((rows) => rows.filter((row) => row !== file))}>Remove</button></li>)}</ul></section>}
   </Modal>;
 }
 
@@ -523,7 +555,7 @@ function ProjectDrawer({ project, user, manager, readOnly, store, users, onDelet
     <div className="marker-scroll"><div className={`mini-pipeline ${progressMode === 'tasks' ? 'task-markers' : ''}`} style={{ gridTemplateColumns: `repeat(${Math.max(1, markers.length)}, minmax(32px, 1fr))`, minWidth: progressMode === 'tasks' ? `${markers.length * 37}px` : undefined }} aria-label={progressMode === 'tasks' ? 'Task progress markers' : 'Phase progress markers'}>{markers.map((item, index) => <span key={item.key} className={item.done ? 'done' : item.current ? 'current' : ''} title={item.label} aria-label={item.label} aria-current={item.current && !item.done ? 'step' : undefined}>{index + 1}</span>)}</div></div>
     <nav className="drawer-tabs">{[['overview', 'Overview'], ['tasks', `Work breakdown (${projectTasks.length})`], ['updates', `Updates (${projectUpdates.length + projectRisks.length})`]].map(([key, label]) => <button className={tab === key ? 'active' : ''} key={key} onClick={() => setTab(key)}>{label}</button>)}</nav></header>
     <div className="drawer-content">
-      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div><span>Project engineer</span><strong>{displayName(project.ownerName)}</strong><small>{project.ownerEmail || 'No SharePoint identity assigned'}</small></div><div><span>Project status</span><strong>{project.status || 'Planned'}</strong></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section><section className="detail-block project-documents"><TaskDocuments projectKey={project.projectKey} store={store} readOnly canDelete={managesProject} refreshKey={taskEditor?.id} onChange={() => setDocumentRevision((value) => value + 1)} /></section></div>}
+      {tab === 'overview' && <div className="drawer-section-stack"><section className="detail-grid"><div className="project-team-detail"><span>Project engineers</span><ProjectTeam project={project} detailed /></div><div><span>Project status</span><strong>{project.status || 'Planned'}</strong></div><div><span>Target completion</span><strong>{displayDate(project.targetFinish)}</strong></div><div><span>Next milestone</span><strong>{project.nextMilestone}</strong><small>{displayDate(project.nextMilestoneDate)}</small></div><div><span>Open actions</span><strong>{projectTasks.filter((task) => !isClosedTask(task)).length}</strong><small>{project.blockedCount} blocked</small></div></section><section className="detail-block"><h3>Upcoming work</h3><div className="upcoming-list">{projectTasks.filter((task) => !isClosedTask(task)).slice(0, 5).map((task) => <button key={task.id} onClick={() => setTaskEditor(task)}><div><strong>{task.title}</strong><small>{workflowData.phases.find((item) => item.key === task.phaseKey)?.short}</small></div><Badge tone={statusTone(task.status)}>{task.status}</Badge></button>)}</div></section><section className="detail-block project-documents"><TaskDocuments projectKey={project.projectKey} store={store} readOnly canDelete={managesProject} refreshKey={taskEditor?.id} onChange={() => setDocumentRevision((value) => value + 1)} /></section></div>}
       {tab === 'tasks' && <div className="phase-task-list">{workflowData.phases.map((stage) => { const stageTasks = projectTasks.filter((task) => task.phaseKey === stage.key); const done = stageTasks.filter(isClosedTask).length; const stageDocuments = projectAttachments.filter((file) => stageTasks.some((task) => task.id === file.taskId)); const documentSummary = stageDocuments.map((file) => `${file.taskTitle}: ${file.name}`).join("\n"); const allNotRequired = stageTasks.length > 0 && stageTasks.every((task) => ['Not Required', 'Not Applicable'].includes(task.status)); return <section key={stage.key} className={`task-stage ${allNotRequired ? 'phase-not-required' : ''}`}><header><div><span>{String(phaseIndex(stage.key) + 1).padStart(2, '0')}</span><strong>{stage.name}</strong></div><div className="phase-header-actions">{!!stageDocuments.length && <span className="phase-document-indicator" tabIndex={0} title={documentSummary} aria-label={`Documents uploaded to ${stage.name}: ${documentSummary}`}><Icon name="paperclip" size={15} /></span>}<Badge>{done}/{stageTasks.length}</Badge>{manager && <button className="icon-button add-task-button" aria-label={`Add task to ${stage.name}`} title={`Add task to ${stage.name}`} onClick={() => setTaskEditor({ id: uid('task'), projectKey: project.projectKey, title: '', phaseKey: stage.key, order: Math.max(0, ...projectTasks.map((task) => task.order || 0)) + 1, status: 'Not Started', ownerName: project.ownerName, ownerKey: project.ownerKey, ownerEmail: project.ownerEmail, dueDate: '' })}><Icon name="plus" size={16} /></button>}{managesProject && <button type="button" className={`phase-required-button ${allNotRequired ? 'active' : ''}`} disabled={!stageTasks.length} aria-label={`${allNotRequired ? 'Restore' : 'Mark'} ${stage.name} ${allNotRequired ? '' : 'not required'}`.trim()} onClick={() => { if (allNotRequired) onSetPhaseRequired(project, stage.key, false); else { setPhaseReason(stage.key); setReason(''); } }}><Icon name={allNotRequired ? 'refresh' : 'ban'} size={13} />{allNotRequired ? 'Restore phase' : 'Not required'}</button>}</div></header><div>{stageTasks.map((task) => { const resolved = isClosedTask(task); return <div key={task.id} className="phase-task" role="button" tabIndex="0" onClick={() => setTaskEditor(task)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTaskEditor(task); } }}><button disabled={readOnly || !managesProject} className={`task-check ${resolved ? 'checked' : ''}`} aria-label={`${resolved ? 'Reopen' : 'Complete'} ${task.title}`} onClick={(event) => { event.stopPropagation(); onToggleTask(task); }}>{resolved && <Icon name="check" size={13} />}</button><div><strong>{task.title}</strong>{task.dataIssue && <small className="issue-text"><Icon name="alert" size={12} />{task.dataIssue}</small>}</div><Badge tone={isOverdue(task) ? 'bad' : statusTone(task.status)}>{task.status === 'Not Applicable' ? 'Not Required' : task.status}</Badge><span className="task-date">{isClosedTask(task) ? 'Resolved' : compactDate(task.dueDate)}</span></div>; })}</div></section>; })}</div>}
       {tab === 'updates' && <ProjectUpdates key={project.projectKey} project={project} tasks={projectTasks} updates={projectUpdates} risks={projectRisks} store={store} canPost={managesProject && !readOnly} onPost={onAddUpdate} onEdit={onEditUpdate} onDelete={onDeleteUpdate} onRefresh={onRefreshUpdates} onTask={setTaskEditor} />}
     </div>
@@ -762,7 +794,7 @@ export function App() {
       const exportProjects = fresh.projects.map((project) => enrichProject(project, fresh.tasks));
       const query = register.search.trim().toLowerCase();
       let scope = exportProjects;
-      if (view === 'overview') scope = scope.filter((project) => (!phaseFilter.length || phaseFilter.includes(project.currentStageKey)) && (!register.health || project.health === register.health) && (!register.organization || project.tasks.some((task) => !isClosedTask(task) && task.organization === register.organization)) && (!query || [project.title, project.measurementArea, project.ownerName, displayName(project.ownerName), project.organization, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)))).map((project) => ({ ...project, progressMode: register.progressMode, ...projectProgress(project.tasks, register.progressMode) }));
+      if (view === 'overview') scope = scope.filter((project) => (!phaseFilter.length || phaseFilter.includes(project.currentStageKey)) && (!register.health || project.health === register.health) && (!register.organization || project.tasks.some((task) => !isClosedTask(task) && task.organization === register.organization)) && (!query || [project.title, project.measurementArea, projectTeamSearch(project), project.organization, project.nextMilestone, project.health].some((value) => String(value || '').toLowerCase().includes(query)))).map((project) => ({ ...project, progressMode: register.progressMode, ...projectProgress(project.tasks, register.progressMode) }));
       if (view === 'my-work') scope = scope.filter((project) => isOwnedByUser(project, user) || project.tasks.some((task) => isOwnedByUser(task, user) && !isClosedTask(task)));
       const attentionTaskIds = view === 'attention' ? new Set(attentionRows(exportProjects, attentionOrganization, attentionControls.search, attentionControls.sort, attentionControls.responsibility).map(({ task }) => task.id)) : null;
       if (attentionTaskIds) scope = scope.filter((project) => project.tasks.some((task) => attentionTaskIds.has(task.id)));

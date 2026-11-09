@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FilePicker } from './FilePicker';
 
 function DocumentActions({ file, busy, canEdit, onDownload, onRename, onDelete }) {
   const [open, setOpen] = useState(false);
@@ -92,7 +93,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     {loading && <p role="status">Loading documents…</p>}
     {!loading && !files.length && <p>No documents attached.</p>}
     <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div>{!compact && <DocumentActions file={file} busy={busy || loading} canEdit={canDelete} onDownload={download} onRename={(row) => setRenaming({ file: row, name: row.name })} onDelete={remove} />}</li>)}</ul>
-    {!readOnly && <label className="field"><span>{busy ? 'Uploading documents…' : 'Attach documents (up to 50 MB each)'}</span><input aria-label="Attach documents" className="document-upload" type="file" multiple disabled={busy || loading} onChange={upload} /></label>}
+    {!readOnly && <FilePicker label={busy ? 'Uploading documents…' : 'Attach documents'} hint="Up to 50 MB each · saved with this task" ariaLabel="Attach documents" disabled={busy || loading} onChange={upload} />}
     {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
   </section>;
 }

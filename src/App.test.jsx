@@ -170,20 +170,22 @@ describe('application shell', () => {
     await act(async () => document.querySelector('[aria-label="Project settings"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Edit project').click());
     expect(document.querySelector('.modal').textContent).not.toContain('Assign project owner');
-    const label = [...document.querySelectorAll('.modal label')].find(row => row.textContent === 'Project Engineer’s email');
+    const label = [...document.querySelectorAll('.modal label')].find(row => row.textContent === 'Add project engineer');
     const owner = label.control;
     const save = () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Save project');
     await act(async () => changeValue(owner, 'Hank'));
     expect(save().disabled).toBe(true);
-    expect(document.querySelector('.modal output').textContent).not.toContain('Old Owner');
+    expect(document.querySelector('.project-team-selection').textContent).toContain('Old Owner');
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 360)); });
     const option = document.querySelector('.modal [role="option"]');
     expect(option.textContent).toContain('Chi, Hank CIV');
     expect(option.textContent).toContain('hank@example.test');
     expect(save().disabled).toBe(true);
     await act(async () => option.click());
-    expect(document.querySelector('.modal output').textContent).toBe('Chi, Hank CIV');
-    expect(owner.value).toBe('hank@example.test');
+    expect(document.querySelector('.project-team-selection').textContent).toContain('Hank Chi');
+    expect(document.querySelectorAll('.project-engineer-chip')).toHaveLength(2);
+    expect(owner.value).toBe('');
+    await act(async () => document.querySelector('[aria-label="Remove Old Owner from project"]').click());
     expect(save().disabled).toBe(false);
     expect(document.querySelector('.owner-edit-option')).toBeNull();
     await act(async () => save().click());
@@ -234,11 +236,11 @@ describe('application shell', () => {
       expect(save.disabled).toBe(true);
       const confirmed = { ...second, title: 'Rivers, Alex' };
       await act(async () => confirm(confirmed));
-      expect(document.querySelector('.modal output').textContent).toBe(confirmed.title);
-      expect(email.value).toBe(confirmed.email);
+      expect(document.querySelector('.project-team-selection').textContent).toContain('Alex Rivers');
+      expect(email.value).toBe('');
       expect(options()).toHaveLength(0);
       await act(async () => save.click());
-      expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ownerName: confirmed.title, ownerEmail: confirmed.email, ownerKey: confirmed.loginName }), confirmed.loginName);
+      expect(onSave).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ownerName: confirmed.title, ownerEmail: confirmed.email, ownerKey: confirmed.loginName, engineers: [{ name: confirmed.title, email: confirmed.email, loginName: confirmed.loginName }] }), [confirmed.loginName]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -271,6 +273,130 @@ describe('application shell', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('adds two verified engineers, prevents duplicates and saves individual removals', async () => {
+    vi.useFakeTimers();
+    try {
+      const people = [
+        { title: 'Avery Engineer', email: 'avery@example.test', loginName: 'claims|avery@example.test' },
+        { title: 'Jordan Engineer', email: 'jordan@example.test', loginName: 'claims|jordan@example.test' },
+      ];
+      const store = {
+        searchPeople: vi.fn(async query => people.filter(person => person.email === query)),
+        resolvePerson: vi.fn(async login => people.find(person => person.loginName === login)),
+      };
+      const onSave = vi.fn();
+      await act(async () => {
+        root = createRoot(document.getElementById('root'));
+        root.render(<ProjectEditor manager store={store} user={people[0]} project={{ id: 'team', title: 'Shared equipment upgrade' }} onClose={() => {}} onSave={onSave} />);
+      });
+      const input = document.querySelector('#project-engineer-email');
+      const save = [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save project');
+      const select = async email => {
+        await act(async () => changeValue(input, email));
+        expect(save.disabled).toBe(true);
+        await act(async () => vi.advanceTimersByTimeAsync(300));
+      };
+      await select(people[0].email);
+      await select(people[1].email);
+      expect([...document.querySelectorAll('.project-engineer-chip strong')].map(el => el.textContent)).toEqual(people.map(person => person.title));
+      expect([...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Assign me').disabled).toBe(true);
+      await select(people[0].email);
+      expect(document.querySelectorAll('.project-engineer-chip')).toHaveLength(2);
+      await act(async () => save.click());
+      expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({
+        engineers: people.map(person => ({ name: person.title, email: person.email, loginName: person.loginName })),
+        ownerName: people[0].title, ownerEmail: people[0].email, ownerKey: people[0].loginName,
+      }), people.map(person => person.loginName));
+      await act(async () => document.querySelector('[aria-label="Remove Avery Engineer from project"]').click());
+      await act(async () => save.click());
+      expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({
+        engineers: [{ name: people[1].title, email: people[1].email, loginName: people[1].loginName }],
+        ownerName: people[1].title, ownerEmail: people[1].email, ownerKey: people[1].loginName,
+      }), [people[1].loginName]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('cancels project team changes without mutating the existing assignments', async () => {
+    const project = { id: 'p', title: 'Existing team', engineers: [
+      { name: 'Avery Engineer', email: 'avery@example.test', loginName: 'claims|avery@example.test' },
+      { name: 'Jordan Engineer', email: 'jordan@example.test', loginName: 'claims|jordan@example.test' },
+    ] };
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root = createRoot(document.getElementById('root'));
+      root.render(<ProjectEditor manager store={{}} user={{}} project={project} onClose={onClose} onSave={onSave} />);
+    });
+    await act(async () => document.querySelector('[aria-label="Remove Avery Engineer from project"]').click());
+    expect(document.querySelectorAll('.project-engineer-chip')).toHaveLength(1);
+    await act(async () => [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Cancel').click());
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(project.engineers).toHaveLength(2);
+  });
+
+  it('only requests assignment changes when the team changes and explicitly saves an empty team', async () => {
+    const project = { id: 'p', title: 'Existing team', ownerName: 'Original Engineer', ownerEmail: 'original@example.test', ownerKey: 'claims|original@example.test' };
+    const onSave = vi.fn();
+    await act(async () => {
+      root = createRoot(document.getElementById('root'));
+      root.render(<ProjectEditor manager store={{}} user={{}} project={project} onClose={() => {}} onSave={onSave} />);
+    });
+    const save = [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save project');
+    await act(async () => save.click());
+    expect(onSave.mock.calls[0]).toHaveLength(1);
+    await act(async () => document.querySelector('[aria-label="Remove Original Engineer from project"]').click());
+    await act(async () => save.click());
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ engineers: [], ownerName: 'Unassigned', ownerEmail: '', ownerKey: '' }), []);
+  });
+
+  it('shows every project engineer in My Work, the register and the project overview', async () => {
+    const raw = createRepository().store;
+    await raw.saveProject({ id: 'team', projectKey: 'team', title: 'Shared modernization', engineers: [
+      { name: 'Avery Engineer', email: 'avery@example.test', loginName: 'claims|avery@example.test' },
+      { name: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local' },
+    ] });
+    await renderApp();
+    const myWork = [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.includes('My work'));
+    expect(myWork.querySelector('.badge').textContent).toBe('1');
+    await act(async () => myWork.click());
+    expect(document.querySelector('.project-card .project-team-display').textContent).toContain('Avery Engineer');
+    expect(document.querySelector('.project-card .project-team-display').textContent).toContain('Local Engineer');
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Portfolio').click());
+    await act(async () => changeValue(document.querySelector('[aria-label="Search portfolio projects"]'), 'local.engineer@example.invalid'));
+    const row = document.querySelector('.project-table-row:not(.table-header)');
+    expect(row.textContent).toContain('Shared modernization');
+    expect(row.textContent).toContain('Avery Engineer');
+    expect(row.textContent).toContain('Local Engineer');
+    await act(async () => row.click());
+    const team = document.querySelector('.project-team-detail');
+    expect(team.textContent).toContain('avery@example.test');
+    expect(team.textContent).toContain('local.engineer@example.invalid');
+  });
+
+  it('lets a second assigned engineer update progress while keeping the project team and due date locked', async () => {
+    const raw = createRepository().store;
+    const engineers = [
+      { name: 'Avery Engineer', email: 'avery@example.test', loginName: 'claims|avery@example.test' },
+      { name: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local' },
+    ];
+    await raw.saveUser({ id: 'engineer', title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', role: 'Project Engineer' });
+    await raw.saveProject({ id: 'team', projectKey: 'team', title: 'Shared equipment', engineers, health: 'On Track', targetFinish: '2027-01-01' });
+    await renderApp(false);
+    await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
+    await act(async () => document.querySelector('[aria-label="Project settings"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Edit project').click());
+    expect(document.querySelectorAll('.project-engineer-chip')).toHaveLength(2);
+    expect(document.querySelector('#project-engineer-email').disabled).toBe(true);
+    expect(document.querySelector('.project-engineer-remove')).toBeNull();
+    const field = label => [...document.querySelectorAll('.modal label')].find(el => el.firstElementChild?.textContent === label).querySelector('input,select,textarea');
+    expect(field('Target completion').disabled).toBe(true);
+    expect(field('Project name').disabled).toBe(true);
+    await act(async () => changeValue(field('Health'), 'At Risk'));
+    await act(async () => [...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Save project').click());
+    expect((await createRepository().store.load()).projects[0]).toMatchObject({ engineers, health: 'At Risk', targetFinish: '2027-01-01' });
+  });
+
   it('discards a stale engineer lookup and retries a new project with the same identity and IDs', async () => {
     vi.useFakeTimers();
     try {
@@ -297,7 +423,7 @@ describe('application shell', () => {
       expect(save.disabled).toBe(true);
       await act(async () => vi.advanceTimersByTimeAsync(300));
       await act(async () => finishFirstLookup([{ title: 'Engineer One', email: 'one@example.test', loginName: 'claims|one@example.test' }]));
-      expect(document.querySelector('.modal output').textContent).toBe(engineer.title);
+      expect(document.querySelector('.project-team-selection').textContent).toContain(engineer.title);
       expect(onSave).not.toHaveBeenCalled();
       await act(async () => save.click());
       expect(document.querySelector('.modal [role="alert"]').textContent).toBe('Permission update interrupted');
@@ -306,7 +432,8 @@ describe('application shell', () => {
       expect(onSave.mock.calls[1]).toEqual(onSave.mock.calls[0]);
       expect(onSave.mock.calls[1]).toEqual([expect.objectContaining({
         id: expect.any(String), projectKey: expect.any(String), ownerKey: engineer.loginName, ownerName: engineer.title, ownerEmail: engineer.email,
-      }), engineer.loginName]);
+        engineers: [{ name: engineer.title, email: engineer.email, loginName: engineer.loginName }],
+      }), [engineer.loginName]]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -351,7 +478,8 @@ describe('application shell', () => {
     const field = label => [...document.querySelectorAll('.modal label')].find(el => el.firstElementChild?.textContent === label).querySelector('input,select,textarea');
     for (const label of ['Project name', 'Measurement area', 'Target completion', 'Priority', 'Description']) expect(field(label).disabled, label).toBe(true);
     expect(document.querySelector('#project-engineer-email').disabled).toBe(true);
-    expect(document.querySelector('.modal output').textContent).toBe('Legacy engineer');
+    expect(document.querySelector('.project-team-selection').textContent).toContain('Legacy engineer');
+    expect(document.querySelector('.project-engineer-remove')).toBeNull();
     expect(field('Current stage').value).toBe('');
     expect(field('Current stage').selectedOptions[0].textContent).toMatch(/Follow work breakdown.*Procurement/i);
     expect(field('Project status').value).toBe('Active');
@@ -583,7 +711,7 @@ describe('application shell', () => {
     await raw.saveTask({ id: 'zn', projectKey: 'z', title: 'Zulu milestone', phaseKey: 'requirement', status: 'Not Started' });
     await renderApp();
     const first = () => document.querySelector('.project-table-row:not(.table-header) > span > strong').textContent;
-    for (const [label, ascending] of [['Project engineer', 'Zulu'], ['Organization', 'Alpha'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
+    for (const [label, ascending] of [['Project engineers', 'Zulu'], ['Organization', 'Alpha'], ['Stage', 'Zulu'], ['Health', 'Alpha'], ['Progress', 'Zulu'], ['Next milestone', 'Alpha'], ['Project', 'Alpha']]) {
       const heading = () => [...document.querySelectorAll('.table-sort')].find((button) => button.textContent.startsWith(label));
       await act(async () => heading().click());
       expect(first(), `${label} ascending`).toBe(ascending);

@@ -73,4 +73,4 @@ foreach ($group in $groups) {
   $list.RoleAssignments.Add($group, $binding) | Out-Null
 }
 $ctx.ExecuteQuery()
-Write-Host "Configured $title. Open the Tracker feedback dialog as a site owner and select Enable manager history access. Test submission as a Viewer and history editing as a Tracker Manager."
+Write-Host "Configured $title. Open the Tracker feedback dialog as a site owner and select Enable manager history access, then Enable private attachments. The app creates a separate private document library with verified matching permissions. Test submission as a Viewer and history editing as a Tracker Manager."

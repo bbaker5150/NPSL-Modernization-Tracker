@@ -166,21 +166,24 @@ describe('explicit manager assignment of a project engineer', () => {
   it('reuses an entry added by another manager while SharePoint is confirming membership', async () => {
     const { store, user } = fixture();
     const newEntry = { spId: 7, id: 'concurrent-invite', loginName: account.LoginName, email: account.Email, role: 'Viewer' };
-    store.directoryRows.mockResolvedValueOnce([]).mockResolvedValueOnce([newEntry]);
+    store.directoryRows.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([newEntry]);
     await store.saveProject(project, account.LoginName);
     expect(store.create.mock.calls.map(([key]) => key)).toEqual(['projects']);
     expect(user()).toMatchObject({ RecordId: newEntry.id, AppRole: 'Project Engineer' });
+    expect(await store.directoryRows.mock.results.at(-1).value).toEqual([expect.objectContaining({ id: newEntry.id, role: 'Project Engineer' })]);
   });
   it('preserves a concurrent manager promotion observed on the directory recheck', async () => {
     const { store, groups, acl } = fixture();
-    store.directoryRows.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+    const promoted = { spId: 7, id: 'concurrent-manager', loginName: account.LoginName, email: account.Email, role: 'Manager' };
+    store.directoryRows.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockImplementationOnce(async () => {
       groups[2].members.push(account);
-      return [{ spId: 7, id: 'concurrent-manager', loginName: account.LoginName, email: account.Email, role: 'Manager' }];
-    });
+      return [promoted];
+    }).mockResolvedValue([promoted]);
     await store.saveProject(project, account.LoginName);
     expect(store.update).not.toHaveBeenCalled();
     expect(store.create.mock.calls.map(([key]) => key)).toEqual(['projects']);
     expect(groups[2].members).toEqual([account]);
+    expect(await store.directoryRows.mock.results.at(-1).value).toEqual([promoted]);
     expect([...acl.values()]).toEqual([[], [], [], []]);
   });
   it('restores editing on all active projects assigned to a returning engineer, including after an interruption', async () => {
@@ -199,5 +202,203 @@ describe('explicit manager assignment of a project engineer', () => {
     await expect(store.saveProject(project, account.LoginName)).rejects.toThrow('Project saved, but its access setup is incomplete');
     await store.saveProject(project, account.LoginName);
     expect(attempted).toEqual([project.id, owned.id, project.id, owned.id]);
+  });
+});
+
+describe('manager assignment of project teams', () => {
+  const second = { ...account, Id: 14, Title: 'Second Engineer', LoginName: 'claims|second@example.test', Email: 'second@example.test' };
+  const retained = { ...account, Id: 15, Title: 'Retained Engineer', LoginName: 'claims|retained@example.test', Email: 'retained@example.test' };
+  const accounts = [account, second, retained];
+  const engineer = item => ({ name: item.Title, email: item.Email, loginName: item.LoginName });
+  function teamFixture({ roles = [], projects = [] } = {}) {
+    const store = new SharePointStore({ webUrl: 'https://tenant.sharepoint.com/sites/metsoft', scopedAccess: true });
+    const groups = [TRACKER_USERS_GROUP, TRACKER_GROUPS['Project Engineer'], TRACKER_GROUPS.Manager].map((Title, i) => ({ Id: i + 1, Title, members: [] }));
+    const users = new Map();
+    let userId = 100;
+    for (const [person, role] of roles) {
+      const Id = ++userId;
+      users.set(Id, { Id, RecordId: `saved-${person.Id}`, Title: person.Title, LoginKey: person.LoginName, Email: person.Email, AppRole: role });
+      groups[0].members.push(person);
+      if (role === 'Project Engineer') groups[1].members.push(person);
+      if (role === 'Manager') groups[2].members.push(person);
+    }
+    const savedProjects = new Map();
+    const timeline = [];
+    const directory = () => [...users.values()].map(row => ({ id: row.RecordId, spId: row.Id, title: row.Title, loginName: row.LoginKey, email: row.Email, role: row.AppRole }));
+    store.currentUser = vi.fn(async () => ({ loginName: 'actor' }));
+    store.permissions.currentRole = vi.fn(async () => ({ role: 'Manager' }));
+    store.directoryRows = vi.fn(async () => directory());
+    store.permissionProjects = vi.fn(async () => [...projects, ...[...savedProjects].map(([spId, row]) => ({ spId, id: row.RecordId, projectKey: row.ProjectKey, ownerKey: row.OwnerKey, engineers: JSON.parse(row.EngineersJson || '[]') }))]);
+    store.permissions.syncProject = vi.fn();
+    store.get = vi.fn(async path => {
+      const user = path.match(/ModernizationUsers'\)\/items\((\d+)\)/);
+      if (user) return users.get(Number(user[1]));
+      if (path.includes('/sitegroups/getbyname')) return groups.find(group => decodeURIComponent(path).includes(`('${group.Title}')`));
+      const membership = path.match(/sitegroups\((\d+)\)\/users/);
+      if (membership) return { value: groups[Number(membership[1]) - 1].members };
+      if (path.includes('/getusereffectivepermissions')) return { GetUserEffectivePermissions: { Low: '0' } };
+      throw new Error(`Unexpected GET ${path}`);
+    });
+    store.post = vi.fn(async (path, options) => {
+      if (path.includes('/ensureuser?')) {
+        timeline.push(`resolve:${options.body.logonName}`);
+        const person = accounts.find(item => item.LoginName.toLowerCase() === options.body.logonName.toLowerCase());
+        if (!person) throw new Error('Unknown account');
+        return person;
+      }
+      const membership = path.match(/sitegroups\((\d+)\)\/users$/);
+      if (membership) {
+        timeline.push(`enroll:${options.body.LoginName}`);
+        const person = accounts.find(item => item.LoginName === options.body.LoginName);
+        if (!person) throw new Error('Unknown group member');
+        groups[Number(membership[1]) - 1].members.push(person);
+        return;
+      }
+      throw new Error(`Unexpected POST ${path}`);
+    });
+    store.update = vi.fn(async (key, id, fields) => {
+      if (key === 'users') users.set(id, { Id: id, ...fields });
+      else if (key === 'projects') savedProjects.set(id, fields);
+      else throw new Error(`Unexpected update ${key}`);
+    });
+    store.create = vi.fn(async (key, fields) => {
+      if (key === 'users') { const Id = ++userId; users.set(Id, { Id, ...fields }); return Id; }
+      if (key === 'projects') { savedProjects.set(8, fields); return 8; }
+      throw new Error(`Unexpected create ${key}`);
+    });
+    return { store, groups, users, directory, timeline, saved: () => savedProjects.get(8) };
+  }
+
+  it('enrolls every selected account, writes canonical team JSON, and mirrors the first verified engineer', async () => {
+    const { store, groups, saved, directory, timeline } = teamFixture();
+    const result = await store.saveProject(project, [account.LoginName, second.LoginName]);
+    expect(result).toMatchObject({ spId: 8, ownerName: account.Title, ownerEmail: account.Email, ownerKey: account.LoginName, engineers: [engineer(account), engineer(second)] });
+    expect(saved()).toMatchObject({ EngineersJson: JSON.stringify([engineer(account), engineer(second)]), OwnerName: account.Title, OwnerEmail: account.Email, OwnerKey: account.LoginName });
+    expect(directory().map(row => [row.loginName, row.role])).toEqual([[account.LoginName, 'Project Engineer'], [second.LoginName, 'Project Engineer']]);
+    expect(groups.map(group => group.members.map(row => row.LoginName))).toEqual([[account.LoginName, second.LoginName], [account.LoginName, second.LoginName], []]);
+    expect(timeline.slice(0, 2)).toEqual([`resolve:${account.LoginName}`, `resolve:${second.LoginName}`]);
+    expect(store.permissions.syncProject).toHaveBeenCalledExactlyOnceWith(result, directory());
+  });
+
+  it('normalizes duplicate logins before resolving or enrolling accounts', async () => {
+    const { store, groups, saved } = teamFixture();
+    await store.saveProject(project, [account.LoginName, ` ${account.LoginName.toUpperCase()} `, second.LoginName, second.LoginName]);
+    expect(store.post.mock.calls.filter(([path]) => path.includes('/ensureuser?'))).toHaveLength(2);
+    expect(JSON.parse(saved().EngineersJson)).toEqual([engineer(account), engineer(second)]);
+    expect(groups[1].members).toEqual([account, second]);
+    expect(store.create.mock.calls.map(([key]) => key)).toEqual(['users', 'users', 'projects']);
+  });
+
+  it('clears a team explicitly without reusing stale legacy owner fields or demoting its members', async () => {
+    const { store, groups, saved, directory } = teamFixture({ roles: [[account, 'Project Engineer'], [second, 'Project Engineer']] });
+    const result = await store.saveProject({ ...project, engineers: [engineer(account), engineer(second)], ownerKey: account.LoginName }, []);
+    expect(saved()).toMatchObject({ EngineersJson: '[]', OwnerName: 'Unassigned', OwnerEmail: '', OwnerKey: '' });
+    expect(result.engineers).toEqual([]);
+    expect(store.post).not.toHaveBeenCalled();
+    expect(groups[1].members).toEqual([account, second]);
+    expect(directory().every(row => row.role === 'Project Engineer')).toBe(true);
+    expect(store.permissions.syncProject).toHaveBeenCalledExactlyOnceWith(result, directory());
+  });
+
+  it('restores returning engineers on other team projects using the complete directory so retained teammates keep access', async () => {
+    const other = { id: 'existing-team', spId: 20, projectKey: 'other', engineers: [engineer(retained), engineer(account)] };
+    const unrelated = { id: 'unrelated', spId: 21, projectKey: 'elsewhere', engineers: [engineer(retained)] };
+    const { store, directory } = teamFixture({ roles: [[account, 'Viewer'], [retained, 'Project Engineer']], projects: [other, unrelated, { ...other, id: 'archived', spId: 22, archived: true }] });
+    await store.saveProject(project, [account.LoginName, second.LoginName]);
+    expect(store.permissions.syncProject.mock.calls.map(([row]) => row.id)).toEqual([project.id, other.id]);
+    const completeDirectory = directory();
+    expect(completeDirectory).toHaveLength(3);
+    for (const [, users] of store.permissions.syncProject.mock.calls) {
+      expect(users).toEqual(completeDirectory);
+      expect(users).toEqual(expect.arrayContaining([expect.objectContaining({ loginName: retained.LoginName, role: 'Project Engineer' })]));
+    }
+  });
+
+  it('does not re-promote a retained Viewer when a different engineer is replaced', async () => {
+    const existing = { ...project, spId: 8, engineers: [engineer(account), engineer(second)] };
+    const { store, groups, directory, saved } = teamFixture({ roles: [[account, 'Project Engineer'], [second, 'Viewer']], projects: [existing] });
+    const result = await store.saveProject(existing, [second.LoginName, retained.LoginName]);
+    expect(result.engineers).toEqual([engineer(second), engineer(retained)]);
+    expect(saved()).toMatchObject({ OwnerKey: second.LoginName, EngineersJson: JSON.stringify([engineer(second), engineer(retained)]) });
+    expect(directory().find(row => row.loginName === second.LoginName).role).toBe('Viewer');
+    expect(directory().find(row => row.loginName === retained.LoginName).role).toBe('Project Engineer');
+    expect(groups[1].members.map(row => row.LoginName)).toEqual([account.LoginName, retained.LoginName]);
+    expect(store.post.mock.calls.filter(([path]) => path.includes('/sitegroups(')).every(([, options]) => options.body.LoginName === retained.LoginName)).toBe(true);
+    expect(store.update.mock.calls.filter(([key]) => key === 'users')).toEqual([]);
+    expect(store.permissions.syncProject).toHaveBeenCalledExactlyOnceWith(result, directory());
+  });
+
+  it('preserves a retained engineer demoted to Viewer after the team preflight read', async () => {
+    const existing = { ...project, spId: 8, engineers: [engineer(account), engineer(second)] };
+    const { store, groups, users, directory, saved } = teamFixture({ roles: [[account, 'Project Engineer'], [second, 'Project Engineer']], projects: [existing] });
+    let reads = 0;
+    store.directoryRows.mockImplementation(async () => {
+      if (++reads === 2) {
+        // Another manager completes the demotion after the initial team snapshot,
+        // before this retained account's enrollment starts.
+        const row = [...users.values()].find(item => item.LoginKey === second.LoginName);
+        users.set(row.Id, { ...row, AppRole: 'Viewer' });
+        groups[1].members = groups[1].members.filter(item => item.LoginName !== second.LoginName);
+      }
+      return directory();
+    });
+    const result = await store.saveProject(existing, [second.LoginName, retained.LoginName]);
+    expect(directory().find(row => row.loginName === second.LoginName).role).toBe('Viewer');
+    expect(groups[1].members.map(row => row.LoginName)).toEqual([account.LoginName, retained.LoginName]);
+    expect(store.post.mock.calls.filter(([path]) => path.includes('/sitegroups(')).every(([, options]) => options.body.LoginName === retained.LoginName)).toBe(true);
+    expect(store.update.mock.calls.filter(([key]) => key === 'users')).toEqual([]);
+    expect(saved().EngineersJson).toBe(JSON.stringify([engineer(second), engineer(retained)]));
+    expect(store.permissions.syncProject).toHaveBeenCalledExactlyOnceWith(result, directory());
+  });
+
+  it('stops the project save when a retained engineer is demoted during live role verification', async () => {
+    const existing = { ...project, spId: 8, engineers: [engineer(account), engineer(second)] };
+    const { store, groups, users, directory } = teamFixture({ roles: [[account, 'Project Engineer'], [second, 'Project Engineer']], projects: [existing] });
+    const verify = store.permissions.ensureAssignmentRole.bind(store.permissions);
+    store.permissions.ensureAssignmentRole = vi.fn(async (...args) => {
+      const role = await verify(...args);
+      const row = [...users.values()].find(item => item.LoginKey === second.LoginName);
+      users.set(row.Id, { ...row, AppRole: 'Viewer' });
+      groups[1].members = groups[1].members.filter(item => item.LoginName !== second.LoginName);
+      return role;
+    });
+    await expect(store.saveProject(existing, [second.LoginName, retained.LoginName])).rejects.toThrow('changed to Viewer during assignment');
+    expect(directory().find(row => row.loginName === second.LoginName).role).toBe('Viewer');
+    expect(store.create).not.toHaveBeenCalled(); expect(store.update).not.toHaveBeenCalled();
+    expect(store.permissions.syncProject).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unresolved second identity before any first-engineer enrollment or project write', async () => {
+    const { store, groups, timeline } = teamFixture();
+    await expect(store.saveProject(project, [account.LoginName, 'claims|missing@example.test'])).rejects.toThrow('Unknown account');
+    expect(timeline.every(item => item.startsWith('resolve:'))).toBe(true);
+    expect(groups.every(group => !group.members.length)).toBe(true);
+    expect(store.create).not.toHaveBeenCalled(); expect(store.update).not.toHaveBeenCalled();
+    expect(store.permissions.syncProject).not.toHaveBeenCalled();
+  });
+
+  it('checks every directory identity before enrolling the first engineer', async () => {
+    const { store, groups, timeline } = teamFixture();
+    store.directoryRows.mockResolvedValue([{ id: 'conflict', loginName: 'claims|different-account', email: second.Email, role: 'Viewer' }]);
+    await expect(store.saveProject(project, [account.LoginName, second.LoginName])).rejects.toThrow('conflicting Tracker directory identities');
+    expect(timeline.every(item => item.startsWith('resolve:'))).toBe(true);
+    expect(groups.every(group => !group.members.length)).toBe(true);
+    expect(store.create).not.toHaveBeenCalled(); expect(store.update).not.toHaveBeenCalled();
+  });
+
+  it('does not resolve accounts or write anything when the new team column has not been provisioned', async () => {
+    const { store } = teamFixture();
+    store.schemaReadiness = { checks: [{ key: 'projects', missingFields: ['EngineersJson'] }] };
+    await expect(store.saveProject(project, [account.LoginName, second.LoginName])).rejects.toThrow('site owner');
+    expect(store.post).not.toHaveBeenCalled(); expect(store.create).not.toHaveBeenCalled(); expect(store.update).not.toHaveBeenCalled();
+    expect(store.permissions.syncProject).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy single-engineer writes compatible before the team column is added', async () => {
+    const { store, saved } = teamFixture();
+    store.schemaReadiness = { checks: [{ key: 'projects', missingFields: ['EngineersJson'] }] };
+    await store.saveProject(project, account.LoginName);
+    expect(saved()).toMatchObject({ OwnerKey: account.LoginName, OwnerName: account.Title });
+    expect(saved()).not.toHaveProperty('EngineersJson');
   });
 });

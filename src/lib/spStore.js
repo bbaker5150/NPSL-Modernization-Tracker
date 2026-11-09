@@ -1,5 +1,6 @@
 import { TrackerLists, displayListTitle, legacyListTitle } from './trackerLists';
 import { assignmentDirectoryUser, isOwnedByUser, matchesAssignmentLogin, normalizeDirectory } from './identity';
+import { decodeProjectEngineers, engineerFields, projectEngineers } from './projectEngineers';
 import { trackerPageUrl, normalizeInvitationUrl, parsePeopleResults } from './peoplePicker';
 import { validateAttachment, validateAttachmentName } from './taskAttachments';
 import { normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations, ROLES } from '../data/workflow';
@@ -13,7 +14,7 @@ const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', 
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
 // These audit columns enhance editing; older lists remain safe to read without them.
 const UPDATE_EDIT_FIELDS = new Set(['EditedAt', 'EditorName', 'EditorKey']);
-const optionalForReading = (key, name) => key === 'updates' && UPDATE_EDIT_FIELDS.has(name);
+const optionalForReading = (key, name) => (key === 'updates' && UPDATE_EDIT_FIELDS.has(name)) || (key === 'projects' && name === 'EngineersJson');
 
 export const CONTAINERS = [
   {
@@ -21,6 +22,7 @@ export const CONTAINERS = [
       ['RecordId', 'Record ID', FIELD.TEXT, true], ['ProjectKey', 'Project Key', FIELD.TEXT, true],
       ['MeasurementArea', 'Measurement Area', FIELD.TEXT], ['Description', 'Description', FIELD.NOTE],
       ['OwnerName', 'Owner', FIELD.TEXT], ['OwnerEmail', 'Owner Email', FIELD.TEXT], ['OwnerKey', 'Owner Identity Key', FIELD.TEXT, true],
+      ['EngineersJson', 'Project Engineers', FIELD.NOTE],
       ['Organization', 'Organization', FIELD.TEXT], ['OwnerCanEdit', 'Project Owner Can Edit', FIELD.BOOLEAN],
       ['Priority', 'Priority', FIELD.TEXT], ['Health', 'Health', FIELD.TEXT], ['ProjectStatus', 'Status', FIELD.TEXT],
       ['CurrentStageKey', 'Current Stage', FIELD.TEXT], ['PercentComplete', 'Percent Complete', FIELD.NUMBER], ['ProgressMode', 'Progress Mode', FIELD.TEXT],
@@ -106,15 +108,19 @@ const projectTrackingFields = (row) => ({
   Health: row.health, ProjectStatus: row.status, CurrentStageKey: row.currentStageKey,
 });
 
-const projectFields = (row) => ({
-  Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
-  Description: row.description, OwnerName: row.ownerName, OwnerEmail: row.ownerEmail, OwnerKey: row.ownerKey || '',
-  Priority: row.priority, ...projectTrackingFields(row),
-  Organization: normalizeOrganization(row.organization), OwnerCanEdit: !!row.ownerCanEdit,
-  PercentComplete: row.percentComplete, ProgressMode: row.progressMode || 'phases', TargetFinish: sharePointDate(row.targetFinish),
-  NextMilestone: row.nextMilestone, NextMilestoneDate: sharePointDate(row.nextMilestoneDate), SourceNotes: row.sourceNotes,
-  ImportedBaseline: !!row.importedBaseline, TagsJson: JSON.stringify(row.tags || []),
-});
+const projectFields = (row) => {
+  const team = engineerFields(projectEngineers(row));
+  return {
+    Title: row.title, RecordId: row.id, ProjectKey: row.projectKey, MeasurementArea: row.measurementArea,
+    Description: row.description, OwnerName: team.ownerName, OwnerEmail: team.ownerEmail, OwnerKey: team.ownerKey,
+    EngineersJson: JSON.stringify(team.engineers),
+    Priority: row.priority, ...projectTrackingFields(row),
+    Organization: normalizeOrganization(row.organization), OwnerCanEdit: !!row.ownerCanEdit,
+    PercentComplete: row.percentComplete, ProgressMode: row.progressMode || 'phases', TargetFinish: sharePointDate(row.targetFinish),
+    NextMilestone: row.nextMilestone, NextMilestoneDate: sharePointDate(row.nextMilestoneDate), SourceNotes: row.sourceNotes,
+    ImportedBaseline: !!row.importedBaseline, TagsJson: JSON.stringify(row.tags || []),
+  };
+};
 
 const taskTrackingFields = (row) => ({
   Organization: normalizeOrganization(row.organization), SubAssignment: row.subAssignment || '', TaskStatus: row.status,
@@ -145,10 +151,14 @@ const acronymFields = (row) => ({
 });
 
 function fromProject(item) {
+  let engineers;
+  try { engineers = decodeProjectEngineers(item.EngineersJson, { ownerName: item.OwnerName, ownerEmail: item.OwnerEmail, ownerKey: item.OwnerKey }); }
+  catch (error) { throw new Error(`${item.Title || item.ProjectKey || 'Project'}: ${error.message}`); }
   return {
     spId: item.Id, id: item.RecordId, projectKey: item.ProjectKey, title: item.Title,
     measurementArea: item.MeasurementArea || item.Title, description: item.Description || '', ownerName: item.OwnerName || 'Unassigned',
     ownerEmail: item.OwnerEmail || '', ownerKey: item.OwnerKey || '',
+    ...engineerFields(engineers),
     organization: normalizeOrganization(item.Organization), ownerCanEdit: !!item.OwnerCanEdit,
     priority: item.Priority || 'Medium', health: item.Health || 'Needs Review', status: item.ProjectStatus || 'Planned',
     currentStageKey: item.CurrentStageKey ? phaseKey(item.CurrentStageKey) : '', percentComplete: Number(item.PercentComplete || 0), progressMode: item.ProgressMode === 'tasks' ? 'tasks' : 'phases',
@@ -689,23 +699,29 @@ export class SharePointStore {
     return fromUser(item);
   }
 
-  async #onboardProjectEngineer(loginName) {
+  async #resolveProjectEngineer(loginName) {
+    if (typeof loginName !== 'string' || !loginName.trim()) throw new Error('Select a resolved SharePoint account for every project engineer.');
     const account = await this.#ensureSiteUser(loginName, true);
     const upn = account.LoginName.split('|').pop();
     const email = account.Email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(upn) ? upn : '');
     const person = { title: account.Title, email, loginName: account.LoginName };
     if (!Number.isSafeInteger(account.Id) || account.Id <= 0 || account.PrincipalType !== 1 ||
         !matchesAssignmentLogin(loginName, person)) throw new Error('SharePoint did not verify the selected individual account. Search for the project engineer again.');
+    return { person, account };
+  }
+
+  async #onboardProjectEngineer({ person, account }, preserveViewer = false) {
     let enrollment = this.#assignmentEnrollments.get(account.Id);
     if (!enrollment) {
-      enrollment = this.#enrollProjectEngineer(person, account).finally(() => this.#assignmentEnrollments.delete(account.Id));
+      enrollment = this.#enrollProjectEngineer(person, account, preserveViewer).finally(() => this.#assignmentEnrollments.delete(account.Id));
       this.#assignmentEnrollments.set(account.Id, enrollment);
     }
     return enrollment;
   }
 
-  async #enrollProjectEngineer(person, account) {
+  async #enrollProjectEngineer(person, account, preserveViewer = false) {
     const previous = assignmentDirectoryUser(await this.directoryRows(), person);
+    if (preserveViewer && previous?.role === 'Viewer') return { ...person, role: 'Viewer' };
     const verifyRole = savedRole => this.permissions
       ? this.permissions.ensureAssignmentRole(person, savedRole, account.IsSiteAdmin === true)
       : savedRole === 'Manager' ? 'Manager' : 'Project Engineer';
@@ -727,27 +743,43 @@ export class SharePointStore {
 
   async saveProject(row, assignedLogin) {
     const manager = this.permissions && (await this.permissions.currentRole(await this.currentUser())).role === 'Manager';
-    let assignee;
-    if (assignedLogin !== undefined) {
-      if (this.permissions && !manager) throw new Error('Only managers can assign a project engineer.');
-      assignee = await this.#onboardProjectEngineer(assignedLogin);
-      row = { ...row, ownerName: assignee.title, ownerKey: assignee.loginName, ownerEmail: assignee.email };
-    }
-    if (!this.permissions) return row.spId ? (await this.update('projects', row.spId, projectFields(row)), row) : { ...row, spId: await this.create('projects', projectFields(row)) };
-    // A retry after a partial permission update reuses the already-saved project.
-    const projects = await this.permissionProjects();
+    // Read the existing team before enrollment. Changing another teammate must
+    // not undo a deliberate Viewer demotion for someone still on the roster.
+    const projects = this.permissions || Array.isArray(assignedLogin) ? await this.permissionProjects() : [];
     const existing = projects.find(project => project.id === row.id);
+    let assignees = [];
+    const teamAvailable = !this.schemaReadiness?.checks.some(check => check.key === 'projects' && check.missingFields.includes('EngineersJson'));
+    if (assignedLogin !== undefined) {
+      if (this.permissions && !manager) throw new Error('Only managers can assign project engineers.');
+      const logins = [...new Set((Array.isArray(assignedLogin) ? assignedLogin : [assignedLogin]).map(login => typeof login === 'string' ? login.trim().toLowerCase() : login))];
+      if (!teamAvailable && logins.length > 1) throw new Error('A site owner must open the updated Tracker to add the Project Engineers column before multiple engineers can be assigned.');
+      // Verify every selected identity before changing any group membership.
+      const accounts = await Promise.all(logins.map(login => this.#resolveProjectEngineer(login)));
+      const directory = await this.directoryRows();
+      for (const { person } of accounts) assignmentDirectoryUser(directory, person);
+      for (const account of accounts) {
+        const retained = Array.isArray(assignedLogin) && existing && isOwnedByUser(existing, account.person);
+        const entry = assignmentDirectoryUser(directory, account.person);
+        assignees.push(retained && entry?.role === 'Viewer' ? { ...account.person, role: 'Viewer' } : await this.#onboardProjectEngineer(account, retained));
+      }
+      row = { ...row, ...engineerFields(assignees) };
+    }
+    if (!teamAvailable && projectEngineers(row).length > 1) throw new Error('A site owner must open the updated Tracker to add the Project Engineers column before multiple engineers can be saved.');
+    const fields = projectFields(row);
+    if (!teamAvailable) delete fields.EngineersJson;
+    if (!this.permissions) return row.spId ? (await this.update('projects', row.spId, fields), row) : { ...row, spId: await this.create('projects', fields) };
+    // A retry after a partial permission update reuses the already-saved project.
     const saved = { ...row, spId: existing?.spId || row.spId };
-    if (saved.spId) await this.update('projects', saved.spId, projectFields(saved));
-    else saved.spId = await this.create('projects', projectFields(saved));
+    if (saved.spId) await this.update('projects', saved.spId, fields);
+    else saved.spId = await this.create('projects', fields);
     if (manager) {
       try {
-        const users = assignee ? [assignee] : await this.directoryRows();
+        const users = await this.directoryRows();
         await this.permissions.syncProject(saved, users);
         // A demoted Viewer may still own other projects whose direct grants
         // were revoked. Recheck those assignments on an explicit retry too.
-        if (assignee?.role === 'Project Engineer') {
-          for (const other of projects.filter(entry => entry.id !== saved.id && !entry.archived && isOwnedByUser(entry, assignee))) {
+        if (assignees.some(person => person.role === 'Project Engineer')) {
+          for (const other of projects.filter(entry => entry.id !== saved.id && !entry.archived && assignees.some(person => person.role === 'Project Engineer' && isOwnedByUser(entry, person)))) {
             await this.permissions.syncProject(other, users);
           }
         }

@@ -122,20 +122,27 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
-  const engineerEmail = frame.getByLabel('Project Engineer’s email', { exact: true });
+  const engineerEmail = frame.getByLabel('Add project engineer', { exact: true });
   await engineerEmail.fill('sme@');
   await frame.getByRole('option', { name: /SME Test User.*sme@example\.test/i }).click();
-  await frame.locator('.modal output[aria-label="Project engineer"]').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.locator('.project-engineer-chip').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.getByRole('button', { name: 'Assign me', exact: true }).click();
+  await frame.locator('.project-engineer-chip').filter({ hasText: 'Local Engineer' }).waitFor();
+  if (await frame.locator('.project-engineer-chip').count() !== 2) errors.push('Two project engineers were not selected');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
       const layout = await engineerEmail.evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
       if (!layout || await frame.locator('.modal input[type="checkbox"]').count()) errors.push('Project engineer field is cramped or retired checkbox remains');
+      const teamFits = await frame.locator('.project-team-selection').evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+      if (!teamFits) errors.push(`Project team overflows at ${width}px in ${theme} theme`);
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await frame.getByRole('button', { name: 'Save project', exact: true }).click();
+  await frame.locator('.project-team-detail').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.locator('.project-team-detail').filter({ hasText: 'Local Engineer' }).waitFor();
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.locator('.drawer-progress').click();
   if (await frame.locator('.drawer-header-actions .project-menu-popover').count()) errors.push('Settings menu did not dismiss on outside click');

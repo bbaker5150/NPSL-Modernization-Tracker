@@ -1,4 +1,5 @@
 import { normalizeRole, ROLES } from '../data/workflow';
+import { projectEngineers } from './projectEngineers';
 
 export function userIdentityKey(user) {
   if (!user) return '';
@@ -29,6 +30,8 @@ function hasIdentityAlias(record, user) {
 }
 
 export function isOwnedByUser(record, user) {
+  if (record?.engineers != null) return projectEngineers(record).some(person =>
+    isOwnedByUser({ ownerKey: person.loginName, ownerEmail: person.email }, user));
   const ownerLogin = String(record?.ownerKey || '').trim().toLowerCase();
   const login = String(user?.loginName || '').trim().toLowerCase();
   // Distinct resolved accounts may share an email address. Use aliases only

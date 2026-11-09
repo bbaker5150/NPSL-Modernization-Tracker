@@ -16,6 +16,22 @@ function fixture(role) {
 }
 
 describe('three-role access model', () => {
+  it('authorizes every assigned engineer while preserving the full team and original dates on engineer edits', async () => {
+    const { store, raw, state } = fixture('Project Engineer');
+    const team = [{ name: 'Other', loginName: 'claims|other', email: 'other@example.test' }, { name: 'Me', loginName: user.loginName, email: user.email }];
+    Object.assign(state.projects[0], { ownerKey: 'claims|other', ownerEmail: 'other@example.test', engineers: team });
+    expect((await store.load()).projects.map(row => row.id)).toEqual(['p1']);
+    await store.addTaskAttachment('t1', new File(['a'], 'a.txt'));
+    await store.saveUpdate({ id: 'new-update', projectKey: 'own', summary: 'Second engineer update' });
+    const saved = await store.saveProject({ ...state.projects[0], engineers: [], ownerKey: 'forged', targetFinish: '2099-01-01', health: 'On Track' }, ['forged']);
+    expect(saved).toMatchObject({ engineers: team, ownerKey: 'claims|other', targetFinish: '2027-01-01', health: 'On Track' });
+    expect(raw.saveProject).toHaveBeenLastCalledWith(saved);
+    state.projects[0].engineers = team.slice(0, 1);
+    await expect(store.saveTask(task)).rejects.toThrow('assigned project engineers');
+    state.projects[0].engineers = team; state.users[0].role = 'Viewer';
+    await expect(store.saveTask(task)).rejects.toThrow();
+    await expect(store.saveUpdate({ projectKey: 'own', summary: 'No longer an engineer' })).rejects.toThrow();
+  });
   it.each(['Viewer', 'Project Engineer', 'Manager'])('allows %s to add distinct glossary entries and reserves changes and removal for managers', async role => {
     const { store, state, raw } = fixture(role);
     const existing = { id: 'old', spId: 31, acronym: 'CSS', term: 'Specification' };

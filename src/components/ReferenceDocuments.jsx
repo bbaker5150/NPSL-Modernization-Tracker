@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { FilePicker } from './FilePicker';
 import { referencePath } from '../lib/referenceDocuments';
 
 function ReferenceActions({ row, busy, readOnly, onDownload, onEdit, onDelete }) {
@@ -111,7 +112,7 @@ export function ReferenceDocuments({ store, readOnly }) {
         {(!readOnly || row.kind === 'file') && <ReferenceActions row={row} busy={busy} readOnly={readOnly} onDownload={download} onEdit={(entry, mode) => { setDraft({ ...entry, mode }); setError(''); }} onDelete={remove} />}
 
       </li>)}</ul>
-      {!readOnly && <label className="field"><span>Upload to {entries.find((row) => row.id === folder)?.name || 'All references'} (up to 50 MB each)</span><input type="file" multiple className="document-upload" aria-label="Upload reference documents" disabled={busy || loading} onChange={upload} /></label>}
+      {!readOnly && <FilePicker label={busy ? 'Uploading documents…' : 'Upload reference documents'} hint={`Up to 50 MB each · saved to ${entries.find((row) => row.id === folder)?.name || 'All references'}`} ariaLabel="Upload reference documents" disabled={busy || loading} onChange={upload} />}
       {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
     </section>
   </section>;
