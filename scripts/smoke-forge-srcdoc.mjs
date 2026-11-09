@@ -197,15 +197,17 @@ try {
   await frame.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
   for (const theme of ['light', 'dark']) {
     await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+    await frame.locator('.modal').evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished)));
     const uploadStyle = await frame.getByLabel('Attach documents', { exact: true }).evaluate((input) => {
       const picker = input.closest('.file-picker');
       const button = getComputedStyle(picker.querySelector('.file-picker-button'));
       const cancel = getComputedStyle(input.closest('.modal').querySelector('footer .button.secondary'));
       return { consistent: ['backgroundColor', 'color', 'borderRadius', 'borderColor'].every(key => button[key] === cancel[key]),
         readable: button.backgroundColor !== button.color, nativeHidden: getComputedStyle(input).opacity === '0',
-        fits: picker.scrollWidth <= picker.clientWidth + 1 };
+        fits: picker.scrollWidth <= picker.clientWidth + 1,
+        styles: Object.fromEntries(['backgroundColor', 'color', 'borderRadius', 'borderColor'].map(key => [key, [button[key], cancel[key]]])) };
     });
-    if (!uploadStyle.consistent || !uploadStyle.readable || !uploadStyle.nativeHidden || !uploadStyle.fits) errors.push(`Upload theme styling failed: ${theme}`);
+    if (!uploadStyle.consistent || !uploadStyle.readable || !uploadStyle.nativeHidden || !uploadStyle.fits) errors.push(`Upload theme styling failed: ${theme} ${JSON.stringify(uploadStyle)}`);
   }
 
 
