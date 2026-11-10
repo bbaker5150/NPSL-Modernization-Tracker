@@ -20,7 +20,7 @@ describe('three-role access model', () => {
     const { store, raw, state } = fixture('Project Engineer');
     const team = [{ name: 'Other', loginName: 'claims|other', email: 'other@example.test' }, { name: 'Me', loginName: user.loginName, email: user.email }];
     Object.assign(state.projects[0], { ownerKey: 'claims|other', ownerEmail: 'other@example.test', engineers: team });
-    expect((await store.load()).projects.map(row => row.id)).toEqual(['p1']);
+    expect((await store.load()).projects.map(row => row.id)).toEqual(['p1', 'p2']);
     await store.addTaskAttachment('t1', new File(['a'], 'a.txt'));
     await store.saveUpdate({ id: 'new-update', projectKey: 'own', summary: 'Second engineer update' });
     const saved = await store.saveProject({ ...state.projects[0], engineers: [], ownerKey: 'forged', targetFinish: '2099-01-01', health: 'On Track' }, ['forged']);
@@ -63,13 +63,15 @@ describe('three-role access model', () => {
     expect(raw.saveTask).not.toHaveBeenCalled();
     expect(raw.addTaskAttachment).not.toHaveBeenCalled();
   });
-  it('scopes engineers to project assignments, not merely task assignments', async () => {
-    const { store } = fixture('Project Engineer');
-    expect((await store.load()).projects.map((row) => row.id)).toEqual(['p1']);
-    expect((await store.load()).tasks.map((row) => row.id)).toEqual(['t1']);
+  it('gives engineers full Viewer reads while project assignments, not task assignments, authorize edits', async () => {
+    const { store, raw, state } = fixture('Project Engineer');
+    expect(await store.load()).toEqual(state);
+    expect((await store.load()).projects.map((row) => row.id)).toEqual(['p1', 'p2']);
+    expect((await store.load()).tasks.map((row) => row.id)).toEqual(['t1', 't2']);
     await expect(store.saveTask(data.tasks[1])).rejects.toThrow('assigned project engineers');
-    await expect(store.listProjectAttachments('other')).rejects.toThrow('cannot access');
-    await expect(store.downloadTaskAttachment('t2', 'report.pdf')).rejects.toThrow('cannot access');
+    expect(await store.listProjectAttachments('other')).toEqual([{ name: 'report.pdf', taskId: 't2', taskTitle: task.title }]);
+    await store.downloadTaskAttachment('t2', 'report.pdf');
+    expect(raw.downloadTaskAttachment).toHaveBeenCalledExactlyOnceWith(state.tasks[1], 'report.pdf');
     await expect(store.saveProject({ id: 'new', projectKey: 'new', ownerEmail: user.email })).rejects.toThrow('assigned project engineers');
   });
   it('keeps distinct claims accounts with a shared email separate for roles and project edits', async () => {
@@ -79,11 +81,62 @@ describe('three-role access model', () => {
     Object.assign(state.projects[0], { ownerKey: user.loginName, ownerEmail: user.email });
     Object.assign(state.projects[1], { ownerKey: colleagueLogin, ownerEmail: user.email });
     expect(isManager(user, state.users)).toBe(false);
-    expect((await store.load()).projects.map(row => row.id)).toEqual(['p1']);
+    expect((await store.load()).projects.map(row => row.id)).toEqual(['p1', 'p2']);
     await expect(store.saveProject({ ...state.projects[1], ownerKey: user.loginName })).rejects.toThrow('assigned project engineers');
     await expect(store.saveTask({ ...state.tasks[1], projectKey: 'own' })).rejects.toThrow('assigned project engineers');
     expect(raw.saveProject).not.toHaveBeenCalled();
     expect(raw.saveTask).not.toHaveBeenCalled();
+  });
+  it.each([true, false])('keeps shared history and documents readable without authorizing unassigned writes (has assignments: %s)', async assigned => {
+    const { store, raw, state } = fixture('Project Engineer');
+    if (!assigned) state.projects[0].ownerEmail = 'someone-else@example.test';
+    const update = { ...state.updates[0], summary: 'Other project history', version: '"2"' };
+    state.updates[0] = update;
+    const risk = { id: 'r2', spId: 31, projectKey: 'other', title: 'Historical risk', version: '"3"' };
+    state.risks.push(risk);
+    const file = new File(['document'], 'document.txt');
+    const writes = ['saveProject', 'saveTask', 'saveUpdate', 'editUpdate', 'deleteUpdate', 'saveRisk', 'editRisk', 'deleteRisk',
+      'addTaskAttachment', 'deleteTaskAttachment', 'renameTaskAttachment', 'addUpdateAttachment', 'deleteUpdateAttachment',
+      'saveReferenceEntry', 'deleteReferenceEntry', 'saveUser', 'recycle'];
+    for (const method of writes) raw[method] = vi.fn();
+    raw.listUpdateAttachments = vi.fn(async () => [{ name: file.name }]);
+    raw.downloadUpdateAttachment = vi.fn(async () => file);
+    raw.listReferenceEntries = vi.fn(async () => [{ id: 'reference', kind: 'file' }]);
+    raw.downloadReferenceEntry = vi.fn(async () => file);
+    expect(await store.load()).toEqual(state);
+    expect(await store.listTaskAttachments('t2')).toEqual([{ name: 'report.pdf' }]);
+    expect(await store.listUpdateAttachments('u2')).toEqual([{ name: file.name }]);
+    expect(await store.downloadUpdateAttachment('u2', file.name)).toBe(file);
+    expect(raw.downloadUpdateAttachment).toHaveBeenCalledExactlyOnceWith(update, file.name);
+    expect(await store.downloadReferenceEntry('reference')).toBe(file);
+    for (const operation of [
+      () => store.saveProject({ ...state.projects[1], ownerEmail: user.email, health: 'On Track' }),
+      () => store.saveProgressMode('p2', 'tasks'),
+      () => store.saveTask({ ...state.tasks[1], spId: 11, projectKey: 'own', status: 'Complete' }),
+      () => store.saveUpdate({ id: 'new', projectKey: 'other', summary: 'Unauthorized' }),
+      () => store.saveUpdate({ ...update, projectKey: 'own', summary: 'Unauthorized' }),
+      () => store.editUpdate({ ...update, spId: 99, projectKey: 'own', summary: 'Unauthorized' }),
+      () => store.deleteUpdate({ ...update, projectKey: 'own' }),
+      () => store.saveRisk({ ...risk, projectKey: 'own' }),
+      () => store.editRisk({ ...risk, projectKey: 'own' }),
+      () => store.deleteRisk({ ...risk, projectKey: 'own' }),
+      () => store.addTaskAttachment('t2', file),
+      () => store.renameTaskAttachment('t2', 'report.pdf', 'new.pdf'),
+      () => store.deleteTaskAttachment('t2', 'report.pdf'),
+      () => store.addUpdateAttachment('u2', file),
+      () => store.deleteUpdateAttachment('u2', file.name, update.version),
+      () => store.saveReferenceEntry({ id: 'reference' }, file),
+      () => store.deleteReferenceEntry('reference'),
+      () => store.saveUser({ ...state.users[0], role: 'Manager' }),
+      () => store.recycle('updates', update.spId, update.id),
+      () => store.recycle('risks', risk.spId, risk.id),
+    ]) await expect(operation()).rejects.toThrow();
+    for (const method of writes) expect(raw[method]).not.toHaveBeenCalled();
+    await expect(store.listProjectAttachments('missing')).rejects.toThrow('cannot access');
+    await expect(store.listTaskAttachments('missing')).rejects.toThrow('cannot access');
+    await expect(store.listUpdateAttachments('missing')).rejects.toThrow('cannot access');
+    raw.downloadUpdateAttachment.mockRejectedValueOnce(Object.assign(new Error('SharePoint denied this file'), { status: 403 }));
+    await expect(store.downloadUpdateAttachment('u2', file.name)).rejects.toMatchObject({ status: 403 });
   });
   it('lets engineers update tracking on existing assigned tasks and preserves the saved task definition', async () => {
     const { store, raw, state } = fixture('Project Engineer');
@@ -129,6 +182,8 @@ describe('three-role access model', () => {
     await store.addTaskAttachment('t1', new File(['a'], 'a.txt'));
     state.projects[0].ownerEmail = 'other@example.test';
     await expect(store.saveTask(task)).rejects.toThrow();
+    expect((await store.load()).projects).toHaveLength(2);
+    await store.downloadTaskAttachment('t1', 'report.pdf');
     state.projects[0].ownerEmail = user.email; state.users[0].role = 'Viewer';
     await expect(store.saveProgressMode('p1', 'phases')).rejects.toThrow();
     await expect(store.addTaskAttachment('t1', new File(['a'], 'a.txt'))).rejects.toThrow();
@@ -153,7 +208,7 @@ describe('three-role access model', () => {
     expect(raw.data.users.map(({ id, role }) => [id, role])).toEqual([['manager', 'Manager'], ['owner', 'Project Engineer'], ['outsider', 'Viewer'], ['viewer', 'Viewer']]);
     await raw.saveProject({ id: 'old', projectKey: 'old', ownerKey: 'new' });
     expect((await raw.load()).users.find(row => row.id === 'owner').role).toBe('Project Engineer');
-    expect(visibleData(await raw.load(), { email: 'owner@example.test' }).projects).toHaveLength(0);
+    expect(visibleData(await raw.load(), { email: 'owner@example.test' }).projects).toHaveLength(2);
   });
   it('registers an existing project owner missing from the directory as an engineer', async () => {
     localStorage.clear(); window.MOD_TRACKER_CONFIG = { forceLocal: true };
@@ -267,7 +322,7 @@ it('checks update attachment scope and permissions independently of task documen
   await store.addUpdateAttachment('u1', file);
   expect(raw.addUpdateAttachment).toHaveBeenCalledWith(state.updates[1], file);
   expect(raw.addTaskAttachment).not.toHaveBeenCalled();
-  await expect(store.addUpdateAttachment('u2', file)).rejects.toThrow('cannot access');
+  await expect(store.addUpdateAttachment('u2', file)).rejects.toThrow('Only managers or assigned project engineers');
   state.users = directory('Viewer');
   await expect(store.addUpdateAttachment('u1', file)).rejects.toThrow('Only managers');
   await store.downloadUpdateAttachment('u2', 'decision.txt');

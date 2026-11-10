@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, ProjectEditor, userInitials } from './App';
 import { createRepository } from './lib/repository';
+import * as portfolioExport from './lib/exportPortfolioWorkbook';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -587,7 +588,7 @@ describe('application shell', () => {
     await renderApp();
     expect(document.body.textContent).toContain('Private other project');
     expect(document.body.textContent).not.toContain('New project');
-    expect(document.body.textContent).toContain('Users and managers');
+    expect(document.body.textContent).not.toContain('Users and managers');
     await act(async () => document.querySelector('.project-table-row:not(.table-header)').click());
     expect(document.querySelector('[aria-label="Project settings"]')).toBeNull();
     await act(async () => document.querySelector('.upcoming-list button').click());
@@ -595,6 +596,55 @@ describe('application shell', () => {
     expect(document.querySelector('.modal input[aria-label="Task name"]').matches(':disabled')).toBe(true);
     expect([...document.querySelectorAll('.modal select')].find((select) => [...select.options].some((option) => option.value === 'Complete')).matches(':disabled')).toBe(true);
     expect([...document.querySelectorAll('.modal button')].some((button) => button.textContent.includes('Delete task'))).toBe(false);
+  });
+
+  it('lets engineers browse unassigned projects, history and documents without editing them', async () => {
+    const raw = createRepository().store;
+    const downloadWorkbook = vi.spyOn(portfolioExport, 'downloadPortfolioWorkbook').mockResolvedValue(undefined);
+    await raw.saveUser({ id: 'engineer', title: 'Local Engineer', loginName: 'local', role: 'Project Engineer' });
+    await raw.saveProject({ id: 'mine', projectKey: 'mine', title: 'Assigned project', engineers: [
+      { name: 'Other Engineer', loginName: 'other', email: 'other@example.test' },
+      { name: 'Local Engineer', loginName: 'local', email: 'local.engineer@example.invalid' },
+    ] });
+    await raw.saveProject({ id: 'other', projectKey: 'other', title: 'Portfolio project', ownerKey: 'other', ownerName: 'Other Engineer' });
+    await raw.saveTask({ id: 'other-task', projectKey: 'other', title: 'Portfolio task', phaseKey: 'requirement', status: 'Not Started', dueDate: '2027-01-01' });
+    await raw.saveUpdate({ id: 'other-update', projectKey: 'other', summary: 'Portfolio update', authorName: 'Other Engineer', entryDate: '2026-11-10' });
+    vi.spyOn(Object.getPrototypeOf(raw), 'listTaskAttachments').mockResolvedValue([{ name: 'Portfolio plan.pdf' }]);
+    vi.spyOn(Object.getPrototypeOf(raw), 'listUpdateAttachments').mockResolvedValue([{ name: 'Portfolio evidence.png' }]);
+    await renderApp(false);
+    const nav = name => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.startsWith(name));
+    expect(document.querySelectorAll('.project-table-row:not(.table-header)')).toHaveLength(2);
+    expect(nav('Users and managers')).toBeUndefined();
+    expect(document.querySelector('.directory-list-panel')).toBeNull();
+    await act(async () => document.querySelector('.export-button').click());
+    expect(downloadWorkbook.mock.calls[0][0].projects.map(project => project.id).sort()).toEqual(['mine', 'other']);
+    await act(async () => nav('My work').click());
+    expect(document.querySelectorAll('.project-card')).toHaveLength(1);
+    expect(document.querySelector('.project-card').textContent).toContain('Assigned project');
+    await act(async () => document.querySelector('.export-button').click());
+    expect(downloadWorkbook.mock.calls[1][0].projects.map(project => project.id)).toEqual(['mine']);
+    await act(async () => nav('Portfolio').click());
+    await act(async () => [...document.querySelectorAll('.project-table-row:not(.table-header)')].find(row => row.textContent.includes('Portfolio project')).click());
+    expect(document.querySelector('[aria-label="Project settings"]')).toBeNull();
+    expect(document.querySelector('.project-documents').textContent).toContain('Portfolio plan.pdf');
+    expect(document.querySelector('.project-drawer input[type="file"]')).toBeNull();
+    await act(async () => document.querySelector('[aria-label="Edit Portfolio plan.pdf"]').click());
+    expect([...document.querySelectorAll('.reference-action-menu button')].map(button => button.textContent)).toEqual(['Download']);
+    await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find(button => button.textContent.startsWith('Updates')).click());
+    expect(document.querySelector('.project-drawer').textContent).toContain('Portfolio update');
+    expect(document.querySelector('.update-documents button').textContent).toBe('Portfolio evidence.png');
+    expect(document.querySelector('.update-documents button').disabled).toBe(false);
+    expect(document.querySelector('.update-composer')).toBeNull();
+    expect(document.querySelector('.update-actions')).toBeNull();
+    expect(document.querySelector('.project-drawer input[type="file"]')).toBeNull();
+    await act(async () => [...document.querySelectorAll('.drawer-tabs button')].find(button => button.textContent.startsWith('Work breakdown')).click());
+    expect(document.querySelector('.add-task-button')).toBeNull();
+    expect(document.querySelector('.phase-required-button')).toBeNull();
+    expect(document.querySelector('.task-check').disabled).toBe(true);
+    await act(async () => document.querySelector('.phase-task').click());
+    expect(document.querySelector('.task-fields').disabled).toBe(true);
+    expect(document.querySelector('.modal input[type="file"]')).toBeNull();
+    expect([...document.querySelectorAll('.modal button')].some(button => button.textContent === 'Save task')).toBe(false);
   });
 
   it('adds and deletes custom phase tasking without removing other tasks', async () => {
@@ -645,22 +695,80 @@ describe('application shell', () => {
 
   it('registers standard users and grants testing manager access only after the right password', async () => {
     await renderApp(false);
-    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['Portfolio', 'Pipeline board', 'My work0', 'Reference Documents', 'Acronym glossary', 'Users and managers']);
+    expect([...document.querySelectorAll('.sidebar nav button')].map((row) => row.textContent)).toEqual(['Portfolio', 'Pipeline board', 'My work0', 'Reference Documents', 'Acronym glossary']);
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0]).toMatchObject({ title: 'Local Engineer', role: 'Viewer' });
-    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
-    expect(document.querySelectorAll('.directory-row')).toHaveLength(1);
-    expect(document.querySelector('.directory-row button')).toBeNull();
+    expect(document.querySelector('.directory-list-panel')).toBeNull();
     expect(document.querySelector('input[type="password"]')).toBeNull();
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true, cancelable: true })));
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'wrong'));
-    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Enable manager access').click());
+    await act(async () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Enable manager access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('incorrect');
     expect(document.body.textContent).not.toContain('New project');
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
-    await act(async () => [...document.querySelectorAll('.directory-form button')].find((button) => button.textContent === 'Enable manager access').click());
+    await act(async () => [...document.querySelectorAll('.modal button')].find((button) => button.textContent === 'Enable manager access').click());
     expect(document.body.textContent).toContain('New project');
     expect(document.querySelector('input[type="password"]')).toBeNull();
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('Manager');
+    expect([...document.querySelectorAll('.sidebar nav button')].some(button => button.textContent === 'Users and managers')).toBe(true);
+  });
+
+  it.each([{ testingManagerPassword: false }, { testingManagerPassword: '' }, { scopedAccess: true }])('hides the testing shortcut when disabled by %j', async config => {
+    Object.assign(window.MOD_TRACKER_CONFIG, config);
+    await renderApp(false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    expect(document.querySelector('.directory-list-panel')).toBeNull();
+    expect(document.body.textContent).not.toContain('Users and managers');
+  });
+
+  it('returns to the portfolio and removes the directory immediately when manager access is lost', async () => {
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Users and managers').click());
+    const self = [...document.querySelectorAll('.directory-row')].find(row => row.textContent.includes('local.engineer@example.invalid'));
+    await act(async () => self.querySelector('.directory-actions > button').click());
+    await act(async () => [...self.querySelectorAll('button')].find(button => button.textContent === 'Update User').click());
+    const raw = createRepository().store;
+    const current = (await raw.load()).users.find(row => row.loginName === 'local');
+    await raw.saveUser({ ...current, role: 'Viewer' });
+    // SharePoint reloads live group roles; preview stores hold a local snapshot.
+    vi.spyOn(Object.getPrototypeOf(raw), 'load').mockResolvedValue(await raw.load());
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(document.body.textContent).toContain('Modernization at a glance');
+    expect(document.querySelector('.directory-list-panel')).toBeNull();
+    expect(document.querySelector('.directory-form')).toBeNull();
+    expect(document.body.textContent).not.toContain('Users and managers');
+    expect([...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Portfolio').classList.contains('active')).toBe(true);
+  });
+
+  it('preserves a newer user save when an earlier manager access check completes', async () => {
+    await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'Viewer' });
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Users and managers').click());
+    const row = [...document.querySelectorAll('.directory-row')].find(entry => entry.textContent.includes('other@example.test'));
+    await act(async () => row.querySelector('.directory-actions > button').click());
+    await act(async () => [...row.querySelectorAll('button')].find(button => button.textContent === 'Update User').click());
+    await act(async () => changeValue(document.querySelector('.directory-form select'), 'Manager'));
+    const raw = createRepository().store;
+    const snapshot = await raw.load();
+    let finishCheck;
+    const pending = new Promise(resolve => { finishCheck = resolve; });
+    vi.spyOn(Object.getPrototypeOf(raw), 'load').mockReturnValueOnce(pending);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    await act(async () => [...document.querySelectorAll('.directory-form button')].find(button => button.textContent === 'Save user').click());
+    expect(row.querySelector('.badge').textContent).toBe('Manager');
+    await act(async () => finishCheck(snapshot));
+    expect(row.querySelector('.badge').textContent).toBe('Manager');
+    expect(document.querySelector('.page-stack > [role="status"]').textContent).toContain('saved as Manager');
+  });
+
+  it('closes the directory with an error when manager access cannot be rechecked', async () => {
+    await renderApp();
+    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Users and managers').click());
+    vi.spyOn(Object.getPrototypeOf(createRepository().store), 'load').mockRejectedValueOnce(new Error('SharePoint access is unavailable.'));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(document.querySelector('.directory-list-panel')).toBeNull();
+    expect(document.body.textContent).toContain('Modernization at a glance');
+    expect(document.querySelector('.toast[role="alert"]').textContent).toContain('Manager access could not be verified');
   });
 
   it('combines stage multi-selection with local portfolio search and health filters', async () => {
@@ -765,15 +873,14 @@ describe('application shell', () => {
 
   it('shows a persistent activation error when the directory write fails', async () => {
     await renderApp(false);
-    await act(async () => [...document.querySelectorAll('.sidebar nav button')].find((row) => row.textContent === 'Users and managers').click());
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true, cancelable: true })));
     vi.spyOn(Object.getPrototypeOf(createRepository().store), 'saveUser').mockRejectedValue(new Error('SharePoint denied the directory update (403).'));
     await act(async () => changeValue(document.querySelector('input[type="password"]'), 'admin123'));
-    await act(async () => [...document.querySelectorAll('.directory-form button')].find((row) => row.textContent === 'Enable manager access').click());
+    await act(async () => [...document.querySelectorAll('.modal button')].find((row) => row.textContent === 'Enable manager access').click());
     expect(document.querySelector('[role="alert"]').textContent).toContain('403');
     expect(document.body.textContent).not.toContain('New project');
     expect(JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).users[0].role).toBe('Viewer');
-    expect(document.querySelector('.directory-form button').disabled).toBe(false);
+    expect([...document.querySelectorAll('.modal button')].find(button => button.textContent === 'Enable manager access').disabled).toBe(false);
   });
 
   it('lets an assigned engineer update existing work and progress while managers control task definitions', async () => {

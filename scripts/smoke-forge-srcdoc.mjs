@@ -47,9 +47,11 @@ try {
   });
   if (loadingLogoStyle.animationName !== 'none' || loadingLogoStyle.boxShadow !== 'none' || loadingLogoStyle.filter !== 'none') errors.push(`Loading logo still glows or animates: ${JSON.stringify(loadingLogoStyle)}`);
   if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
-  await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  if (await frame.getByRole('button', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users navigation');
+  if (await frame.getByRole('heading', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users panel');
   if (await frame.getByLabel('Testing password').count()) errors.push('Testing manager access was visible before Ctrl+M');
   await frame.locator('body').press('Control+m');
+  await frame.getByRole('heading', { name: 'Testing manager access', exact: true }).waitFor();
   await frame.getByLabel('Testing password').fill('incorrect-password');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('alert').filter({ hasText: 'Testing password is incorrect' }).waitFor();
@@ -57,6 +59,8 @@ try {
   await frame.getByLabel('Testing password').fill('admin123');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('button', { name: /New project/ }).waitFor();
+  await frame.getByRole('button', { name: 'Users and managers', exact: true }).waitFor();
+  await frame.getByLabel('Testing password').waitFor({ state: 'detached' });
   // Reload the packaged application to verify persisted role, not just UI state.
   await page.evaluate(() => {
     const key = 'modernization-project-tracker:v2';

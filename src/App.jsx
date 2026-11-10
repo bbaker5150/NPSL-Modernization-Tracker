@@ -17,7 +17,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { createRepository, createStarterTasks, isOwnedByUser, workflowData, userIdentityKey } from './lib/repository';
 import { downloadPortfolioWorkbook } from './lib/exportPortfolioWorkbook';
-import { authorizedStore, isManager, canManageProject, canViewPortfolio, validateTask } from './lib/access';
+import { authorizedStore, isManager, userRole, canManageProject, canViewPortfolio, validateTask } from './lib/access';
 import navairSeal from './assets/navair-seal-384.webp';
 
 const NAV = [
@@ -462,32 +462,49 @@ function DirectoryUserActions({ entry, currentUser, busy, onUpdate, onDelete }) 
   return <div className="directory-actions project-menu-wrap" ref={menuRef}><button type="button" className="button secondary" disabled={busy} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>Edit</button>{menuOpen && <div className="project-menu-popover"><button type="button" onClick={() => { setMenuOpen(false); onUpdate(entry); }}>Update User</button><button type="button" disabled={self || busy} title={self ? 'You cannot delete your own account' : 'Remove from tracker directory'} onClick={() => { setMenuOpen(false); onDelete(entry); }}>Delete User</button></div>}</div>;
 }
 
-function UserDirectory({ users, currentUser, onDelete, store, config, localPreview, manager, testingEnabled, onActivate, onSave }) {
-  const [userSearch, setUserSearch] = useState('');
-  const filteredUsers = users.filter((entry) => `${entry.title} ${entry.email || ''} ${entry.role}`.toLowerCase().includes(userSearch.trim().toLowerCase())).sort((a, b) => a.title.localeCompare(b.title));
+function TestingManagerAccess({ onActivate }) {
   const [password, setPassword] = useState('');
-  const [testingManagerOpen, setTestingManagerOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const [activationError, setActivationError] = useState('');
-  const [saveError, setSaveError] = useState('');
-  const [saveMessage, setSaveMessage] = useState('');
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (manager || !testingEnabled) return undefined;
     const openTestingManager = (event) => {
       if (!event.ctrlKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'm') return;
       event.preventDefault();
-      setTestingManagerOpen(true);
+      setOpen(true);
     };
     window.addEventListener('keydown', openTestingManager);
     return () => window.removeEventListener('keydown', openTestingManager);
-  }, [manager, testingEnabled]);
+  }, []);
   async function activate(event) {
-    event.preventDefault();
+    event?.preventDefault();
     if (saving || !password) return;
     setSaving(true); setActivationError('');
-    try { await onActivate(password); setPassword(''); }
+    try { await onActivate(password); setPassword(''); setOpen(false); }
     catch (error) { setActivationError(error.message || 'Manager activation failed. Please try again.'); }
     finally { setSaving(false); }
   }
+  function close() {
+    if (saving) return;
+    setOpen(false); setPassword(''); setActivationError('');
+  }
+  if (!open) return null;
+  return <Modal title="Testing manager access" subtitle="Preview testing only" onClose={close} actions={<>
+    <button type="button" className="button secondary" disabled={saving} onClick={close}>Cancel</button>
+    <button type="button" className="button primary" onClick={activate} disabled={saving || !password}>{saving ? 'Saving and verifying role…' : 'Enable manager access'}</button>
+  </>}><form onSubmit={activate}>
+    <p>Enter the shared testing password to grant your signed-in account manager access.</p>
+    <Field label="Testing password"><input type="password" autoComplete="off" autoFocus disabled={saving} value={password} onChange={(event) => setPassword(event.target.value)} /></Field>
+    {activationError && <p role="alert" className="inline-error">{activationError}</p>}
+    {saving && <p role="status">Please wait while your manager role is saved and verified.</p>}
+  </form></Modal>;
+}
+
+function UserDirectory({ users, currentUser, onDelete, store, config, localPreview, manager, onSave }) {
+  const [userSearch, setUserSearch] = useState('');
+  const filteredUsers = users.filter((entry) => `${entry.title} ${entry.email || ''} ${entry.role}`.toLowerCase().includes(userSearch.trim().toLowerCase())).sort((a, b) => a.title.localeCompare(b.title));
+  const [saveError, setSaveError] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
   const empty = { title: '', email: '', loginName: '', role: 'Viewer' };
   const [draft, setDraft] = useState(empty);
   const [saving, setSaving] = useState(false);
@@ -522,7 +539,7 @@ function UserDirectory({ users, currentUser, onDelete, store, config, localPrevi
     catch (error) { setSaveError(error.message || 'User could not be deleted. Please try again.'); }
     finally { setSaving(false); }
   }
-  return <section className="page-stack"><h1>Users and managers</h1><p>Signed-in users and their application roles.</p>{manager && <TrackerAccessSetup store={store} />}{manager && <PeopleInvite store={store} config={config} localPreview={localPreview} onSave={saveInvitee} />}{!manager && testingEnabled && testingManagerOpen && <form className="panel directory-form" onSubmit={activate}><h2>Testing manager access</h2><p>Testing only: enter the shared testing password to grant your signed-in account manager access.</p><Field label="Testing password"><input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>{activationError && <p role="alert" className="inline-error">{activationError}</p>}<button type="button" className="button primary" onClick={activate} disabled={saving || !password}>{saving ? 'Saving and verifying role…' : 'Enable manager access'}</button>{saving && <p role="status">Please wait while your manager role is saved and verified.</p>}</form>}{manager && draft.id && <form className="panel directory-form" noValidate onSubmit={saveDirectoryUser}>
+  return <section className="page-stack"><h1>Users and managers</h1><p>Signed-in users and their application roles.</p>{manager && <TrackerAccessSetup store={store} />}{manager && <PeopleInvite store={store} config={config} localPreview={localPreview} onSave={saveInvitee} />}{manager && draft.id && <form className="panel directory-form" noValidate onSubmit={saveDirectoryUser}>
     {['title', 'email'].map((key) => <Field key={key} label={{ title: 'Name', email: 'Email', loginName: 'SharePoint login' }[key]}><input type={key === 'email' ? 'email' : 'text'} required={key === 'title' || !draft.loginName?.trim()} disabled={saving} value={draft[key] || ''} onChange={(event) => setDraft((row) => ({ ...row, [key]: event.target.value }))} /></Field>)}
     <Field label="Role"><select aria-label="Role" disabled={saving} value={draft.role} onChange={(event) => setDraft((row) => ({ ...row, role: event.target.value }))}>{ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field><button type="button" className="button primary" onClick={saveDirectoryUser} disabled={saving}>{saving ? 'Saving and verifying role…' : 'Save user'}</button>{draft.id && <button type="button" className="button secondary" disabled={saving} onClick={() => { setDraft(empty); setSaveError(''); setSaveMessage(''); }}>Cancel edit</button>}
     </form>}{saveError && <p role="alert" className="inline-error">{saveError}</p>}{saveMessage && <p role="status">{saveMessage}</p>}<section className="panel directory-list-panel"><div className="directory-list-heading"><h2>Users <small>({users.length})</small></h2><input type="search" aria-label="Search users" placeholder="Search name, email or role" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} /></div><div className="directory-list" role="region" aria-label="User directory" tabIndex={0}>{!filteredUsers.length && <p className="empty-state">No users match your search.</p>}{filteredUsers.map((entry) => <article className="directory-row" key={entry.id}><div className="directory-identity"><strong>{displayName(entry.title)}</strong><span>{entry.email || 'Email not available'}</span></div><Badge>{entry.role}</Badge>{manager && <DirectoryUserActions entry={entry} currentUser={currentUser} busy={saving} onUpdate={(entry) => { setDraft({ ...empty, ...entry, email: entry.email || '' }); setSaveError(''); setSaveMessage(''); }} onDelete={deleteDirectoryUser} />}</article>)}</div></section></section>;
@@ -608,8 +625,50 @@ export function App() {
 
   const manager = isManager(user, data.users);
   const portfolioAccess = canViewPortfolio(user, data.users);
+  const testingEnabled = !repo.store.scopedAccess && !repo.config.scopedAccess && repo.config.testingManagerPassword !== false && repo.config.testingManagerPassword !== '';
   const enriched = useMemo(() => data.projects.map((project) => enrichProject(project, data.tasks)), [data.projects, data.tasks]);
   const openProject = enriched.find((project) => project.id === openProjectId);
+  useEffect(() => { if (view === 'users' && !manager) setView('overview'); }, [view, manager]);
+  useEffect(() => {
+    if (view !== 'users' || !manager) return undefined;
+    let active = true;
+    let checking = false;
+    const refreshDirectoryAccess = async () => {
+      if (checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        const loaded = await repo.store.load();
+        if (active && !isManager(user, loaded.users)) {
+          const role = userRole(user, loaded.users);
+          // A role check must not overwrite newer saves with its older snapshot.
+          setData(current => ({ ...current, users: (current.users || []).map(entry => isOwnedByUser({ ownerKey: entry.loginName, ownerEmail: entry.email }, user) ? { ...entry, role } : entry) }));
+          setView('overview');
+        }
+      } catch (error) {
+        if (active) {
+          setView('overview');
+          setToast({ tone: 'bad', message: `Manager access could not be verified. The directory was closed. ${error.message || 'Please try again.'}` });
+        }
+      }
+      finally { checking = false; }
+    };
+    refreshDirectoryAccess();
+    window.addEventListener('focus', refreshDirectoryAccess);
+    document.addEventListener('visibilitychange', refreshDirectoryAccess);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshDirectoryAccess);
+      document.removeEventListener('visibilitychange', refreshDirectoryAccess);
+    };
+  }, [view, manager, repo.store, user]);
+
+  async function activateTestingManager(password) {
+    const saved = await repo.store.activateTestingManager(password);
+    const loaded = await repo.store.load();
+    if (!isManager(user, loaded.users)) throw new Error('The directory still reports your account as a basic user. Manager access could not be confirmed; please reload and try again.');
+    setData(loaded);
+    setToast({ message: `Manager access confirmed for ${saved.title}.` });
+  }
 
   async function saveProject(project, assignedLogin) {
     const creating = !projectEditor?.id;
@@ -821,14 +880,14 @@ export function App() {
   if (error) return <div className="gate-shell"><div className="gate-card"><div className="inline-error"><Icon name="alert" />{error}</div><button className="button primary" onClick={initialize}>Try again</button></div></div>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><button className="brand" aria-label="Portfolio home" onClick={() => { setOpenProjectId(''); setView('overview'); }}><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></button><nav>{[...NAV.filter(([key]) => portfolioAccess || ['my-work', 'references', 'glossary'].includes(key)), ['users', 'Users and managers', 'tasks']].map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{displayName(user?.title || 'SharePoint user')}</strong><span>{user?.email || 'Email not available'}</span></div></div></div></aside>
+    <aside className="sidebar"><button className="brand" aria-label="Portfolio home" onClick={() => { setOpenProjectId(''); setView('overview'); }}><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><div><strong>MODERNIZATION</strong><span>Project Tracker</span></div></button><nav>{[...NAV.filter(([key]) => portfolioAccess || ['my-work', 'references', 'glossary'].includes(key)), ...(manager ? [['users', 'Users and managers', 'tasks']] : [])].map(([key, label, icon]) => <button className={view === key ? 'active' : ''} key={key} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === 'my-work' && <Badge>{enriched.filter((project) => isOwnedByUser(project, user)).length}</Badge>}</button>)}</nav><div className="sidebar-footer"><div className="sidebar-user"><span className="avatar">{userInitials(user)}</span><div><strong>{displayName(user?.title || 'SharePoint user')}</strong><span>{user?.email || 'Email not available'}</span></div></div></div></aside>
     <div className="main-shell"><header className="topbar"><button className="mobile-brand" aria-label="Portfolio home" onClick={() => { setOpenProjectId(''); setView('overview'); }}><img className="brand-logo" src={navairSeal} alt="NAVAIR" /><strong>MODERNIZATION</strong></button><div className="top-actions"><button className="button secondary export-button" disabled={exporting} onClick={exportWorkbook}><Icon name="download" /> {exporting ? 'Building Excel…' : 'Export Excel'}</button>{manager && <button className="button primary" onClick={() => setProjectEditor({})}><Icon name="plus" /> New project</button>}<Feedback store={repo.store} /><button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></div></header>
       <main>
         {view === 'overview' && <Overview projects={enriched} tasks={data.tasks} risks={data.risks} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} onAttention={(organization) => { setAttentionOrganization(organization); setView('attention'); }} onBoard={() => setView('board')} register={register} setRegister={setRegister} />}
         {view === 'board' && <Board projects={enriched} onOpen={(project) => setOpenProjectId(project.id)} onDelete={manager ? deleteProject : undefined} />}
         {view === 'attention' && <Attention store={repo.store} refreshKey={`${taskEditor?.id || ''}:${openProjectId || ''}`} projects={enriched} organization={attentionOrganization} controls={attentionControls} onControls={setAttentionControls} onTask={setTaskEditor} onOpen={(project) => setOpenProjectId(project.id)} />}
         {view === 'references' && <ReferenceDocuments store={repo.store} readOnly={!manager} />}
-        {view === 'users' && <UserDirectory currentUser={user} onDelete={deleteUser} store={repo.store} config={repo.config} localPreview={repo.mode === 'local'} users={data.users || []} manager={manager} testingEnabled={repo.config.testingManagerPassword !== false && repo.config.testingManagerPassword !== ''} onActivate={async (password) => { const saved = await repo.store.activateTestingManager(password); const loaded = await repo.store.load(); if (!isManager(user, loaded.users)) throw new Error('The directory still reports your account as a basic user. Manager access could not be confirmed; please reload and try again.'); setData(loaded); setToast({ message: `Manager access confirmed for ${saved.title}.` }); }} onSave={saveUser} />}
+        {view === 'users' && manager && <UserDirectory currentUser={user} onDelete={deleteUser} store={repo.store} config={repo.config} localPreview={repo.mode === 'local'} users={data.users || []} manager={manager} onSave={saveUser} />}
         {view === 'my-work' && <MyWork projects={enriched} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
         {view === 'glossary' && <Glossary manager={manager} acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
       </main>
@@ -836,6 +895,7 @@ export function App() {
     {openProject && <ProjectDrawer readOnly={!canManageProject(openProject, user, data.users)} store={repo.store} key={openProject.id} project={openProject} user={user} manager={manager} users={data.users || []} onDeleteTask={deleteTask} onProgressMode={async (id, mode) => { try { const saved = await repo.store.saveProgressMode(id, mode); setData((state) => ({ ...state, projects: state.projects.map((row) => row.id === saved.id ? saved : row) })); } catch (error) { setToast({ tone: 'bad', message: error.message }); } }} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={(project) => setProjectEditor(data.projects.find((row) => row.id === project.id))} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onEditUpdate={editUpdate} onDeleteUpdate={deleteUpdate} onRefreshUpdates={refreshUpdates} onDelete={deleteProject} />}
     {projectEditor && (manager || canManageProject(projectEditor, user, data.users)) && <ProjectEditor project={projectEditor.id ? projectEditor : null} user={user} store={repo.store} displayedStage={openProject?.currentStageKey} manager={manager} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
     {taskEditor && <TaskEditor task={taskEditor} manager={manager} onDelete={manager ? deleteTask : undefined} canDeleteDocuments={canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} readOnly={!canManageProject(data.projects.find((project) => project.projectKey === taskEditor.projectKey), user, data.users)} store={repo.store} users={data.users || []} onClose={() => setTaskEditor(null)} onSave={saveTask} />}
+    {!manager && testingEnabled && <TestingManagerAccess onActivate={activateTestingManager} />}
     <Toast toast={toast} onClose={() => setToast(null)} />
   </div>;
 }

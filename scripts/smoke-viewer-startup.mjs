@@ -67,6 +67,10 @@ try {
       if (scenario === 'prior-schema') {
         await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
         assert.equal(await app.getByRole('button', { name: 'New project', exact: true }).count(), 0);
+        assert.equal(await app.getByRole('button', { name: 'Users and managers', exact: true }).count(), 0);
+        assert.equal(await app.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0);
+        await app.locator('body').press('Control+m');
+        assert.equal(await app.getByLabel('Testing password').count(), 0, 'SharePoint viewers cannot enable testing manager access');
         await app.locator('.project-table-row:not(.table-header)').click();
         await app.locator('.drawer-tabs').getByRole('button', { name: /^Updates/ }).click();
         await app.getByText('Existing project history', { exact: true }).waitFor();
