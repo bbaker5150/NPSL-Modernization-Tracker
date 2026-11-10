@@ -69,7 +69,7 @@ try {
         assert.equal(await app.getByRole('button', { name: 'New project', exact: true }).count(), 0);
         assert.equal(await app.getByRole('button', { name: 'Users and managers', exact: true }).count(), 0);
         assert.equal(await app.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0);
-        await app.locator('body').press('Control+m');
+        await app.getByRole('button', { name: 'Portfolio', exact: true }).press('Control+m');
         assert.equal(await app.getByLabel('Testing password').count(), 0, 'SharePoint viewers cannot enable testing manager access');
         await app.locator('.project-table-row:not(.table-header)').click();
         await app.locator('.drawer-tabs').getByRole('button', { name: /^Updates/ }).click();

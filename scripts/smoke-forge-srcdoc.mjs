@@ -50,7 +50,8 @@ try {
   if (await frame.getByRole('button', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users navigation');
   if (await frame.getByRole('heading', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users panel');
   if (await frame.getByLabel('Testing password').count()) errors.push('Testing manager access was visible before Ctrl+M');
-  await frame.locator('body').press('Control+m');
+  // Focus a real control so keyboard input enters the srcdoc frame.
+  await frame.getByRole('button', { name: 'Portfolio', exact: true }).press('Control+m');
   await frame.getByRole('heading', { name: 'Testing manager access', exact: true }).waitFor();
   await frame.getByLabel('Testing password').fill('incorrect-password');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
