@@ -14,6 +14,12 @@ try {
   await page.locator('#app').evaluate((frame, html) => { frame.srcdoc = html; }, html);
   const app = page.frameLocator('#app');
   const trigger = app.getByRole('button', { name: 'Report a bug or request a feature' });
+  await trigger.waitFor();
+  assert.equal(await app.locator('html').getAttribute('data-theme'), 'dark');
+  assert.equal(await trigger.evaluate(el => el.nextElementSibling?.getAttribute('aria-label')), 'Switch to light mode');
+  // Start the feedback checks in light mode, then switch back for dark mobile coverage.
+  await app.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  assert.equal(await app.locator('html').getAttribute('data-theme'), 'light');
   await trigger.click();
   assert.equal(await trigger.evaluate(el => el.nextElementSibling?.tagName === 'DIALOG' ? el.nextElementSibling.nextElementSibling?.getAttribute('aria-label') : el.nextElementSibling?.getAttribute('aria-label')), 'Switch to dark mode');
   assert.equal(await app.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
