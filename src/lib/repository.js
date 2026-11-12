@@ -1,4 +1,5 @@
-import { assignmentDirectoryUser, normalizeDirectory } from './identity';
+import { assignmentDirectoryUser, isOwnedByUser, normalizeDirectory } from './identity';
+import { engineerFields, projectEngineers } from './projectEngineers';
 export { isOwnedByUser, userIdentityKey } from './identity';
 import { localAttachments, validateAttachment, validateAttachmentName } from './taskAttachments';
 import { workflowData, normalizePhaseKey, normalizeOrganization, normalizeTaskStatus, normalizeTaskOrganizations } from '../data/workflow';
@@ -35,7 +36,7 @@ class LocalStore {
   async provision() { return []; }
   async load() {
     const data = clone(this.data);
-    data.projects = data.projects.map((row) => ({ ...row, currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit }));
+    data.projects = data.projects.map((row) => ({ ...row, ...engineerFields(projectEngineers(row)), currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit }));
     data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) }));
     for (const row of [...data.updates, ...data.risks]) row.version ||= '1';
     data.users = normalizeDirectory(data.users, data.projects);
@@ -82,11 +83,16 @@ class LocalStore {
   async saveUser(row) { return this.upsert('users', row, 'user'); }
   async saveProject(row, assignedLogin) {
     if (assignedLogin !== undefined) {
-      const person = await this.resolvePerson(assignedLogin);
-      const entry = assignmentDirectoryUser(this.data.users, person);
-      if (!entry) throw new Error('Choose a saved Tracker user for the project engineer in preview mode.');
-      if (!['Manager', 'Project Engineer'].includes(entry.role)) await this.saveUser({ ...entry, role: 'Project Engineer' });
-      row = { ...row, ownerName: person.title, ownerEmail: person.email || '', ownerKey: person.loginName };
+      const logins = Array.isArray(assignedLogin) ? assignedLogin : [assignedLogin];
+      const people = await Promise.all(logins.map(login => this.resolvePerson(login)));
+      const entries = people.map(person => assignmentDirectoryUser(this.data.users, person));
+      if (entries.some(entry => !entry)) throw new Error('Choose saved Tracker users for project engineers in preview mode.');
+      const existing = this.data.projects.find(project => project.id === row.id);
+      for (const entry of entries) {
+        const retainedViewer = Array.isArray(assignedLogin) && existing && entry.role === 'Viewer' && isOwnedByUser(existing, entry);
+        if (!retainedViewer && !['Manager', 'Project Engineer'].includes(entry.role)) await this.saveUser({ ...entry, role: 'Project Engineer' });
+      }
+      row = { ...row, ...engineerFields(people) };
     }
     return this.upsert('projects', row, 'project');
   }

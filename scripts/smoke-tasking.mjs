@@ -20,6 +20,8 @@ async function boot() {
 async function role(value) {
   await page.evaluate(value => { const key = 'modernization-project-tracker:v2'; const data = JSON.parse(localStorage.getItem(key)); data.users[0].role = value; localStorage.setItem(key, JSON.stringify(data)); }, value);
   await boot();
+  assert.equal(await frame.getByRole('button', { name: 'Users and managers', exact: true }).count(), value === 'Manager' ? 1 : 0, 'Only managers have the users navigation');
+  if (value !== 'Manager') assert.equal(await frame.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0, 'Nonmanagers cannot see the users panel');
 }
 async function assertNotesFit(label) {
   const layout = await frame.getByLabel('Notes', { exact: true }).evaluate(el => ({
@@ -94,9 +96,52 @@ try {
   await frame.getByRole('button', { name: 'Projects', exact: true }).click();
   assert.equal(await frame.getByLabel('Sort attention projects').inputValue(), 'hours');
   assert.equal(await frame.locator('.attention-task-card').count(), 1);
+  // Prepare real documents and an update on somebody else's project, then
+  // verify that engineers retain the same portfolio reads as viewers.
+  await frame.locator('.sidebar nav').getByRole('button', { name: 'Portfolio', exact: true }).click();
+  await frame.locator('.project-table-row:not(.table-header)').filter({ hasText: 'Pressure modernization' }).click();
+  await frame.getByRole('button', { name: /Work breakdown/ }).click();
+  await frame.locator('.phase-task').filter({ hasText: 'Resolve procurement funding dependency' }).click();
+  await frame.getByLabel('Attach documents', { exact: true }).setInputFiles({ name: 'other-project-task.txt', mimeType: 'text/plain', buffer: Buffer.from('Other project task document') });
+  await frame.getByRole('button', { name: 'other-project-task.txt', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await frame.getByRole('button', { name: /^Updates/ }).click();
+  await frame.getByRole('textbox', { name: 'Your update', exact: true }).fill('Pressure project review is available to the portfolio.');
+  await frame.getByLabel('Update documents', { exact: true }).setInputFiles({ name: 'other-project-update.txt', mimeType: 'text/plain', buffer: Buffer.from('Other project update document') });
+  await frame.getByRole('button', { name: 'Post update', exact: true }).click();
+  await frame.getByText('Update posted with all selected documents.', { exact: true }).waitFor();
   await role('Project Engineer');
-  assert.equal(await frame.locator('.project-table-row:not(.table-header)').count(), 1);
-  await frame.locator('.project-table-row:not(.table-header)').click();
+  assert.equal(await frame.locator('.project-table-row:not(.table-header)').count(), 2, 'Engineers can read every project');
+  await frame.locator('.kpi-card').filter({ hasText: 'NPSL (Calibration Lab)' }).click();
+  assert.equal(await frame.locator('.attention-task-card').count(), 4, 'Need Attention includes other projects');
+  await frame.locator('.sidebar nav').getByRole('button', { name: 'Portfolio', exact: true }).click();
+  await frame.locator('.project-table-row:not(.table-header)').filter({ hasText: 'Pressure modernization' }).click();
+  assert.equal(await frame.getByRole('button', { name: 'Project settings', exact: true }).count(), 0);
+  await frame.getByRole('button', { name: 'other-project-task.txt', exact: true }).waitFor();
+  const otherTaskDownload = page.waitForEvent('download');
+  await frame.getByRole('button', { name: 'other-project-task.txt', exact: true }).click();
+  assert.equal(await fs.readFile(await (await otherTaskDownload).path(), 'utf8'), 'Other project task document');
+  await frame.getByRole('button', { name: /Work breakdown/ }).click();
+  assert.equal(await frame.getByRole('button', { name: /Add task to/ }).count(), 0);
+  assert.equal(await frame.locator('.phase-required-button').count(), 0);
+  assert.ok(await frame.locator('.task-check').evaluateAll(buttons => buttons.length > 0 && buttons.every(button => button.disabled)), 'Unassigned project task completion is read-only');
+  await frame.locator('.phase-task').filter({ hasText: 'Resolve procurement funding dependency' }).click();
+  for (const label of ['Task name', 'Original due date', 'Assigned / creation date', 'Deferred date', 'Notes']) assert.ok(await frame.getByLabel(label, { exact: true }).isDisabled(), `Other project ${label} is read-only`);
+  assert.equal(await frame.getByRole('button', { name: 'Save task', exact: true }).count(), 0);
+  assert.equal(await frame.getByLabel('Attach documents', { exact: true }).count(), 0);
+  await frame.getByRole('button', { name: 'other-project-task.txt', exact: true }).waitFor();
+  await frame.locator('.modal footer').getByRole('button', { name: 'Close', exact: true }).click();
+  await frame.getByRole('button', { name: /^Updates/ }).click();
+  await frame.getByText('Pressure project review is available to the portfolio.', { exact: true }).waitFor();
+  for (const name of ['Edit update', 'Delete update', 'Post update']) assert.equal(await frame.getByRole('button', { name, exact: true }).count(), 0);
+  assert.equal(await frame.getByRole('textbox', { name: 'Your update', exact: true }).count(), 0);
+  assert.equal(await frame.locator('.project-updates input[type=file]').count(), 0);
+  const otherUpdateDownload = page.waitForEvent('download');
+  await frame.getByRole('button', { name: 'other-project-update.txt', exact: true }).click();
+  assert.equal(await fs.readFile(await (await otherUpdateDownload).path(), 'utf8'), 'Other project update document');
+  await page.screenshot({ path: 'test-artifacts/engineer-other-project-readonly.png' });
+  await frame.locator('.project-drawer').getByRole('button', { name: 'Close', exact: true }).click();
+  await frame.locator('.project-table-row:not(.table-header)').filter({ hasText: 'Electrical standards' }).click();
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
   assert.ok(await frame.getByLabel('Target completion', { exact: true }).isDisabled());
@@ -111,6 +156,12 @@ try {
   }
   assert.equal(await frame.getByRole('button', { name: 'Delete task', exact: true }).count(), 0);
   assert.ok(await frame.getByLabel('Notes', { exact: true }).isEditable());
+  await frame.getByLabel('Notes', { exact: true }).fill('Engineer progress update on an assigned project.');
+  await frame.getByRole('button', { name: 'Save task', exact: true }).click();
+  await frame.locator('.modal').waitFor({ state: 'detached' });
+  const engineerEdit = await page.evaluate(() => JSON.parse(localStorage.getItem('modernization-project-tracker:v2')).tasks.find(row => row.id === 't0'));
+  assert.equal(engineerEdit.notes, 'Engineer progress update on an assigned project.');
+  assert.equal(engineerEdit.dueDate, '2026-09-15');
   await role('Manager');
   await frame.locator('.project-table-row:not(.table-header)').filter({ hasText: 'Electrical standards' }).click();
   await frame.getByRole('button', { name: /Work breakdown/ }).click();
@@ -195,7 +246,7 @@ try {
   assert.equal(await notesField.inputValue(), longNotes);
   await assertNotesFit('read-only saved notes');
   assert.deepEqual(errors, []);
-  console.log('Tasking smoke passed: responsive attention, project grouping, role scope, locked deadlines, owner autocomplete and pre-save document persistence.');
+  console.log('Tasking smoke passed: responsive attention, portfolio-wide engineer reads with other-project task/update downloads, assignment-scoped editing, manager-only directory, locked deadlines, owner autocomplete and pre-save document persistence.');
 } catch (error) {
   await page.screenshot({ path: 'test-artifacts/tasking-failure.png' }).catch(() => {});
   console.error(error);

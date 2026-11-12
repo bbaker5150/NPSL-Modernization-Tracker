@@ -126,8 +126,8 @@ try {
         await page.locator('#app').evaluate((iframe, content) => { iframe.srcdoc = content; }, html);
         await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
         assert.equal(await app.getByRole('button', { name: 'New project', exact: true }).count(), 0);
-        await app.getByRole('button', { name: 'Users and managers', exact: true }).click();
-        await app.getByRole('heading', { name: 'Users and managers', exact: true }).waitFor();
+        assert.equal(await app.getByRole('button', { name: 'Users and managers', exact: true }).count(), 0);
+        assert.equal(await app.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0);
         assert.equal(await app.getByRole('region', { name: 'Invite people', exact: true }).count(), 0);
         assert.equal(await app.getByRole('button', { name: 'Edit', exact: true }).count(), 0);
         assert.equal(writes.length, viewerWriteStart, 'Viewer startup must not provision or enroll users');

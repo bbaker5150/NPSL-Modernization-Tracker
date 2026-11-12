@@ -14,11 +14,30 @@ try {
   await page.locator('#app').evaluate((frame, html) => { frame.srcdoc = html; }, html);
   const app = page.frameLocator('#app');
   const trigger = app.getByRole('button', { name: 'Report a bug or request a feature' });
+  await trigger.waitFor();
+  assert.equal(await app.locator('html').getAttribute('data-theme'), 'dark');
+  assert.equal(await trigger.evaluate(el => el.nextElementSibling?.getAttribute('aria-label')), 'Switch to light mode');
+  // Start the feedback checks in light mode, then switch back for dark mobile coverage.
+  await app.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  assert.equal(await app.locator('html').getAttribute('data-theme'), 'light');
   await trigger.click();
   assert.equal(await trigger.evaluate(el => el.nextElementSibling?.tagName === 'DIALOG' ? el.nextElementSibling.nextElementSibling?.getAttribute('aria-label') : el.nextElementSibling?.getAttribute('aria-label')), 'Switch to dark mode');
   assert.equal(await app.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   await app.getByLabel('Summary', { exact: true }).fill('The project filter needs attention');
   await app.getByLabel('What happened?', { exact: true }).fill('Steps to reproduce\nSelect a project and change the filter.');
+  const screenshot = { name: 'feedback-screen.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6aS8AAAAASUVORK5CYII=', 'base64') };
+  const document = { name: 'steps.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nFeedback steps') };
+  await app.getByLabel('Choose feedback attachments', { exact: true }).setInputFiles([screenshot, document]);
+  assert.equal(await app.locator('.feedback-attachment-list li').count(), 2);
+  await app.getByRole('button', { name: 'Remove steps.pdf', exact: true }).click();
+  assert.equal(await app.locator('.feedback-attachment-list li').count(), 1);
+  await app.getByLabel('Choose feedback attachments', { exact: true }).setInputFiles(document);
+  await app.locator('.feedback-form').evaluate(form => {
+    const files = new DataTransfer(); files.items.add(new File(['temporary notes'], 'remove-me.txt', { type: 'text/plain' }));
+    form.querySelector('.feedback-attachment-dropzone').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: files }));
+  });
+  await app.getByRole('button', { name: 'Remove remove-me.txt', exact: true }).click();
+  assert.equal(await app.locator('.feedback-attachment-list li').count(), 2);
   await fs.mkdir('test-artifacts', { recursive: true });
   await app.getByRole('dialog').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
   await page.screenshot({ path: 'test-artifacts/feedback-light.png' });
@@ -38,6 +57,14 @@ try {
   await app.getByRole('heading', { name: 'The project filter needs attention' }).waitFor();
   assert.equal(await app.getByRole('button', { name: 'Feedback History', exact: true }).count(), 0);
   let report = app.getByRole('article', { name: 'The project filter needs attention', exact: true });
+  await report.getByRole('button', { name: 'Preview', exact: true }).click();
+  await report.locator('.feedback-screenshot img').waitFor();
+  await report.locator('.feedback-screenshot img').evaluate(img => img.decode());
+  assert.equal(await report.locator('.feedback-screenshot img').evaluate(img => img.complete && img.naturalWidth > 0), true);
+  const downloaded = page.waitForEvent('download');
+  await report.getByRole('button', { name: 'Download steps.pdf', exact: true }).click();
+  assert.equal((await downloaded).suggestedFilename(), 'steps.pdf');
+  await page.screenshot({ path: 'test-artifacts/feedback-attachments-history.png' });
   await report.getByRole('button', { name: 'Edit', exact: true }).click();
   await app.getByLabel('Summary', { exact: true }).fill('Discard this edit');
   await app.getByRole('button', { name: 'Cancel edit', exact: true }).click();
@@ -96,7 +123,7 @@ try {
   await app.getByRole('button', { name: 'Back to feedback' }).click();
   assert.equal(await app.getByRole('button', { name: 'Send feedback', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('Feedback smoke passed: submit, individual editing/status persistence, canceled edits, single deletion preserving other reports, bulk clearing, focus return, mobile editing, dark mobile layout.');
+  console.log('Feedback smoke passed: attachment selection/removal/drop, image preview and document download, submit, individual editing/status persistence, canceled edits, single deletion preserving other reports, bulk clearing, focus return, mobile editing, dark mobile layout.');
 } catch (error) {
   await page.screenshot({ path: 'test-artifacts/feedback-failure.png' }).catch(() => {});
   console.error(await page.frameLocator('#app').getByRole('dialog').ariaSnapshot().catch(() => 'Dialog unavailable'));

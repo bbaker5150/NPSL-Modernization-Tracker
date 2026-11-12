@@ -16,11 +16,11 @@ export function canViewPortfolio() { return true; }
 export function canManageProject(project, user, users = []) {
   return isManager(user, users) || (userRole(user, users) === 'Project Engineer' && !!project && isOwnedByUser(project, user));
 }
-export function visibleData(data, user) {
-  if (userRole(user, data.users) !== 'Project Engineer') return data;
-  const projects = data.projects.filter((project) => isOwnedByUser(project, user));
-  const keys = new Set(projects.map((project) => project.projectKey));
-  return { ...data, projects, tasks: data.tasks.filter((row) => keys.has(row.projectKey)), updates: data.updates.filter((row) => keys.has(row.projectKey)), risks: data.risks.filter((row) => keys.has(row.projectKey)) };
+export function visibleData(data) {
+  // All Tracker roles share Viewer access to the portfolio returned by
+  // SharePoint. Project assignment restricts writes, not shared reads.
+  // My work applies its own ownership filter without removing portfolio data.
+  return data;
 }
 
 const engineerProjectFields = ['health', 'currentStageKey', 'status'];

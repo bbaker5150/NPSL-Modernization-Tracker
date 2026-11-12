@@ -25,7 +25,7 @@ it('offers feedback to a viewer, hides inbox, and preserves a failed draft', asy
   } finally { document.removeEventListener('click', cancelNativeSubmit, true); await act(async () => root.unmount()); node.remove(); }
 });
 it('shows the private inbox for owners and renders reports as text', async () => {
-  const store = { webUrl: 'https://example.test', currentUser: async () => ({ isSiteAdmin: true }), get: vi.fn().mockImplementation(async path => path.includes('/lists?') ? { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] } : { Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }, { PrincipalId: 7, RoleDefinitionBindings: [], Id: 1, Title: '<script>bad</script>', FeedbackKind: 'Bug', FeedbackDetails: '<img src=x>', Created: '2026-10-30T00:00:00Z', Author: { Title: 'Reporter' } }] }) };
+  const store = { webUrl: 'https://example.test', currentUser: async () => ({ isSiteAdmin: true }), get: vi.fn().mockImplementation(async path => path.includes('/lists?') ? { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] } : { Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ Id: 901, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { Id: 902, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }, { PrincipalId: 7, RoleDefinitionBindings: [], Id: 1, Title: '<script>bad</script>', FeedbackKind: 'Bug', FeedbackDetails: '<img src=x>', Created: '2026-10-30T00:00:00Z', Author: { Title: 'Reporter' } }] }) };
   const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
   try {
     await act(async () => root.render(<Feedback store={store} />));
@@ -50,7 +50,7 @@ it('rechecks signed-in owner access on reopen and explains verification failures
     expect(document.querySelector('[role="alert"]').textContent).toContain('could not be verified');
     expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Feedback History')).toBe(false);
     await act(async () => document.querySelector('[aria-label="Close feedback"]').click());
-    store.get.mockImplementation(async path => path.includes('/lists?') ? { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] } : { Low: '4294967295', High: '2147483647', Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] });
+    store.get.mockImplementation(async path => path.includes('/lists?') ? { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] } : { Low: '4294967295', High: '2147483647', Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ Id: 901, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { Id: 902, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] });
     await act(async () => node.querySelector('button').click());
     expect(document.querySelector('footer').textContent).toContain('Feedback History');
     expect(document.querySelector('[role="alert"]')).toBeNull();
@@ -167,7 +167,7 @@ it('keeps the owner edit draft and original record on a failed save', async () =
     if (path.includes('/lists?')) return { value: [{ Id: '11111111-1111-1111-1111-111111111111', Title: 'Modernization-Tracker - Feedback', BaseTemplate: 100 }] };
     if (path.includes('/fields?$filter')) return { value: [{ InternalName: 'FeedbackStatus', TypeAsString: 'Choice', Choices: ['New', 'In progress', 'Resolved', 'Closed'] }] };
     if (path.includes('/items?')) return { value: [{ Id: 1, Title: 'Original report', FeedbackKind: 'Bug', FeedbackDetails: 'Details', 'odata.etag': '"2"', Created: '2026-10-30T00:00:00Z' }] };
-    return { Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] };
+    return { Id: 7, Title: 'Modernization-Tracker - Feedback', HasUniqueRoleAssignments: true, value: [{ Id: 901, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackKind' }, { Id: 902, PrincipalId: 7, RoleDefinitionBindings: [], InternalName: 'FeedbackDetails' }] };
   }) };
   const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
   const button = label => [...document.querySelectorAll('button')].find(button => button.textContent === label);
@@ -205,5 +205,42 @@ it('shows Feedback History and editing controls to a verified manager without de
     expect(button('Enable manager history access')).toBeUndefined();
     await act(async () => button('Edit').click());
     expect(document.querySelector('.feedback-edit input').value).toBe('History report');
+  } finally { await act(async () => root.unmount()); node.remove(); }
+});
+
+it('accepts optional files from the picker and clipboard, removes individual files, and keeps failed drafts', async () => {
+  const store = { webUrl: 'https://example.test', currentUser: async () => ({}), get: async () => ({ value: [] }), post: vi.fn().mockRejectedValue(new Error('Offline')) };
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  const button = label => [...document.querySelectorAll('button')].find(button => button.textContent === label);
+  try {
+    await act(async () => root.render(<Feedback store={store} />));
+    await act(async () => node.querySelector('button').click());
+    await act(async () => { change(document.querySelector('input[maxlength]'), 'Screenshots help'); change(document.querySelector('textarea'), 'Steps'); });
+    const input = document.querySelector('input[type=file]');
+    await act(async () => {
+      Object.defineProperty(input, 'files', { configurable: true, value: [new File(['pdf'], 'steps.pdf', { type: 'application/pdf' })] });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(document.querySelector('.feedback-attachment-list').textContent).toContain('steps.pdf');
+    await act(async () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { files: [new File(['image'], 'pasted.png', { type: 'image/png' })] } });
+      document.querySelector('textarea').dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    });
+    expect(document.querySelectorAll('.feedback-attachment-list li')).toHaveLength(2);
+    await act(async () => document.querySelector('[aria-label="Remove steps.pdf"]').click());
+    expect(document.querySelectorAll('.feedback-attachment-list li')).toHaveLength(1);
+    await act(async () => button('Send feedback').click());
+    await act(async () => { await vi.waitFor(() => expect(store.post).toHaveBeenCalledTimes(1)); });
+    expect(document.querySelector('[role="alert"]').textContent).toContain('No report was sent');
+    expect(document.querySelector('.feedback-attachment-list').textContent).toContain('pasted.png');
+    expect(document.querySelector('textarea').value).toBe('Steps');
+    await act(async () => button('Send feedback').click());
+    expect(store.post).toHaveBeenCalledTimes(1);
+    await act(async () => document.querySelector('[aria-label="Remove pasted.png"]').click());
+    store.post.mockResolvedValue([{ ErrorInfo: null }]);
+    await act(async () => button('Send feedback').click());
+    expect(document.body.textContent).toContain('Thank you for the feedback');
   } finally { await act(async () => root.unmount()); node.remove(); }
 });

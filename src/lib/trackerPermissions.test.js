@@ -582,3 +582,105 @@ describe('list-based project folder lookup', () => {
     expect(store.post).not.toHaveBeenCalled();
   });
 });
+
+describe('project team permissions', () => {
+  const colleague = { id: 'u2', title: 'Second Engineer', loginName: 'i:0#.f|membership|second@example.com', email: 'second@example.com', role: 'Project Engineer' };
+  const engineer = { ...person, email: 'engineer@example.com' };
+  const teamProject = (people = [engineer, colleague]) => ({
+    spId: 5, projectKey: 'p', title: 'Team project',
+    engineers: people.map(row => ({ name: row.title, email: row.email, loginName: row.loginName })),
+  });
+  const assignment = (id, role = 3, type = 1) => ({ PrincipalId: id, Member: { PrincipalType: type }, RoleDefinitionBindings: [{ Id: role }] });
+  function teamFixture() {
+    const f = fixture();
+    f.permissions.group = vi.fn(async () => ({ Id: 7 }));
+    f.permissions.membership = vi.fn(async (_group, login) => ({ Id: login === engineer.loginName ? 11 : 12, LoginName: login }));
+    f.permissions.contributionRole = vi.fn(async () => 3);
+    f.permissions.applyScope = vi.fn();
+    f.permissions.folder = vi.fn(async key => ({ path: `/${key}/tracker-project-5`, scope: `/${key}/items(50)` }));
+    f.permissions.pages = vi.fn(async () => []);
+    return f;
+  }
+  it('keeps retained teammates, removes only departed engineer Contribute, and adds the new teammate once', async () => {
+    const { permissions, store } = fixture();
+    let acl = [assignment(11), assignment(12), assignment(90, 99), assignment(50, 3, 8), assignment(13, 2)];
+    store.get.mockImplementation(async path => path.includes('/roleassignments') ? { value: acl } : { HasUniqueRoleAssignments: true });
+    store.post.mockImplementation(async path => {
+      const [, id, role] = path.match(/principalid=(\d+),roledefid=(\d+)/);
+      if (path.includes('/removeroleassignment')) acl = acl.flatMap(row => row.PrincipalId !== Number(id) ? [row] : [{ ...row, RoleDefinitionBindings: row.RoleDefinitionBindings.filter(binding => binding.Id !== Number(role)) }]);
+      else acl.push(assignment(Number(id), Number(role)));
+    });
+    await permissions.applyScope('/project', [12, 13], 3);
+    expect(store.post.mock.calls.map(([path]) => path)).toEqual([
+      '/project/roleassignments/removeroleassignment(principalid=11,roledefid=3)',
+      '/project/roleassignments/addroleassignment(principalid=13,roledefid=3)',
+    ]);
+    expect(acl).toEqual(expect.arrayContaining([assignment(12), assignment(13), assignment(13, 2), assignment(90, 99), assignment(50, 3, 8)]));
+    store.post.mockClear();
+    await permissions.applyScope('/project', [13, 12], 3);
+    expect(store.post).not.toHaveBeenCalled();
+    expect(permissions.matchesEngineer(acl, [12, 13], 3)).toBe(true);
+    expect(permissions.matchesEngineer(acl, [12], 3)).toBe(false);
+  });
+  it('does not change a scope when one desired principal is invalid', async () => {
+    const { permissions, store } = fixture();
+    await expect(permissions.applyScope('/project', [11, undefined], 3)).rejects.toThrow('every project engineer principal');
+    expect(store.get).not.toHaveBeenCalled(); expect(store.post).not.toHaveBeenCalled();
+  });
+  it('applies both engineers to the project, all child folders, and legacy items while matching team ACLs are skipped', async () => {
+    const { permissions } = teamFixture();
+    permissions.pages.mockImplementation(async path => {
+      const key = path.includes('Tasks') ? 'tasks' : path.includes('Updates') ? 'updates' : 'risks';
+      return [
+        { Id: 1, FileSystemObjectType: 0, FileDirRef: `/${key}`, HasUniqueRoleAssignments: false },
+        { Id: 2, FileSystemObjectType: 0, FileDirRef: `/${key}/tracker-project-5`, HasUniqueRoleAssignments: false },
+        { Id: 3, FileSystemObjectType: 0, FileDirRef: `/${key}`, HasUniqueRoleAssignments: true },
+        { Id: 4, FileSystemObjectType: 0, FileDirRef: `/${key}`, HasUniqueRoleAssignments: true, Archived: true },
+      ];
+    });
+    permissions.assignments = vi.fn(async scope => scope.endsWith('/items(3)') ? [assignment(11), assignment(12), assignment(90, 99)] : [assignment(11), assignment(99)]);
+    await permissions.syncProject(teamProject(), [engineer, colleague]);
+    expect(permissions.membership.mock.calls.map(([, login]) => login)).toEqual([engineer.loginName, colleague.loginName]);
+    expect(permissions.applyScope).toHaveBeenCalledTimes(10);
+    expect(permissions.applyScope.mock.calls.every(([, ids]) => ids.length === 2 && ids.includes(11) && ids.includes(12))).toBe(true);
+    expect(permissions.applyScope.mock.calls.some(([scope]) => /\/items\([23]\)$/.test(scope))).toBe(false);
+  });
+  it('stops before changing any scopes if the second engineer membership is missing', async () => {
+    const { permissions, store } = teamFixture();
+    permissions.membership.mockImplementation(async (_group, login) => login === engineer.loginName ? { Id: 11 } : undefined);
+    await expect(permissions.syncProject(teamProject(), [engineer, colleague])).rejects.toThrow('Second Engineer');
+    expect(permissions.applyScope).not.toHaveBeenCalled(); expect(permissions.folder).not.toHaveBeenCalled(); expect(store.post).not.toHaveBeenCalled();
+  });
+  it.each(['missing', 'ambiguous'])('does not silently remove a teammate whose directory identity is %s', async problem => {
+    const { permissions, store } = teamFixture();
+    const users = problem === 'missing' ? [engineer] : [engineer, colleague, { ...colleague, id: 'duplicate' }];
+    await expect(permissions.syncProject(teamProject(), users)).rejects.toThrow('uniquely verify');
+    expect(permissions.applyScope).not.toHaveBeenCalled(); expect(permissions.membership).not.toHaveBeenCalled(); expect(store.post).not.toHaveBeenCalled();
+  });
+  it('does not grant a demoted Viewer direct access or duplicate a Manager baseline grant', async () => {
+    const { permissions } = teamFixture();
+    await permissions.syncProject(teamProject(), [{ ...engineer, role: 'Viewer' }, { ...colleague, role: 'Manager' }]);
+    expect(permissions.membership).not.toHaveBeenCalled();
+    expect(permissions.applyScope.mock.calls.every(([, ids]) => ids === null)).toBe(true);
+  });
+  it('revokes every engineer when a project is archived without resolving stale team identities', async () => {
+    const { permissions } = teamFixture();
+    await permissions.syncProject({ ...teamProject(), archived: true }, []);
+    expect(permissions.membership).not.toHaveBeenCalled();
+    expect(permissions.applyScope).toHaveBeenCalledTimes(4);
+    expect(permissions.applyScope.mock.calls.every(([, ids]) => ids === null)).toBe(true);
+  });
+  it('distinguishes two assigned claims identities even if they share a mailbox', async () => {
+    const { permissions } = teamFixture();
+    const users = [engineer, colleague].map(row => ({ ...row, email: 'shared@example.com' }));
+    await permissions.syncProject(teamProject(users), users);
+    expect(permissions.membership.mock.calls.map(([, login]) => login)).toEqual([engineer.loginName, colleague.loginName]);
+    expect(permissions.applyScope.mock.calls.every(([, ids]) => ids.length === 2)).toBe(true);
+  });
+  it('does not apply access if distinct logins unexpectedly resolve to the same principal', async () => {
+    const { permissions } = teamFixture();
+    permissions.membership.mockResolvedValue({ Id: 11 });
+    await expect(permissions.syncProject(teamProject(), [engineer, colleague])).rejects.toThrow('uniquely verify every engineer');
+    expect(permissions.applyScope).not.toHaveBeenCalled();
+  });
+});

@@ -47,9 +47,12 @@ try {
   });
   if (loadingLogoStyle.animationName !== 'none' || loadingLogoStyle.boxShadow !== 'none' || loadingLogoStyle.filter !== 'none') errors.push(`Loading logo still glows or animates: ${JSON.stringify(loadingLogoStyle)}`);
   if (await frame.getByRole('button', { name: /New project/ }).count()) errors.push('Standard user could create projects');
-  await frame.getByRole('button', { name: 'Users and managers', exact: true }).click();
+  if (await frame.getByRole('button', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users navigation');
+  if (await frame.getByRole('heading', { name: 'Users and managers', exact: true }).count()) errors.push('Viewer could see the users panel');
   if (await frame.getByLabel('Testing password').count()) errors.push('Testing manager access was visible before Ctrl+M');
-  await frame.locator('body').press('Control+m');
+  // Focus a real control so keyboard input enters the srcdoc frame.
+  await frame.getByRole('button', { name: 'Portfolio', exact: true }).press('Control+m');
+  await frame.getByRole('heading', { name: 'Testing manager access', exact: true }).waitFor();
   await frame.getByLabel('Testing password').fill('incorrect-password');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('alert').filter({ hasText: 'Testing password is incorrect' }).waitFor();
@@ -57,6 +60,8 @@ try {
   await frame.getByLabel('Testing password').fill('admin123');
   await frame.getByRole('button', { name: 'Enable manager access' }).click();
   await frame.getByRole('button', { name: /New project/ }).waitFor();
+  await frame.getByRole('button', { name: 'Users and managers', exact: true }).waitFor();
+  await frame.getByLabel('Testing password').waitFor({ state: 'detached' });
   // Reload the packaged application to verify persisted role, not just UI state.
   await page.evaluate(() => {
     const key = 'modernization-project-tracker:v2';
@@ -122,20 +127,27 @@ try {
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).waitFor();
   await frame.getByRole('button', { name: 'Edit project', exact: true }).click();
-  const engineerEmail = frame.getByLabel('Project Engineer’s email', { exact: true });
+  const engineerEmail = frame.getByLabel('Add project engineer', { exact: true });
   await engineerEmail.fill('sme@');
   await frame.getByRole('option', { name: /SME Test User.*sme@example\.test/i }).click();
-  await frame.locator('.modal output[aria-label="Project engineer"]').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.locator('.project-engineer-chip').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.getByRole('button', { name: 'Assign me', exact: true }).click();
+  await frame.locator('.project-engineer-chip').filter({ hasText: 'Local Engineer' }).waitFor();
+  if (await frame.locator('.project-engineer-chip').count() !== 2) errors.push('Two project engineers were not selected');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await frame.locator('html').evaluate((el, value) => { el.dataset.theme = value; }, theme);
       const layout = await engineerEmail.evaluate((el) => el.getBoundingClientRect().width > 150 && el.scrollWidth <= el.clientWidth + 1);
       if (!layout || await frame.locator('.modal input[type="checkbox"]').count()) errors.push('Project engineer field is cramped or retired checkbox remains');
+      const teamFits = await frame.locator('.project-team-selection').evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+      if (!teamFits) errors.push(`Project team overflows at ${width}px in ${theme} theme`);
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await frame.getByRole('button', { name: 'Save project', exact: true }).click();
+  await frame.locator('.project-team-detail').filter({ hasText: 'SME Test User' }).waitFor();
+  await frame.locator('.project-team-detail').filter({ hasText: 'Local Engineer' }).waitFor();
   await frame.getByRole('button', { name: 'Project settings', exact: true }).click();
   await frame.locator('.drawer-progress').click();
   if (await frame.locator('.drawer-header-actions .project-menu-popover').count()) errors.push('Settings menu did not dismiss on outside click');
@@ -190,11 +202,17 @@ try {
   await frame.getByRole('button', { name: 'smoke-report.txt', exact: true }).waitFor();
   for (const theme of ['light', 'dark']) {
     await frame.locator('html').evaluate((element, value) => { element.dataset.theme = value; }, theme);
+    await frame.locator('.modal').evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished)));
     const uploadStyle = await frame.getByLabel('Attach documents', { exact: true }).evaluate((input) => {
-      const button = getComputedStyle(input, '::file-selector-button');
-      return { background: button.backgroundColor, color: button.color, radius: button.borderRadius };
+      const picker = input.closest('.file-picker');
+      const button = getComputedStyle(picker.querySelector('.file-picker-button'));
+      const cancel = getComputedStyle(input.closest('.modal').querySelector('footer .button.secondary'));
+      return { consistent: ['backgroundColor', 'color', 'borderRadius', 'borderColor'].every(key => button[key] === cancel[key]),
+        readable: button.backgroundColor !== button.color, nativeHidden: getComputedStyle(input).opacity === '0',
+        fits: picker.scrollWidth <= picker.clientWidth + 1,
+        styles: Object.fromEntries(['backgroundColor', 'color', 'borderRadius', 'borderColor'].map(key => [key, [button[key], cancel[key]]])) };
     });
-    if (uploadStyle.radius !== '7px' || uploadStyle.background === uploadStyle.color) errors.push(`Upload theme styling failed: ${theme}`);
+    if (!uploadStyle.consistent || !uploadStyle.readable || !uploadStyle.nativeHidden || !uploadStyle.fits) errors.push(`Upload theme styling failed: ${theme} ${JSON.stringify(uploadStyle)}`);
   }
 
 

@@ -87,6 +87,15 @@ function upgradeFixture({ missing = auditFields, low = '1', missingList } = {}) 
   });
   return { store, schemas };
 }
+it('keeps older projects readable for Viewers without selecting or writing the new team column', async () => {
+  const { store, schemas } = upgradeFixture({ missing: [] });
+  schemas.projects.delete('EngineersJson');
+  await startStorage(store);
+  expect(store.schemaReadiness).toMatchObject({ ready: false, readable: true });
+  await store.load();
+  expect(store.post).not.toHaveBeenCalled();
+  expect(store.get.mock.calls.filter(([path]) => path.includes('ModernizationProjects') && path.includes('/items?')).every(([path]) => !path.includes('EngineersJson'))).toBe(true);
+});
 it.each([auditFields, ['EditedAt'], ['EditorName', 'EditorKey']].map(missing => ({ missing })))('loads the pre-editing schema for a Viewer without setup writes ($missing)', async ({ missing }) => {
   const { store } = upgradeFixture({ missing });
   await startStorage(store);

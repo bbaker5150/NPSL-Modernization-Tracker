@@ -2,6 +2,7 @@ import { CONTAINERS, SharePointStore } from './spStore';
 import { retryMigrationRead, reconcileMigrationWrite, migrationRequest } from './migrationRecovery';
 import { getFormDigest } from './spContext';
 import { makeMigrationBatch, checkMigrationBatch } from './migrationBatch';
+import { decodeProjectEngineers, projectEngineers } from './projectEngineers';
 
 export const MIGRATION_SOURCE = 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG';
 export const MIGRATION_TARGET = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
@@ -20,6 +21,22 @@ export const same = (a, b, fields) => fields.every(field => clean(a[field], fiel
 const identity = (key, row) => key === 'users' ? row.Archived ? '' : String(row.LoginKey || row.Email || '').trim().toLowerCase().split('|').pop() : key === 'projects' ? row.ProjectKey : key === 'acronyms' ? String(row.Acronym || '').toLowerCase() : '';
 export const writable = (row, fields) => Object.fromEntries(fields.map(field => [field, fieldTypes.get(field) === 'Boolean' ? Boolean(row[field]) : row[field] ?? null]));
 export const sha256 = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
+
+async function readMigrationSource(source, list) {
+  const rows = await source.readRows(list.key, list.sourceFields || list.fields);
+  if (list.key !== 'projects') return rows;
+  // Owner mirrors and the team are one assignment. Importing an older source
+  // must replace both together instead of retaining a newer destination team.
+  return rows.map(row => {
+    const legacy = { ownerName: row.OwnerName, ownerEmail: row.OwnerEmail, ownerKey: row.OwnerKey };
+    if (list.deriveLegacyEngineers) return { ...row, EngineersJson: JSON.stringify(projectEngineers(legacy)) };
+    if (list.fields.includes('EngineersJson')) {
+      try { decodeProjectEngineers(row.EngineersJson, legacy); }
+      catch (error) { throw new Error(`Projects/${row.RecordId}: ${error.message}`); }
+    }
+    return row;
+  });
+}
 
 // This adapter uses the current SharePoint session and existing request plumbing.
 // It neither changes site permissions nor bypasses host confirmation policies.
@@ -163,10 +180,13 @@ export async function previewMigration(source, target, onProgress = () => {}, { 
     onProgress(`Reading ${container.suffix}…`);
     const [sourceSchema, targetSchema] = await Promise.all([source.schema(container), target.schema(container)]);
     for (const required of ['Title', 'RecordId']) if (!sourceSchema.has(required)) throw new Error(`${container.suffix}: source is missing ${required}.`);
-    const fields = fieldsFor(container).filter(field => sourceSchema.has(field));
+    const sourceFields = fieldsFor(container).filter(field => sourceSchema.has(field));
+    const deriveLegacyEngineers = container.key === 'projects' && !sourceSchema.has('EngineersJson') && targetSchema.has('EngineersJson');
+    const fields = [...sourceFields, ...(deriveLegacyEngineers ? ['EngineersJson'] : [])];
     const missing = fields.filter(field => !targetSchema.has(field));
     if (missing.length) throw new Error(`${container.suffix}: destination needs fields ${missing.join(', ')}. Open the current tracker build on metsoft as a site owner to complete setup.`);
-    const [rows, existing] = await Promise.all([source.readRows(container.key, fields), target.readRows(container.key, fields)]);
+    const sourceRead = { key: container.key, fields, sourceFields, deriveLegacyEngineers };
+    const [rows, existing] = await Promise.all([readMigrationSource(source, sourceRead), target.readRows(container.key, fields)]);
     indexRows(container.key, rows, 'ISEA METENG source'); const byId = indexRows(container.key, existing, 'metsoft destination');
     const matched = new Set(), entries = [];
     for (const row of rows) {
@@ -178,7 +198,7 @@ export async function previewMigration(source, target, onProgress = () => {}, { 
       const names = ['tasks', 'updates', 'references'].includes(container.key) ? await source.attachments(container.key, row.Id) : [];
       entries.push({ source: row, destination, names, conflict: !!destination && !same(row, destination, fields) });
     }
-    plan.lists.push({ key: container.key, title: container.suffix, fields, entries, extra: existing.filter(row => !matched.has(row.Id)).length });
+    plan.lists.push({ ...sourceRead, title: container.suffix, entries, extra: existing.filter(row => !matched.has(row.Id)).length });
   }
   const projects = new Set(plan.lists.find(list => list.key === 'projects').entries.map(entry => entry.source.ProjectKey));
   for (const list of plan.lists.filter(list => ['tasks', 'updates', 'risks'].includes(list.key))) {
@@ -203,7 +223,7 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
   // Refresh both sides before any write. The reviewed snapshot must still match.
   for (const list of plan.lists) {
     onProgress(`Checking ${list.title} source and destination before copying…`);
-    const [sourceRows, targetRows] = await Promise.all([source.readRows(list.key, list.fields), target.readRows(list.key, list.fields)]);
+    const [sourceRows, targetRows] = await Promise.all([readMigrationSource(source, list), target.readRows(list.key, list.fields)]);
     const original = list.entries.map(entry => entry.source);
     if (sourceRows.length !== original.length || original.some(row => !sourceRows.some(now => now.RecordId === row.RecordId && now.Modified === row.Modified && same(now, row, list.fields)))) throw new Error('Source changed after preview. Pause edits and refresh the preview.');
     for (const entry of list.entries) {
@@ -266,7 +286,7 @@ export async function runMigration(source, target, plan, { replaceConflicts = fa
   onProgress('Verifying records and source consistency…');
   for (const list of plan.lists) {
     onProgress(`Verifying ${list.title} source snapshot…`);
-    const rows = await source.readRows(list.key, list.fields);
+    const rows = await readMigrationSource(source, list);
     if (rows.length !== list.entries.length) throw new Error('Source changed during migration. Refresh preview and repeat before switching users.');
     for (const entry of list.entries) {
       onProgress(`Verifying ${list.title}: ${entry.source.Title || entry.source.RecordId}…`);

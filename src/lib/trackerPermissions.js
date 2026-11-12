@@ -1,4 +1,5 @@
 import { isOwnedByUser } from './identity';
+import { projectEngineers } from './projectEngineers';
 import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
 import { legacyListTitle } from './trackerLists';
 export { TRACKER_GROUPS } from './trackerGroups';
@@ -8,6 +9,13 @@ const suffixes = { projects: 'Projects', tasks: 'Tasks', updates: 'Updates', ris
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(String(value).replace(/'/g, "''"));
 const positiveId = value => Number.isInteger(Number(value)) && Number(value) > 0;
+const engineerPrincipalSet = value => {
+  const ids = value == null ? [] : value instanceof Set ? [...value] : Array.isArray(value) ? value : [value];
+  if (ids.some(id => !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) {
+    throw new Error('Could not verify every project engineer principal. No permission changes were made.');
+  }
+  return new Set(ids.map(Number));
+};
 
 // No privileged service identity: every operation runs as the signed-in person.
 // Group ownership and the four list ACLs must be configured by the site owner.
@@ -257,17 +265,20 @@ export class TrackerPermissions {
     return rows;
   }
   matchesEngineer(rows, principalId, roleId) {
-    const engineers = rows.filter(row => Number(row.Member.PrincipalType) === 1 &&
-      (row.RoleDefinitionBindings.results || row.RoleDefinitionBindings).some(binding => Number(binding.Id) === Number(roleId)));
-    return engineers.every(row => Number(row.PrincipalId) === Number(principalId)) &&
-      (!principalId || engineers.some(row => Number(row.PrincipalId) === Number(principalId)));
+    const desired = engineerPrincipalSet(principalId);
+    const engineers = new Set(rows.filter(row => Number(row.Member.PrincipalType) === 1 &&
+      (row.RoleDefinitionBindings.results || row.RoleDefinitionBindings).some(binding => Number(binding.Id) === Number(roleId)))
+      .map(row => Number(row.PrincipalId)));
+    return engineers.size === desired.size && [...engineers].every(id => desired.has(id));
   }
   async applyScope(scope, principalId, roleId, baseline = null) {
+    const desired = engineerPrincipalSet(principalId);
     baseline ??= await this.baselineGrants();
     const info = unwrap(await this.get(`${scope}?$select=HasUniqueRoleAssignments`));
     if (typeof info.HasUniqueRoleAssignments !== 'boolean') throw new Error('Could not verify permission inheritance. No scope changes were made.');
     if (!info.HasUniqueRoleAssignments) await this.post(`${scope}/breakroleinheritance(copyRoleAssignments=true,clearSubscopes=false)`);
     const bindings = row => row.RoleDefinitionBindings?.results || row.RoleDefinitionBindings || [];
+    const hasContribute = row => bindings(row).some(binding => Number(binding.Id) === Number(roleId));
     const current = await this.assignments(scope);
     let changed = false;
     // Add baseline roles without replacing any existing owner or manual grants.
@@ -277,23 +288,24 @@ export class TrackerPermissions {
         changed = true;
       }
     }
-    // These app scopes reserve direct-user Contribute for the assigned engineer.
-    // Preserve groups, Full Control, Read, and any other manually assigned roles.
+    // These app scopes reserve direct-user Contribute for assigned engineers.
+    // Preserve retained teammates, groups, Full Control, and other manual roles.
     for (const row of current) {
-      if (row.Member?.PrincipalType === 1 && row.PrincipalId !== principalId && bindings(row).some(binding => binding.Id === roleId)) {
+      if (Number(row.Member?.PrincipalType) === 1 && !desired.has(Number(row.PrincipalId)) && hasContribute(row)) {
         await this.post(`${scope}/roleassignments/removeroleassignment(principalid=${row.PrincipalId},roledefid=${roleId})`);
         changed = true;
       }
     }
-    if (principalId && !current.some(row => row.PrincipalId === principalId && bindings(row).some(binding => binding.Id === roleId))) {
-      await this.post(`${scope}/roleassignments/addroleassignment(principalid=${principalId},roledefid=${roleId})`);
-      changed = true;
+    for (const id of desired) {
+      if (!current.some(row => Number(row.PrincipalId) === id && Number(row.Member?.PrincipalType) === 1 && hasContribute(row))) {
+        await this.post(`${scope}/roleassignments/addroleassignment(principalid=${id},roledefid=${roleId})`);
+        changed = true;
+      }
     }
     const checked = changed ? await this.assignments(scope) : current;
     if (!this.matchesBaseline(checked, baseline)) throw new Error('SharePoint did not verify baseline group access. Retry Apply tracker permissions.');
-    const verified = checked.filter(row => row.Member?.PrincipalType === 1 && bindings(row).some(binding => binding.Id === roleId));
-    if (verified.some(row => row.PrincipalId !== principalId) || (principalId && !verified.some(row => row.PrincipalId === principalId))) {
-      throw new Error('SharePoint did not verify the project engineer permission change. Retry Apply tracker permissions.');
+    if (!this.matchesEngineer(checked, desired, roleId)) {
+      throw new Error('SharePoint did not verify every project engineer permission change. Retry Apply tracker permissions.');
     }
   }
   async metadata(key) {
@@ -383,14 +395,41 @@ export class TrackerPermissions {
   }
   async syncProject(project, users, onProgress = () => {}, baseline = null) {
     baseline ??= await this.baselineGrants();
-    const engineer = users.find(row => row.role === 'Project Engineer' && isOwnedByUser(project, row));
-    let principalId = null;
-    if (engineer && !project.archived) {
-      const group = await this.group('Project Engineer');
-      const member = await this.membership(group, engineer.loginName);
-      if (!positiveId(member?.Id)) throw new Error(`Save ${engineer.title}'s Project Engineer role before assigning project access.`);
-      principalId = Number(member.Id);
+    const engineerIds = [];
+    if (!project.archived) {
+      const team = projectEngineers(project);
+      const resolved = [];
+      for (const engineer of team) {
+        // Name-only legacy assignments can be displayed, but never authorize access.
+        if (!engineer.loginName && !engineer.email) continue;
+        const matches = users.filter(row => isOwnedByUser({ ownerKey: engineer.loginName, ownerEmail: engineer.email }, row));
+        if (matches.length > 1 || (Array.isArray(project.engineers) && matches.length === 0)) {
+          throw new Error(`Could not uniquely verify ${engineer.name || engineer.email || engineer.loginName} in the Tracker directory. Check the project team before applying access.`);
+        }
+        const user = matches[0];
+        // An intentional demotion to Viewer must not be undone by a saved assignment.
+        // Managers already receive the baseline Manager group grant.
+        if (!user || user.role === 'Viewer' || user.role === 'Manager') continue;
+        if (user.role !== 'Project Engineer' || !user.loginName?.trim()) {
+          throw new Error(`Verify ${user.title || engineer.name}'s Project Engineer role before assigning project access.`);
+        }
+        if (!resolved.some(row => row.loginName.toLowerCase() === user.loginName.toLowerCase())) resolved.push(user);
+      }
+      // Verify the entire team before any scope is changed. A missing teammate
+      // must never be treated as permission to remove their existing grants.
+      if (resolved.length) {
+        const group = await this.group('Project Engineer');
+        for (const engineer of resolved) {
+          const member = await this.membership(group, engineer.loginName);
+          if (!positiveId(member?.Id) || engineerIds.includes(Number(member.Id))) {
+            throw new Error(`Save ${engineer.title}'s Project Engineer role before assigning project access. SharePoint did not uniquely verify every engineer.`);
+          }
+          engineerIds.push(Number(member.Id));
+        }
+      }
     }
+    // Keep the scalar contract for legacy single-assignee callers and retries.
+    const principalId = engineerIds.length > 1 ? engineerIds : engineerIds[0] || null;
     const roleId = await this.contributionRole();
     onProgress(`Updating access: ${project.title || project.projectKey}`);
     await this.applyScope(`${this.root('projects')}/items(${project.spId})`, principalId, roleId, baseline);

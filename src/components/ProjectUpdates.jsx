@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { FilePicker } from './FilePicker';
 import { displayName } from '../lib/displayName';
 import { validateAttachment } from '../lib/taskAttachments';
 
@@ -59,7 +60,7 @@ function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
         <button type="button" className="text-button update-delete" aria-label={`Confirm remove ${file.name}`} disabled={busy} onClick={remove}>Confirm removal</button>
       </> : <button type="button" className="text-button" aria-label={`Remove ${file.name}`} disabled={busy || !item.version} onClick={() => setRemoval({ name: file.name, version: item.version })}>Remove</button>)}
     </li>)}</ul>}
-    {canPost && <details><summary>Attach documents to this update</summary><input className="document-upload" type="file" multiple aria-label={`Attach documents to update by ${item.authorName || 'Unknown author'}`} disabled={busy} onChange={upload} /><small>Up to 50 MB each.</small></details>}
+    {canPost && <details><summary>Attach documents to this update</summary><FilePicker label="Attach update documents" hint="Up to 50 MB each · saved with this update" ariaLabel={`Attach documents to update by ${item.authorName || 'Unknown author'}`} disabled={busy} onChange={upload} /></details>}
     {busy && <p role="status">Working on update documents…</p>}
     {error && <p className="inline-error" role="alert">{error} <button type="button" className="text-button" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh documents</button></p>}
   </div>;
@@ -157,7 +158,7 @@ export function ProjectUpdates({ project, tasks, updates, risks = [], store, can
     {canPost && <form className="update-composer" noValidate onSubmit={post} aria-label="New project update">
       <div className="update-options"><label className="field">Task reference <small>Optional</small><select aria-label="Task reference" disabled={busy || !!posted} value={taskId} onChange={event => setTaskId(event.target.value)}><option value="">Project-wide update</option>{tasks.map(task => <option value={task.id} key={task.id}>{task.title}</option>)}</select></label></div>
       <label className="field">Your update<textarea aria-label="Your update" rows={4} disabled={busy || !!posted} value={summary} onChange={event => setSummary(event.target.value)} placeholder="What changed, what needs attention, or what was decided?" /></label>
-      {!posted && <label className="update-attachment-picker"><Icon name="paperclip" size={16} /><span>Attach update documents <small>Optional · up to 50 MB each</small></span><input aria-label="Update documents" className="document-upload" type="file" multiple disabled={busy} onChange={queue} /></label>}
+      {!posted && <FilePicker label="Attach update documents" hint="Optional · up to 50 MB each · saved with this update" ariaLabel="Update documents" disabled={busy} onChange={queue} />}
       {!!files.length && <ul className="update-pending-files">{files.map(file => <li key={file.name}><span>{file.name}</span><button type="button" className="text-button" disabled={busy} onClick={() => setFiles(rows => rows.filter(row => row !== file))}>Remove</button></li>)}</ul>}
       <div className="update-composer-footer"><div>{posted && <button type="button" className="button secondary" disabled={busy} onClick={() => { reset(); setError(''); setMessage('Update kept. Remaining documents were not attached.'); }}>Finish without remaining files</button>}<button type="button" className="button primary" disabled={busy || !summary.trim()} onClick={post}>{busy ? 'Posting…' : posted ? 'Retry documents' : 'Post update'}</button></div></div>
     </form>}
