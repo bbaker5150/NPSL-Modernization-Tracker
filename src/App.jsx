@@ -588,7 +588,7 @@ export function App() {
   const repoRef = useRef(null);
   if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store, repository.config) }; }
   const repo = repoRef.current;
-  const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') === 'light' ? 'light' : 'dark');
   const [view, setView] = useState('my-work');
   const [user, setUser] = useState(null);
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
