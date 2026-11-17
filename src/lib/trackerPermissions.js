@@ -119,22 +119,38 @@ export class TrackerPermissions {
     }
     const target = state.find(entry => entry.name === role);
     if (role && role !== 'Viewer' && !target) throw new Error('Select a valid tracker role.');
-    // Let role changes revoke engineer grants using the live memberships we
-    // just read, before removing groups or granting the replacement role.
-    if (beforeChange) await beforeChange(state);
-    // Existing Viewers can be repaired by saving their role again. Any
-    // transition from a live elevated group must preserve basic Tracker access.
-    if (role === 'Viewer' && (ensureViewerMembership || state.some(entry => entry.member))) {
-      await this.ensureAppMembership(person);
+    // Manager membership is controlled by that group's owner. Verify the
+    // requested promotion before removing engineer access: an ordinary tracker
+    // manager may be able to revoke engineer grants but not grant Manager.
+    const managerTarget = role === 'Manager';
+    if (managerTarget) {
+      try { await this.ensureElevatedMembership(person, target.group, target.member); }
+      catch (error) {
+        // A failed response can follow a committed addition. Do not claim the
+        // target is absent, retry the write, or roll back existing access.
+        throw new Error(`The Manager change could not be verified. Engineer access was left unchanged by this attempt. Ask a site owner to check Tracker Managers membership before retrying. ${error.message}`);
+      }
     }
-    // Remove stale privileged membership before granting the replacement role.
-    for (const entry of state.filter(entry => entry.member && entry !== target)) {
-      try {
-        await this.post(`/_api/web/sitegroups(${entry.group.Id})/users/removebyid(${entry.member.Id})`);
-        if (await this.membership(entry.group, person.loginName)) throw new Error('Membership is still present.');
-      } catch (error) { throw new Error(`Could not remove membership in ${entry.group.Title}. Its group owner must complete this role change. ${error.message}`); }
+    try {
+      // Demotions and removals still revoke direct engineer grants first.
+      // Promotions finish that cleanup only after Manager membership is verified.
+      if (beforeChange) await beforeChange(state);
+      // Existing Viewers can be repaired by saving their role again. Any
+      // transition from a live elevated group must preserve basic Tracker access.
+      if (role === 'Viewer' && (ensureViewerMembership || state.some(entry => entry.member))) {
+        await this.ensureAppMembership(person);
+      }
+      for (const entry of state.filter(entry => entry.member && entry !== target)) {
+        try {
+          await this.post(`/_api/web/sitegroups(${entry.group.Id})/users/removebyid(${entry.member.Id})`);
+          if (await this.membership(entry.group, person.loginName)) throw new Error('Membership is still present.');
+        } catch (error) { throw new Error(`Could not remove membership in ${entry.group.Title}. Its group owner must complete this role change. ${error.message}`); }
+      }
+      if (target && !managerTarget) await this.ensureElevatedMembership(person, target.group, target.member);
+    } catch (error) {
+      if (managerTarget) throw new Error(`Manager group membership is confirmed, but the remaining role cleanup is incomplete. Retry this role change to finish. ${error.message}`);
+      throw error;
     }
-    if (target) await this.ensureElevatedMembership(person, target.group, target.member);
     return target?.group || null;
   }
   async revokeEngineerAccess(person, memberships = []) {
