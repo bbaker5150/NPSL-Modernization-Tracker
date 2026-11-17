@@ -489,7 +489,12 @@ describe('Manager promotion with scoped project cleanup', () => {
     const projects = [{ spId: 5, projectKey: 'assigned', ownerKey: person.loginName }, { spId: 6, projectKey: 'former', ownerKey: 'someone-else' }];
     store.permissionProjects = vi.fn(async () => projects);
     store.permissions.revokeEngineerAccess = vi.fn(async () => {
-      expect(store.post).not.toHaveBeenCalled(); // cleanup precedes all group mutations
+      if (requested === 'Manager') {
+        // A verified promotion must precede cleanup; a denied addition must
+        // never deprive the target of their existing engineer access.
+        expect(backing.groups.find(group => group.role === 'Manager').members).toHaveLength(1);
+        expect(store.post.mock.calls.every(([path]) => path === '/_api/web/sitegroups(2)/users')).toBe(true);
+      } else expect(store.post).not.toHaveBeenCalled(); // demotion cleanup still precedes group changes
     });
     await store.syncUserAccess(person, requested, savedRole ? [{ ...person, role: savedRole }] : []);
     expect(store.permissionProjects).not.toHaveBeenCalled();
@@ -497,7 +502,7 @@ describe('Manager promotion with scoped project cleanup', () => {
     if (requested && requested !== 'Viewer') expect(backing.groups.find(group => group.role === requested).members).toHaveLength(1);
     else expect(backing.groups.every(group => group.members.length === 0)).toBe(true);
   });
-  it('stops promotion before group changes or directory persistence when engineer cleanup fails', async () => {
+  it('reports verified Manager membership and keeps engineer membership when promotion cleanup fails', async () => {
     const backing = fixture();
     backing.groups.find(group => group.role === 'Project Engineer').members = [{ Id: 11, LoginName: person.loginName }];
     const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
@@ -506,10 +511,11 @@ describe('Manager promotion with scoped project cleanup', () => {
     store.permissionProjects = vi.fn(async () => [{ spId: 5, projectKey: 'p' }]);
     store.permissions.revokeEngineerAccess = vi.fn(async () => { throw new Error('Cleanup incomplete'); });
     store.update = vi.fn(); store.create = vi.fn();
-    await expect(store.saveUser({ ...person, role: 'Manager' })).rejects.toThrow('Cleanup incomplete');
-    expect(store.post).not.toHaveBeenCalled();
+    await expect(store.saveUser({ ...person, role: 'Manager' })).rejects.toThrow('Manager group membership is confirmed, but the remaining role cleanup is incomplete');
+    expect(store.post).toHaveBeenCalledExactlyOnceWith('/_api/web/sitegroups(2)/users', { body: { LoginName: person.loginName } });
     expect(store.update).not.toHaveBeenCalled(); expect(store.create).not.toHaveBeenCalled();
     expect(backing.groups.find(group => group.role === 'Project Engineer').members).toHaveLength(1);
+    expect(backing.groups.find(group => group.role === 'Manager').members).toHaveLength(1);
   });
   it('checks all memberships before cleanup and stops when a membership read fails', async () => {
     const backing = fixture();
@@ -682,5 +688,124 @@ describe('project team permissions', () => {
     permissions.membership.mockResolvedValue({ Id: 11 });
     await expect(permissions.syncProject(teamProject(), [engineer, colleague])).rejects.toThrow('uniquely verify every engineer');
     expect(permissions.applyScope).not.toHaveBeenCalled();
+  });
+});
+
+describe('safe Manager promotion sequencing', () => {
+  function promotionFixture(initialRole = 'Project Engineer') {
+    const backing = fixture();
+    backing.groups.find(group => group.role === initialRole).members = [{ Id: 11, LoginName: person.loginName }];
+    const store = new SharePointStore({ webUrl: backing.store.webUrl, scopedAccess: true });
+    let record = { Id: 7, RecordId: person.id, Title: person.title, LoginKey: person.loginName, Email: 'engineer@example.com', AppRole: initialRole };
+    let engineerGrants = true;
+    const events = [];
+    const directoryRow = () => ({ ...person, spId: record.Id, email: record.Email, role: record.AppRole });
+    store.directoryRows = vi.fn(async () => [directoryRow()]);
+    store.get = vi.fn(async path => {
+      if (path.includes('/items(7)?')) return record;
+      const result = await backing.store.get(path);
+      if (path.includes('/sitegroups(2)/users') && backing.groups.find(group => group.role === 'Manager').members.length) events.push('Manager membership verified');
+      return result;
+    });
+    store.post = vi.fn(async (path, options) => {
+      if (path === '/_api/web/sitegroups(2)/users') events.push('Manager addition');
+      if (path.includes('/removebyid(')) events.push('Old group removal');
+      return backing.store.post(path, options);
+    });
+    store.permissions.revokeEngineerAccess = vi.fn(async () => { events.push('Engineer grant cleanup'); engineerGrants = false; });
+    store.update = vi.fn(async (_key, _id, fields) => { events.push('Directory save'); record = { Id: 7, ...fields }; });
+    store.create = vi.fn();
+    return { store, backing, events, directoryRow, savedRole: () => record.AppRole, hasEngineerGrants: () => engineerGrants };
+  }
+
+  it.each(['denied', 'ignored', 'response lost', 'verification denied'])('preserves all engineer access and the saved role when Manager addition is %s', async failure => {
+    const f = promotionFixture();
+    const post = f.store.post.getMockImplementation();
+    const get = f.store.get.getMockImplementation();
+    let attempted = false;
+    f.store.post.mockImplementation(async (path, options) => {
+      if (path !== '/_api/web/sitegroups(2)/users') return post(path, options);
+      attempted = true;
+      if (failure === 'denied') throw Object.assign(new Error('Access denied'), { status: 403 });
+      if (failure === 'ignored') return {};
+      await post(path, options);
+      if (failure === 'response lost') throw new Error('Connection interrupted after submission');
+    });
+    if (failure === 'verification denied') f.store.get.mockImplementation(async path => {
+      if (attempted && path.includes('/sitegroups(2)/users')) throw Object.assign(new Error('Cannot verify membership'), { status: 403 });
+      return get(path);
+    });
+    await expect(f.store.saveUser({ ...f.directoryRow(), role: 'Manager' })).rejects.toThrow('The Manager change could not be verified. Engineer access was left unchanged by this attempt.');
+    expect(f.store.permissions.revokeEngineerAccess).not.toHaveBeenCalled();
+    expect(f.hasEngineerGrants()).toBe(true);
+    expect(f.backing.groups.find(group => group.role === 'Project Engineer').members).toEqual([{ Id: 11, LoginName: person.loginName }]);
+    expect(f.savedRole()).toBe('Project Engineer');
+    expect(f.store.update).not.toHaveBeenCalled(); expect(f.store.create).not.toHaveBeenCalled();
+    expect(f.store.post).toHaveBeenCalledExactlyOnceWith('/_api/web/sitegroups(2)/users', { body: { LoginName: person.loginName } });
+    // Lost/denied verification responses are deliberately not treated as proof
+    // that the preceding addition did not commit, and are never replayed here.
+    expect(f.backing.groups.find(group => group.role === 'Manager').members.length).toBe(['response lost', 'verification denied'].includes(failure) ? 1 : 0);
+  });
+
+  it('verifies Manager membership before cleanup and removal, then saves the confirmed directory role', async () => {
+    const f = promotionFixture();
+    const saved = await f.store.saveUser({ ...f.directoryRow(), role: 'Manager' });
+    expect(saved.role).toBe('Manager');
+    expect(f.events).toEqual(['Manager addition', 'Manager membership verified', 'Engineer grant cleanup', 'Old group removal', 'Directory save']);
+    expect(f.hasEngineerGrants()).toBe(false);
+    expect(f.backing.groups.find(group => group.role === 'Project Engineer').members).toEqual([]);
+    expect(f.backing.groups.find(group => group.role === 'Manager').members).toHaveLength(1);
+  });
+
+  it.each(['cleanup', 'group removal'])('retries unfinished %s after a verified promotion without adding Manager twice', async failure => {
+    const f = promotionFixture();
+    if (failure === 'cleanup') f.store.permissions.revokeEngineerAccess.mockRejectedValueOnce(new Error('Permission cleanup interrupted'));
+    else {
+      const post = f.store.post.getMockImplementation();
+      let interrupted = false;
+      f.store.post.mockImplementation(async (path, options) => {
+        if (path.includes('/sitegroups(1)/users/removebyid') && !interrupted) { interrupted = true; throw new Error('Removal interrupted'); }
+        return post(path, options);
+      });
+    }
+    await expect(f.store.saveUser({ ...f.directoryRow(), role: 'Manager' })).rejects.toThrow('Manager group membership is confirmed, but the remaining role cleanup is incomplete. Retry this role change to finish.');
+    expect(f.backing.groups.find(group => group.role === 'Manager').members).toHaveLength(1);
+    expect(f.backing.groups.find(group => group.role === 'Project Engineer').members).toHaveLength(1);
+    expect(f.savedRole()).toBe('Project Engineer');
+    expect(f.store.update).not.toHaveBeenCalled();
+    const result = await f.store.saveUser({ ...f.directoryRow(), role: 'Manager' });
+    expect(result.role).toBe('Manager');
+    expect(f.savedRole()).toBe('Manager');
+    expect(f.hasEngineerGrants()).toBe(false);
+    expect(f.backing.groups.find(group => group.role === 'Project Engineer').members).toEqual([]);
+    expect(f.store.post.mock.calls.filter(([path]) => path === '/_api/web/sitegroups(2)/users')).toHaveLength(1);
+    expect(f.store.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('verifies an existing Manager on resave without adding membership or redoing engineer cleanup', async () => {
+    const f = promotionFixture('Manager');
+    await f.store.saveUser({ ...f.directoryRow(), title: 'Updated manager profile' });
+    expect(f.store.post).not.toHaveBeenCalled();
+    expect(f.store.permissions.revokeEngineerAccess).not.toHaveBeenCalled();
+    expect(f.events).toEqual(['Manager membership verified', 'Manager membership verified', 'Directory save']);
+    expect(f.savedRole()).toBe('Manager');
+  });
+
+  it.each(['Viewer', 'Project Engineer', null])('preserves existing demotion and removal ordering for Manager → %s', async requestedRole => {
+    const f = promotionFixture('Manager');
+    f.store.permissionProjects = vi.fn(async () => []);
+    if (requestedRole === 'Project Engineer') {
+      // Existing policy reconciles project grants after membership replacement;
+      // it must still remove Manager membership before adding Engineer.
+      await f.store.syncUserAccess(f.directoryRow(), requestedRole, [f.directoryRow()]);
+      const writes = f.store.post.mock.calls.map(([path]) => path);
+      expect(writes).toEqual(['/_api/web/sitegroups(2)/users/removebyid(11)', '/_api/web/sitegroups(1)/users']);
+    } else {
+      await f.store.syncUserAccess(f.directoryRow(), requestedRole, [f.directoryRow()]);
+      expect(f.events.indexOf('Engineer grant cleanup')).toBeLessThan(f.events.indexOf('Old group removal'));
+      expect(f.store.permissions.revokeEngineerAccess).toHaveBeenCalledTimes(1);
+    }
+    expect(f.store.post.mock.calls.some(([path]) => path === '/_api/web/sitegroups(2)/users')).toBe(false);
+    expect(f.backing.groups.find(group => group.role === 'Manager').members).toEqual([]);
   });
 });

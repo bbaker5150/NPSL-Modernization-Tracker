@@ -965,6 +965,7 @@ describe('application shell', () => {
     expect(document.querySelector('.directory-form')).toBeNull();
     await act(async () => [...card.querySelectorAll('button')].find((button) => button.textContent === 'Update User').click());
     await act(async () => changeValue(document.querySelector('.directory-form select'), role));
+    expect(document.querySelector('#manager-role-hint')).toBeNull();
     const form = document.querySelector('.directory-form');
     expect(form.checkValidity()).toBe(true);
     expect(form.querySelector('button').disabled).toBe(false);
@@ -993,6 +994,43 @@ describe('application shell', () => {
     expect(document.querySelector('.directory-form select').value).toBe('Manager');
     expect(card.textContent).toContain('Viewer');
     expect(document.querySelector('.directory-form button').disabled).toBe(false);
+  });
+
+  it('explains scoped Manager promotions and preserves an Engineer draft after failure until a successful retry', async () => {
+    const prototype = Object.getPrototypeOf(createRepository().store);
+    Object.defineProperty(prototype, 'scopedAccess', { configurable: true, value: true });
+    try {
+      await createRepository().store.saveUser({ id: 'other', title: 'Other Engineer', email: 'other@example.test', loginName: 'other', role: 'Project Engineer' });
+      await renderApp();
+      await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent === 'Users and managers').click());
+      const card = [...document.querySelectorAll('.directory-row')].find(row => row.textContent.includes('Other Engineer'));
+      const openEditor = async () => {
+        await act(async () => card.querySelector('.directory-actions > button').click());
+        await act(async () => [...card.querySelectorAll('button')].find(button => button.textContent === 'Update User').click());
+      };
+      await openEditor();
+      expect(document.querySelector('#manager-role-hint')).toBeNull();
+      await act(async () => changeValue(document.querySelector('.directory-form select'), 'Manager'));
+      expect(document.querySelector('#manager-role-hint').textContent).toContain('permission to manage the Tracker Managers SharePoint group');
+      expect(document.querySelector('.directory-form select').selectedOptions[0].disabled).toBe(false);
+      const save = () => document.querySelector('.directory-form button');
+      expect(save().disabled).toBe(false);
+      vi.spyOn(prototype, 'saveUser').mockRejectedValueOnce(new Error('Could not add membership in Tracker Managers. Ask its group owner or a site owner. Access denied (403).'));
+      await act(async () => save().click());
+      expect(card.querySelector('.badge').textContent).toBe('Project Engineer');
+      expect(document.querySelector('.directory-form select').value).toBe('Manager');
+      expect(document.querySelector('.page-stack > [role="alert"]').textContent).toContain('Access denied (403)');
+      expect(document.querySelector('.page-stack > [role="status"]')).toBeNull();
+      expect(document.body.textContent).not.toContain('saved as Manager');
+      expect(save().disabled).toBe(false);
+      await act(async () => save().click());
+      expect(card.querySelector('.badge').textContent).toBe('Manager');
+      expect(document.querySelector('.directory-form')).toBeNull();
+      expect(document.querySelector('.page-stack > [role="alert"]')).toBeNull();
+      expect(document.querySelector('.page-stack > [role="status"]').textContent).toContain('Other Engineer saved as Manager');
+      await openEditor();
+      expect(document.querySelector('#manager-role-hint')).toBeNull();
+    } finally { delete prototype.scopedAccess; }
   });
 
   it('collapses project groups independently and saves the assigned date', async () => {
