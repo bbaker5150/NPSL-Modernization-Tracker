@@ -1,3 +1,12 @@
+import { getFirepitBridge } from './firepit';
+
+// Private feedback deliberately grants submitters Add without Read. Firepit
+// blocks the CSOM no-read-back operation; replacing it with REST could commit a
+// report and then fail while returning it. Keep the private permission model.
+export function assertPrivateFeedbackSupported() {
+  if (getFirepitBridge()) throw new Error('Private feedback cannot be submitted from this Firepit page. Use the SharePoint feedback form outside Firepit, or contact a site owner. No feedback or attachments have been sent.');
+}
+
 const xml = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 // CSOM executes AddItem + field setters + Update without loading the created
@@ -15,6 +24,7 @@ export function feedbackCreateRequest(title, report) {
 const unconfirmed = message => Object.assign(new Error(message), { submissionUncertain: true });
 
 export async function submitPrivateFeedback(store, titles, report) {
+  assertPrivateFeedbackSupported();
   for (const title of titles) {
     let response;
     try { response = await store.post('/_vti_bin/client.svc/ProcessQuery', { raw: true, headers: { 'Content-Type': 'text/xml; charset=utf-8', Accept: 'application/json' }, body: feedbackCreateRequest(title, report) }); }

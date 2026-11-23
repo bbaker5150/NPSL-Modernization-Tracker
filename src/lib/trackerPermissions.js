@@ -2,6 +2,7 @@ import { isOwnedByUser } from './identity';
 import { projectEngineers } from './projectEngineers';
 import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
 import { legacyListTitle } from './trackerLists';
+import { getFirepitBridge } from './firepit';
 export { TRACKER_GROUPS } from './trackerGroups';
 
 const CHILDREN = ['tasks', 'updates', 'risks'];
@@ -215,6 +216,7 @@ export class TrackerPermissions {
     }
     let addRole = roles.find(role => role.Name === roleName);
     if (!addRole) {
+      if (getFirepitBridge()) throw new Error(`Firepit cannot create permission levels. A site owner must create the ${roleName} permission level with the documented glossary read and add permissions in SharePoint, then retry glossary setup. No glossary permissions were changed.`);
       await this.post('/_api/web/roledefinitions', { body: { Name: roleName, Description: 'Read and add glossary entries.', BasePermissions: addMask } });
       addRole = unwrap(await this.get(`/_api/web/roledefinitions/getbyname('${quote(roleName)}')?$select=Id,Name,BasePermissions`));
     }
@@ -334,15 +336,28 @@ export class TrackerPermissions {
     const path = `${root}/${name}`;
     // List folders are list items. Resolve them in the list itself: some hosts
     // return no usable item ID from GetFolder.../ListItemAllFields.
-    const lookup = await this.get(`${this.root(key)}/items?$select=Id&$filter=FileRef eq '${quote(path)}'&$top=2`);
-    const matches = lookup?.value || lookup?.d?.results || lookup?.results;
-    if (!Array.isArray(matches)) throw new Error(`SharePoint did not return list records while finding the ${key} project folder at ${path}. No folder was created.`);
-    if (matches.length > 1 || lookup['@odata.nextLink'] || lookup['odata.nextLink'] || lookup.d?.__next) throw new Error(`More than one result was returned for the ${key} project folder at ${path}. No folder was selected.`);
-    let id;
+    const find = async () => {
+      const lookup = await this.get(`${this.root(key)}/items?$select=Id&$filter=FileRef eq '${quote(path)}'&$top=2`);
+      const matches = lookup?.value || lookup?.d?.results || lookup?.results;
+      if (!Array.isArray(matches)) throw new Error(`SharePoint did not return list records while finding the ${key} project folder at ${path}. No folder was selected.`);
+      if (matches.length > 1 || lookup['@odata.nextLink'] || lookup['odata.nextLink'] || lookup.d?.__next) throw new Error(`More than one result was returned for the ${key} project folder at ${path}. No folder was selected.`);
+      return matches;
+    };
+    const matches = await find();
+    let id, createdInFirepit = false;
     if (matches.length === 1) id = matches[0].Id;
     else {
       if (!create) throw new Error(`The ${key} project folder is not set up. Run Apply tracker permissions first.`);
-      id = await this.addInFolder(key, root, { Title: name, ProjectKey: project.projectKey }, name);
+      if (getFirepitBridge()) {
+        // Firepit permits the folder collection API, but UsingPath is limited
+        // to ordinary rows. Resolve and validate the new folder in this same
+        // list before setting its ProjectKey or touching its permissions.
+        await this.post(`${this.root(key)}/RootFolder/Folders/add(url='${quote(name)}')`);
+        const created = await find();
+        if (created.length !== 1) throw new Error(`The ${key} folder may have been created, but SharePoint did not return its list record. Reload before retrying setup. No folder permissions were changed.`);
+        id = created[0].Id;
+        createdInFirepit = true;
+      } else id = await this.addInFolder(key, root, { Title: name, ProjectKey: project.projectKey }, name);
     }
     if (!positiveId(id)) throw new Error(`Could not identify the ${key} project folder at ${path}.`);
     const scope = `${this.root(key)}/items(${Number(id)})`;
@@ -364,7 +379,8 @@ export class TrackerPermissions {
       // Computed ItemChildCount/FolderChildCount columns are not REST item
       // properties on every list. Use the associated Folder resource, and
       // only when recovering a blank key; absent counts never mean zero.
-      const folderInfo = unwrap(await this.get(`${scope}/Folder?$select=ServerRelativeUrl,ItemCount`));
+      const folderResource = getFirepitBridge() ? `/_api/web/GetFolderByServerRelativePath(decodedurl='${quote(path)}')` : `${scope}/Folder`;
+      const folderInfo = unwrap(await this.get(`${folderResource}?$select=ServerRelativeUrl,ItemCount`));
       if (String(folderInfo?.ServerRelativeUrl || '').toLowerCase() !== path.toLowerCase() || ![0, '0'].includes(folderInfo?.ItemCount)) {
         throw identityError('SharePoint did not verify that the unassigned folder is empty. Resolve its contents before retrying setup.');
       }
@@ -372,7 +388,7 @@ export class TrackerPermissions {
       if (Number(parent.Id) !== Number(project.spId) || parent.ProjectKey !== project.projectKey) throw identityError('The saved parent project could not be verified.');
       const etag = row['odata.etag'] || row['@odata.etag'] || row.__metadata?.etag;
       if (!etag || etag === '*') throw identityError('SharePoint did not return a concurrency token for the empty folder.');
-      await this.post(scope, { body: { ProjectKey: project.projectKey }, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
+      await this.post(scope, { body: { ...(createdInFirepit ? { Title: name } : {}), ProjectKey: project.projectKey }, headers: { 'IF-MATCH': etag, 'X-HTTP-Method': 'MERGE' } });
       row = await read();
       validateFolder(row);
       if (row.ProjectKey !== project.projectKey) throw identityError('SharePoint did not save the folder project key.');
@@ -380,6 +396,7 @@ export class TrackerPermissions {
     return { path, scope };
   }
   async addInFolder(key, path, fields, leafName) {
+    if (leafName && getFirepitBridge()) throw new Error('Use Apply tracker permissions to create and verify project folders in Firepit before creating their records. No folder was created.');
     // UsingPath takes ResourcePath objects for BOTH FolderPath and LeafName.
     // A plain LeafName string produces SharePoint's PrimitiveValue/StartObject 400.
     const result = await this.post(`${this.root(key)}/AddValidateUpdateItemUsingPath`, { body: {

@@ -9,6 +9,7 @@ import { defaultAcronyms } from '../data/defaultAcronyms';
 import { TrackerPermissions } from './trackerPermissions';
 import { TRACKER_USERS_GROUP } from './trackerGroups';
 import { TrackerAccessJob } from './trackerAccessJob';
+import { fileDownloadUrl, getFirepitBridge, withFirepitTransport, requireNativeInvitations } from './firepit';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
@@ -207,6 +208,7 @@ export class SharePointStore {
       catch (error) { if (controller.signal.aborted) throw new Error('SharePoint request timed out after 60 seconds. A write may have completed; reload or rerun permission setup to verify it.'); throw error; }
       finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     };
+    this.fetchImpl = withFirepitTransport(this.webUrl, this.fetchImpl);
     this.lists = new TrackerLists(prefix, path => spGet(this.webUrl, path, this.fetchImpl), (path, options) => spPost(this.webUrl, path, options, this.fetchImpl));
     this.userPromise = null;
     this.scopedAccess = scopedAccess;
@@ -386,7 +388,7 @@ export class SharePointStore {
     const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/validateupdatelistitem`, {
       body: {
         formValues: this.formValues(fields),
-        bNewDocumentUpdate: true,
+        bNewDocumentUpdate: !getFirepitBridge(),
       },
     });
     const rows = result?.value || result?.ValidateUpdateListItem?.results || result?.ValidateUpdateListItem || result?.d?.ValidateUpdateListItem?.results || [];
@@ -430,7 +432,7 @@ export class SharePointStore {
   async downloadTaskAttachment(task, name) {
     const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!file) throw new Error('This document no longer exists. Refresh the documents list.');
-    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -483,12 +485,14 @@ export class SharePointStore {
   async deleteUpdateAttachment(update, name) {
     const files = await this.listUpdateAttachments(update);
     if (!files.some(file => file.name === name)) throw new Error('This update document is no longer available.');
-    await this.post(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles('${escapeOData(name)}')`, { headers: { 'X-HTTP-Method': 'DELETE' } });
+    const path = `${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles('${escapeOData(name)}')`;
+    if (getFirepitBridge()) await this.post(`${path}/recycle()`);
+    else await this.post(path, { headers: { 'X-HTTP-Method': 'DELETE' } });
   }
   async downloadUpdateAttachment(update, name) {
     const file = (await this.listUpdateAttachments(update)).find(item => item.name === name);
     if (!file) throw new Error('This update document is no longer available.');
-    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -530,7 +534,7 @@ export class SharePointStore {
     if (!file) throw new Error('This reference document is unavailable.');
     const url = new URL(file.ServerRelativeUrl, this.webUrl);
     if (url.origin !== new URL(this.webUrl).origin) throw new Error('Unexpected reference document address.');
-    const response = await this.fetchImpl(url.href, { credentials: 'include', headers: { Accept: '*/*' } });
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, url.href), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -558,6 +562,7 @@ export class SharePointStore {
   }
 
   async shareSiteAccess(person, role, appUrl) {
+    requireNativeInvitations();
     if (!ROLES.includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
     const link = new URL(trackerPageUrl(appUrl, this.webUrl));
     const fileApi = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(link.pathname))}')`;

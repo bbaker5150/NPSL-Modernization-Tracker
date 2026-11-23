@@ -8,7 +8,30 @@ const priorSchema = JSON.parse(await fs.readFile('scripts/fixtures/pre-update-ed
 const artifact = await fs.readFile('build-singlefile/modernization-project-tracker.html', 'utf8');
 await fs.mkdir('test-artifacts', { recursive: true });
 const webUrl = 'https://tenant.sharepoint-mil.us/sites/metsoft';
-const html = artifact.replace('<head>', `<head><script>window.MOD_TRACKER_CONFIG=${JSON.stringify({ webUrl, forceSharePoint: true, scopedAccess: true })}</script>`);
+const firepit = process.argv.includes('--firepit');
+// Contract fixture, not a copy of the host implementation. The opaque child can
+// only ask the parent bridge for REST responses; CSP blocks direct networking/eval.
+const bridgeScript = `
+  let requestId = 0; const pending = new Map();
+  addEventListener('message', event => {
+    if (event.source !== parent || event.data?.type !== 'mock-bridge-result') return;
+    const item = pending.get(event.data.id); if (!item) return;
+    pending.delete(event.data.id);
+    item.resolve(new Response(event.data.body, {status: event.data.status, headers: {'Content-Type':'application/json'}}));
+  });
+  window.firepit = {sharepoint: {siteUrl: ${JSON.stringify(webUrl)}, fetch: (input, init = {}) => new Promise((resolve, reject) => {
+    const id = ++requestId; pending.set(id, {resolve, reject});
+    parent.postMessage({type:'mock-bridge-request', id, url: typeof input === 'string' ? input : input.url,
+      method:init.method || input.method || 'GET', headers:[...new Headers(init.headers).entries()], body:init.body}, '*');
+  })}};
+`;
+const parentRelay = `<script>addEventListener('message', async event => {
+  if (event.source !== document.querySelector('#app').contentWindow || event.data?.type !== 'mock-bridge-request') return;
+  const {id, url, method, headers, body} = event.data;
+  const result = await fetch(url, {method, headers, body});
+  event.source.postMessage({type:'mock-bridge-result', id, status:result.status, body:await result.text()}, '*');
+});</script>`;
+const html = artifact.replace('<head>', `<head>${firepit ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'"><script>${bridgeScript}</script>` : ''}<script>window.MOD_TRACKER_CONFIG=${JSON.stringify({ ...(firepit ? {} : { webUrl }), forceSharePoint: true, scopedAccess: true })}</script>`);
 const suffixes = ['Projects', 'Tasks', 'Updates', 'Risks', 'Acronyms', 'Users', 'Reference Documents'];
 const lists = Object.keys(priorSchema).map((key, index) => ({ key, Id: `${String(index + 1).padStart(8, '0')}-1111-1111-1111-111111111111`, Title: `Modernization-Tracker - ${suffixes[index]}`, BaseTemplate: 100, Hidden: false }));
 const user = { Id: 10, Title: 'Viewer Test Account', LoginName: 'i:0#.f|membership|viewer@example.test', Email: 'viewer@example.test', IsSiteAdmin: false };
@@ -30,7 +53,8 @@ try {
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname.slice(new URL(webUrl).pathname.length);
       const send = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-      if (url.href === `${webUrl}/preview`) return route.fulfill({ contentType: 'text/html', body: '<iframe id="app" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>' });
+      if (url.href === `${webUrl}/preview`) return route.fulfill({ contentType: 'text/html', body: `<iframe id="app" ${firepit ? 'sandbox="allow-scripts allow-downloads"' : ''} style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>${firepit ? parentRelay : ''}` });
+      if (firepit) assert.equal(request.headers()['x-requestdigest'], undefined, 'The child must not supply a form digest');
       requests.push({ method: request.method(), path, select: url.searchParams.get('$select') });
       if (request.method() !== 'GET') { unexpected.push(`Unexpected write: ${request.method()} ${path}`); return send({ error: { message: 'Viewer cannot write setup or data' } }, 403); }
       if (path.toLowerCase().endsWith('/effectivebasepermissions')) return send({ Low: '1', High: '0' });
@@ -66,6 +90,16 @@ try {
       const app = page.frameLocator('#app');
       if (scenario === 'prior-schema') {
         await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
+        if (firepit) {
+          assert.equal(await app.locator('body').evaluate(() => window.origin), 'null', 'Firepit smoke must use an opaque frame');
+          assert.equal(await app.locator('body').evaluate(() => { try { localStorage.getItem('theme'); return true; } catch { return false; } }), false);
+          const downloadReady = page.waitForEvent('download');
+          await app.getByRole('button', { name: 'Export Excel', exact: true }).click();
+          const download = await downloadReady;
+          assert.match(download.suggestedFilename(), /\.xlsx$/);
+          const workbook = await fs.readFile(await download.path());
+          assert.equal(workbook.subarray(0, 2).toString(), 'PK', 'Workbook export must work without eval permission');
+        }
         assert.equal(await app.getByRole('button', { name: 'New project', exact: true }).count(), 0);
         assert.equal(await app.getByRole('button', { name: 'Users and managers', exact: true }).count(), 0);
         assert.equal(await app.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0);
@@ -95,5 +129,5 @@ try {
     } catch (error) { await page.screenshot({ path: `test-artifacts/viewer-startup-${scenario}-failure.png` }).catch(() => {}); throw error; }
     finally { await page.close(); }
   }
-  console.log('Viewer SharePoint startup smoke passed: prior schema loads read-only without writes; missing core fields, missing lists and denied reads remain explicit failures.');
+  console.log(`${firepit ? 'Firepit opaque-frame/CSP bridge' : 'Viewer SharePoint'} startup smoke passed: prior schema loads read-only without writes; missing core fields, missing lists and denied reads remain explicit failures.`);
 } finally { await browser.close(); }

@@ -588,7 +588,10 @@ export function App() {
   const repoRef = useRef(null);
   if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store, repository.config) }; }
   const repo = repoRef.current;
-  const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') === 'light' ? 'light' : 'dark');
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('mod-tracker-theme') === 'light' ? 'light' : 'dark'; }
+    catch { return 'dark'; }
+  });
   const [view, setView] = useState('my-work');
   const [user, setUser] = useState(null);
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
@@ -603,7 +606,10 @@ export function App() {
   const [toast, setToast] = useState(null);
   const [exporting, setExporting] = useState(false);
 
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('mod-tracker-theme', theme); }, [theme]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('mod-tracker-theme', theme); } catch { /* Theme still works in a read-only or opaque frame. */ }
+  }, [theme]);
   useEffect(() => { initialize(); }, []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 3200); return () => clearTimeout(timer); }, [toast]);
 

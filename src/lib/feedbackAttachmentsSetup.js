@@ -1,6 +1,7 @@
 import { feedbackAttachmentTitle } from './feedbackAttachments';
 import { legacyListTitle } from './trackerLists';
 import { TRACKER_GROUPS } from './trackerGroups';
+import { assertPrivateFeedbackSupported } from './feedbackSubmission';
 export { feedbackAttachmentTitle } from './feedbackAttachments';
 
 const PENDING = 'NPSL Tracker private feedback attachments setup pending v1';
@@ -164,6 +165,7 @@ export function feedbackAttachmentsSetup(store, isOwner, feedbackPath, verifyFee
       return { ready: !!await field(sourcePath), title };
     },
     async provision(progress = () => {}) {
+      assertPrivateFeedbackSupported();
       await requireOwner();
       if (!store.webUrl) return { ready: true, title };
       const response = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));

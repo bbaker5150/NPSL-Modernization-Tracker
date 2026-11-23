@@ -60,7 +60,7 @@ The newest successful build is always available at:
 
 ## SharePoint configuration
 
-The app discovers its SharePoint web from `_spPageContextInfo`, the same-origin parent frame, or the `/sites/<name>` URL. A deployment can override defaults before the app bundle runs:
+The app discovers its SharePoint web from the Firepit host bridge, `_spPageContextInfo`, the same-origin parent frame, or the `/sites/<name>` URL. In Firepit 9.2, the app and its data must use the same hosting web; an explicit different target is rejected without retargeting data. See [Firepit deployment and limits](docs/firepit.md). A deployment can override defaults before the app bundle runs:
 
 ```html
 <script>
