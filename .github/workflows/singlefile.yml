@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: modernization-tracker-singlefile
+  group: modernization-tracker-singlefile-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -63,13 +63,7 @@ jobs:
           npx --no-install playwright install --with-deps chromium
 
       - name: Smoke test the final file inside an iframe srcdoc
-        run: |
-          node scripts/smoke-forge-srcdoc.mjs
-          node scripts/smoke-feedback.mjs
-          node scripts/smoke-project-updates.mjs
-          node scripts/smoke-viewer-startup.mjs
-          node scripts/smoke-viewer-startup.mjs --firepit
-          node scripts/smoke-tracker-invitations.mjs
+        run: npm run smoke:singlefile
 
       - name: Generate checksum
         id: checksum
@@ -105,6 +99,7 @@ jobs:
             gh release create "$TAG" \
               build-singlefile/modernization-project-tracker.html \
               build-singlefile/modernization-project-tracker.html.sha256 \
+              --target "$COMMIT" \
               --title "Modernization Tracker $TAG" \
               --notes "$NOTES"
           fi

@@ -97,7 +97,13 @@ it('downloads bytes through the file REST endpoint without losing punctuation', 
   const store = new SharePointStore({ webUrl: web });
   store.listTaskAttachments = vi.fn(async () => [{ name: "O'Brien #1.pdf", url: web + "/Docs/O'Brien%20%231.pdf" }]);
   const blob = await store.downloadTaskAttachment({ spId: 1 }, "O'Brien #1.pdf", { readBytes: true });
-  const buffer = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsArrayBuffer(blob); });
+  // Node 22's Response returns its native Blob, which jsdom's FileReader cannot
+  // read. Keep the byte assertion valid for both native and jsdom Blob realms.
+  const buffer = typeof blob.arrayBuffer === 'function' ? await blob.arrayBuffer() : await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result); reader.onerror = reject;
+    reader.readAsArrayBuffer(blob);
+  });
   expect([...new Uint8Array(buffer)]).toEqual([0, 1, 255]);
   const target = new URL(bridge.fetch.mock.calls[0][0]);
   expect(target.pathname).toBe('/sites/Tracker/Subweb/_api/web/GetFileByServerRelativePath(decodedurl=@file)/$value');
