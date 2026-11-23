@@ -90,6 +90,8 @@ try {
       const app = page.frameLocator('#app');
       if (scenario === 'prior-schema') {
         await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
+        const glossaryId = lists.find(list => list.key === 'acronyms').Id;
+        assert.ok(!requests.some(request => request.path.includes(glossaryId) && request.path.endsWith('/items')), 'Ordinary startup must not read glossary rows before the glossary or export is requested');
         if (firepit) {
           assert.equal(await app.locator('body').evaluate(() => window.origin), 'null', 'Firepit smoke must use an opaque frame');
           assert.equal(await app.locator('body').evaluate(() => { try { localStorage.getItem('theme'); return true; } catch { return false; } }), false);

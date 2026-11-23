@@ -100,6 +100,51 @@ describe('application shell', () => {
     expect(document.body.textContent).toContain('Calibration Standard Specification');
   });
 
+  it('loads glossary rows on demand and offers retry without presenting a failed read as an empty list', async () => {
+    const prototype = Object.getPrototypeOf(createRepository().store);
+    let rejectRead;
+    const read = vi.spyOn(prototype, 'listAcronyms').mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject; }));
+    await renderApp();
+    expect(read).not.toHaveBeenCalled();
+    const glossaryButton = [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.includes('Acronym glossary'));
+    await act(async () => glossaryButton.click());
+    expect(document.body.textContent).toContain('Loading glossary');
+    expect(document.body.textContent).not.toContain('No acronyms yet');
+    expect(document.querySelector('.glossary-composer button').disabled).toBe(true);
+    await act(async () => rejectRead(new Error('Glossary temporarily unavailable')));
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Glossary temporarily unavailable');
+    expect(document.body.textContent).not.toContain('No acronyms yet');
+    const retry = [...document.querySelectorAll('button')].find(button => button.textContent === 'Retry glossary');
+    await act(async () => retry.click());
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain('Calibration Standard Specification');
+    expect(document.querySelector('.glossary-composer button').disabled).toBe(true); // Empty draft, not a read error.
+    expect(document.querySelector('input[aria-label="Acronym"]').disabled).toBe(false);
+  });
+
+  it('ignores a stale glossary response after navigation and preserves a subsequent edit', async () => {
+    const prototype = Object.getPrototypeOf(createRepository().store);
+    let oldRead;
+    vi.spyOn(prototype, 'listAcronyms').mockImplementationOnce(() => new Promise(resolve => { oldRead = resolve; }));
+    await renderApp();
+    const nav = name => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.includes(name));
+    await act(async () => nav('Acronym glossary').click());
+    await act(async () => nav('Portfolio').click());
+    expect(document.body.textContent).toContain('Modernization at a glance');
+    await act(async () => nav('Acronym glossary').click());
+    await act(async () => {
+      changeValue(document.querySelector('input[aria-label="Acronym"]'), 'FRESH');
+      changeValue(document.querySelector('input[aria-label="Full term"]'), 'Newly saved term');
+    });
+    await act(async () => document.querySelector('.glossary-composer').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.body.textContent).toContain('Newly saved term');
+    await act(async () => oldRead([{ id: 'stale', acronym: 'STALE', term: 'Old delayed glossary', definition: '' }]));
+    expect(document.body.textContent).toContain('Newly saved term');
+    expect(document.body.textContent).not.toContain('Old delayed glossary');
+    await act(async () => nav('Portfolio').click());
+    expect(document.body.textContent).toContain('Modernization at a glance');
+  });
+
   it.each(['click', 'Enter'])('lets a viewer add an acronym via %s in an embedded host that blocks form submission', async method => {
     await renderApp(false);
     await act(async () => [...document.querySelectorAll('.sidebar nav button')].find(button => button.textContent.includes('Acronym glossary')).click());

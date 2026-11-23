@@ -22,6 +22,14 @@ The bridge handles SharePoint authentication and form digests. Tracker sends RES
 
 Lock Down Mode, a read-only Firepit session, and unavailable REST routes remain host policy errors. They are not repaired by granting broader SharePoint permissions. Reload into an authorized writable hosting session after resolving the host policy.
 
+## Reducing unnecessary consent requests
+
+Normal startup, portfolio refreshes, and unrelated authorization checks do not load glossary records. The glossary loads when opened, with a loading state, an explicit error and retry on failure, and protection against delayed responses replacing newer edits. Workbook exports and the default repository `load()` still include the complete glossary. Updates and Risks remain in the core load because the dashboard and project history use them.
+
+Saving unchanged task, tracking, update, risk, or reference values avoids a redundant write after the current role, project access, validation, and applicable version checks. An unchanged manager project also avoids its record write, while its permission verification and interrupted-repair retry still run. Uploads and required multi-step saves retain their existing safeguards. SharePoint ACLs and Firepit's consent decisions are unchanged.
+
+Firepit can still ask for a new flow when the app reads a new list or the relevant permissions change. Opening the glossary and later writing to another list can legitimately add a consent request. Approval remains specific to the open host session; these optimizations do not suppress required approval or promise a prompt-free session.
+
 ## Validation boundary
 
 `npm test`, `npm run verify:singlefile`, and `npm run smoke:singlefile` cover request routing, rejected writes, cancellation, file bytes, folder identity safeguards, privacy guards, legacy behavior, and the production HTML in a mocked opaque Firepit frame. The smoke uses an independent bridge contract fixture, not Firepit implementation code. Real tenant permissions, host approval prompts, and live upload/write outcomes still require deployment verification.

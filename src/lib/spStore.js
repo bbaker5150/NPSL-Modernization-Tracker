@@ -346,13 +346,15 @@ export class SharePointStore {
     return rows.filter((row) => row.FileSystemObjectType !== 1 && (includeArchived || !row.Archived)).map(converter);
   }
 
-  async load() {
+  listAcronyms = () => this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym);
+
+  async load({ includeAcronyms = true } = {}) {
     const [projects, tasks, updates, risks, acronyms, users] = await Promise.all([
       this.listItems('projects', CONTAINERS[0].fields.map((field) => field.name), fromProject),
       this.listItems('tasks', CONTAINERS[1].fields.map((field) => field.name), fromTask),
       this.listItems('updates', CONTAINERS[2].fields.map((field) => field.name), fromUpdate),
       this.listItems('risks', CONTAINERS[3].fields.map((field) => field.name), fromRisk),
-      this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
+      includeAcronyms ? this.listAcronyms() : [],
       this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
     const directory = normalizeDirectory(users, projects);
@@ -781,7 +783,12 @@ export class SharePointStore {
     if (!this.permissions) return row.spId ? (await this.update('projects', row.spId, fields), row) : { ...row, spId: await this.create('projects', fields) };
     // A retry after a partial permission update reuses the already-saved project.
     const saved = { ...row, spId: existing?.spId || row.spId };
-    if (saved.spId) await this.update('projects', saved.spId, fields);
+    if (saved.spId) {
+      const previous = existing && new Map(this.formValues(projectFields(existing)).map(field => [field.FieldName, field.FieldValue]));
+      if (!previous || this.formValues(fields).some(field => previous.get(field.FieldName) !== field.FieldValue)) {
+        await this.update('projects', saved.spId, fields);
+      }
+    }
     else saved.spId = await this.create('projects', fields);
     if (manager) {
       try {

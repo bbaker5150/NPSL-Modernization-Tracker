@@ -29,6 +29,18 @@ const engineerTaskFields = [
   'estimatedHours', 'startDate', 'deferredDate', 'deferredJustification',
   'notRequiredJustification', 'blockedReason', 'notes',
 ];
+const taskDefinitionFields = ['title', 'id', 'projectKey', 'phaseKey', 'order', 'assignedDate', 'dueDate', 'sourceStartLabel', 'dataIssue'];
+const taskDates = new Set(['assignedDate', 'startDate', 'finishDate', 'dueDate', 'deferredDate']);
+const storedText = value => value == null ? '' : String(value);
+const sameFields = (saved, next, fields, value = (_field, entry) => storedText(entry)) =>
+  fields.every(field => Object.is(value(field, saved[field]), value(field, next[field])));
+function taskValue(field, value) {
+  if (taskDates.has(field)) return value ? String(value).slice(0, 10) : '';
+  if (field === 'estimatedHours' || field === 'order') return value == null || value === '' ? '' : Number(value);
+  if (field === 'organization') return normalizeOrganization(value);
+  if (field === 'status') return normalizeTaskStatus(value);
+  return storedText(value);
+}
 
 function applyEditableFields(saved, draft, fields) {
   const next = { ...saved };
@@ -54,8 +66,8 @@ export function validateTask(task) {
 // Application authorization applies to every repository call, including exports.
 // SharePoint ACLs remain the server-side security boundary (see deployment guide).
 export function authorizedStore(raw, config = {}) {
-  const context = async () => {
-    const [user, data] = await Promise.all([raw.currentUser(), raw.load()]);
+  const context = async (options = {}) => {
+    const [user, data] = await Promise.all([raw.currentUser(), raw.load({ includeAcronyms: false, ...options })]);
     return { user, data, manager: isManager(user, data.users) };
   };
   const requireManager = async () => {
@@ -68,7 +80,10 @@ export function authorizedStore(raw, config = {}) {
       if (property === 'saveReferenceEntry') return async (row, file) => {
         await requireManager();
         const entries = await raw.listReferenceEntries();
-        return raw.saveReferenceEntry(validateReference(entries, row, file), file);
+        const next = validateReference(entries, row, file);
+        const existing = entries.find(entry => entry.id === next.id);
+        if (!file && existing && sameFields(existing, next, ['name', 'parentId'])) return existing;
+        return raw.saveReferenceEntry(next, file);
       };
       if (property === 'deleteReferenceEntry') return async (id) => {
         await requireManager();
@@ -125,12 +140,13 @@ export function authorizedStore(raw, config = {}) {
         if (existing && !existing.roleMigrationPending && Object.keys(row).every((field) => row[field] === existing[field])) return existing;
         return raw.saveUser(row);
       };
-      if (property === 'load') return async () => { const { data, user } = await context(); return visibleData(data, user); };
+      if (property === 'load') return async (options = {}) => { const { data, user } = await context({ includeAcronyms: true, ...options }); return visibleData(data, user); };
       if (property === 'saveProgressMode') return async (id, mode) => {
         const { user, data } = await context();
         const project = data.projects.find((row) => row.id === id);
         if (!project || !canManageProject(project, user, data.users)) throw new Error('Only managers or assigned project engineers can change progress calculation.');
         if (!['phases', 'tasks'].includes(mode)) throw new Error('Select a valid progress calculation.');
+        if ((project.progressMode || 'phases') === mode) return project;
         const next = { ...project, progressMode: mode };
         return raw.saveProjectTracking ? raw.saveProjectTracking(next, { progressModeOnly: true }) : raw.saveProject(next);
       };
@@ -149,6 +165,10 @@ export function authorizedStore(raw, config = {}) {
         validateTask(next);
         next.estimatedHours = next.estimatedHours === '' || next.estimatedHours == null ? null : Number(next.estimatedHours);
         next.finishDate = ['Complete', 'Not Required', 'Not Applicable'].includes(next.status) ? (existing?.finishDate || new Date().toISOString().slice(0, 10)) : '';
+        // Compare only fields this role can persist, after current access and
+        // validation checks. Enriched UI values must not create extra versions.
+        const persistedFields = [...engineerTaskFields, 'finishDate', ...(manager ? taskDefinitionFields : [])];
+        if (existing && sameFields(existing, next, persistedFields, taskValue)) return existing;
         return manager ? raw.saveTask(next) : raw.saveTask(next, { trackingOnly: true });
       };
       if (property === 'listProjectAttachments') return async (projectKey) => {
@@ -184,14 +204,18 @@ export function authorizedStore(raw, config = {}) {
         if (property === 'deleteUpdate' || property === 'deleteRisk') return raw[property](existing);
         if (risk) {
           if (!row.title?.trim()) throw new Error('Enter a risk title.');
-          return raw.editRisk({ ...existing, title: row.title.trim(), mitigation: row.mitigation?.trim() || '',
-            severity: row.severity?.trim() || '', status: row.status?.trim() || 'Open' });
+          const next = { ...existing, title: row.title.trim(), mitigation: row.mitigation?.trim() || '',
+            severity: row.severity?.trim() || '', status: row.status?.trim() || 'Open' };
+          if (sameFields({ ...existing, status: existing.status || 'Open' }, next, ['title', 'mitigation', 'severity', 'status'])) return existing;
+          return raw.editRisk(next);
         }
         if (!row.summary?.trim()) throw new Error('Enter an update.');
         const task = row.taskId ? data.tasks.find(item => item.id === row.taskId && item.projectKey === existing.projectKey) : null;
         // A removed task may keep its historical reference if it was not changed.
         if (row.taskId && !task && row.taskId !== existing.taskId) throw new Error('Select a task from this project.');
-        return raw.editUpdate({ ...existing, summary: row.summary.trim(), taskId: row.taskId || '', taskTitle: task?.title || (row.taskId ? existing.taskTitle : ''),
+        const next = { ...existing, summary: row.summary.trim(), taskId: row.taskId || '', taskTitle: task?.title || (row.taskId ? existing.taskTitle : '') };
+        if (sameFields(existing, next, ['summary', 'taskId', 'taskTitle'])) return existing;
+        return raw.editUpdate({ ...next,
           editedAt: new Date().toISOString(), editorName: user.title || user.email || user.loginName, editorKey: userIdentityKey(user) });
       };
       if (property === 'saveUpdate') return async (row) => {
@@ -223,7 +247,7 @@ export function authorizedStore(raw, config = {}) {
       };
       if (property === 'saveTasks' || property === 'saveProjectTracking') return undefined;
       if (['saveProject', 'saveRisk', 'saveAcronym', 'recycle', 'saveUser'].includes(property)) return async (...args) => {
-        const { data, user, manager } = await context();
+        const { data, user, manager } = await context({ includeAcronyms: property === 'saveAcronym' || (property === 'recycle' && args[0] === 'acronyms') });
         if (!manager && property === 'saveUser') throw new Error('Only managers can perform this action.');
         if (property === 'saveAcronym') {
           if (!userIdentityKey(user)) throw new Error('Sign in to add an acronym.');
@@ -247,6 +271,7 @@ export function authorizedStore(raw, config = {}) {
           if (!current || !canManageProject(current, user, data.users)) throw new Error('Only managers or assigned project engineers can edit this project.');
           // Only a manager's explicit assignment may trigger a role change.
           const next = applyEditableFields(current, draft, engineerProjectFields);
+          if (sameFields(current, next, engineerProjectFields)) return current;
           return raw.saveProjectTracking ? raw.saveProjectTracking(next) : raw.saveProject(next);
         }
         if (!manager && property === 'saveRisk') {
