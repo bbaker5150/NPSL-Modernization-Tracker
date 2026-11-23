@@ -300,8 +300,10 @@ it('preserves assignment and original due dates while allowing engineers to defe
   await expect(store.saveTask({ ...task, id: 'new', assignedDate: '2099-01-01' })).rejects.toThrow('Only managers can create tasks');
 });
 it('validates METCAL responsibilities and clears them when changing organization', async () => {
-  const { store } = fixture('Manager');
-  expect(await store.saveTask({ ...task, organization: 'PMA 260B', subAssignment: 'Team 2 Lead' })).toMatchObject({ organization: 'NAVAIR METCAL 260B', subAssignment: 'Team 2 Lead' });
+  const { store, state } = fixture('Manager');
+  const saved = await store.saveTask({ ...task, organization: 'PMA 260B', subAssignment: 'Team 2 Lead' });
+  expect(saved).toMatchObject({ organization: 'NAVAIR METCAL 260B', subAssignment: 'Team 2 Lead' });
+  state.tasks[0] = saved;
   await expect(store.saveTask({ ...task, organization: 'PMA 260B', subAssignment: 'Unknown' })).rejects.toThrow('METCAL');
   expect(await store.saveTask({ ...task, organization: 'NPSL', subAssignment: 'Team 2 Lead' })).toMatchObject({ subAssignment: '' });
 });

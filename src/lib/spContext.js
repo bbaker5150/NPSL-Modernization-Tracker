@@ -1,15 +1,9 @@
 // ---------------------------------------------------------------------------
 // SharePoint context discovery and request plumbing.
 // ---------------------------------------------------------------------------
-// This build runs as a plain HTML page hosted inside a SharePoint site, not as
-// an SPFx web part, so none of the SPFx runtime is available: no
-// `context.pageContext`, no SPHttpClient, no automatic digest handling. What we
-// do have is same-origin cookies, because the page is served from the same
-// SharePoint host as the REST API.
-//
-// Everything below exists to reconstruct, from a bare page, the two things
-// SPFx would have handed us for free: which web we are in, and a valid form
-// digest for writes.
+// Direct SharePoint pages use cookies and form digests. Firepit uses its
+// authenticated parent bridge instead; the iframe cannot access those cookies.
+import { getFirepitBridge, withFirepitTransport } from './firepit';
 
 /** Cached web URL so discovery only runs once per page load. */
 let cachedWebUrl;
@@ -91,11 +85,16 @@ function discoverWebUrl(win) {
 
   // 4. Explicit override wins, so a page can be pointed at another web.
   try {
-    const override = new URLSearchParams(win.location.search).get('webUrl');
+    const query = win.location.search || (getFirepitBridge(win) ? String(win.location.hash || '').replace(/^#/, '?') : '');
+    const override = new URLSearchParams(query).get('webUrl');
     if (override) return stripTrailingSlash(override);
   } catch {
     /* malformed query string — fall through to discovery */
   }
+
+  // The host bridge is authoritative even in blob:/srcdoc opaque frames.
+  const bridge = getFirepitBridge(win);
+  if (bridge) return stripTrailingSlash(bridge.siteUrl);
 
   // 1. Injected directly into a SharePoint page.
   const own = win._spPageContextInfo?.webAbsoluteUrl;
@@ -121,6 +120,7 @@ function discoverWebUrl(win) {
  * deployment and detectably wrong (a 404 on the first call) otherwise.
  */
 export function deriveWebUrlFromPath(origin, pathname) {
+  if (!/^https?:\/\//i.test(origin || '')) return '';
   const match = /^\/(sites|teams)\/([^/]+)/i.exec(pathname || '');
   return match ? `${origin}/${match[1]}/${match[2]}` : origin;
 }
@@ -150,6 +150,7 @@ let digestCache = null;
  * requests.
  */
 export async function getFormDigest(webUrl, fetchImpl = fetch) {
+  if (getFirepitBridge()) return null; // SPHttpClient obtains the target-web digest.
   if (digestCache && digestCache.webUrl === webUrl && Date.now() < digestCache.expiresAt) {
     return digestCache.value;
   }
@@ -157,7 +158,7 @@ export async function getFormDigest(webUrl, fetchImpl = fetch) {
   const response = await fetchImpl(`${webUrl}/_api/contextinfo`, {
     method: 'POST',
     credentials: 'include',
-    headers: { Accept: JSON_ACCEPT, 'Content-Length': '0' },
+    headers: { Accept: JSON_ACCEPT },
   });
 
   if (!response.ok) {
@@ -194,7 +195,7 @@ export class SharePointError extends Error {
 
 /** GET returning parsed JSON. */
 export async function spGet(webUrl, path, fetchImpl = fetch, headers = {}) {
-  const response = await fetchImpl(`${webUrl}${path}`, {
+  const response = await withFirepitTransport(webUrl, fetchImpl)(`${webUrl}${path}`, {
     method: 'GET',
     cache: 'no-store',
     credentials: 'include',
@@ -214,13 +215,13 @@ export async function spPost(
   const contentType = verbose ? VERBOSE : JSON_ACCEPT;
   const requestHeaders = {
     Accept: contentType,
-    'X-RequestDigest': digest,
+    ...(digest ? { 'X-RequestDigest': digest } : {}),
     ...headers,
   };
   if (!raw && body !== undefined) {
     requestHeaders['Content-Type'] = contentType;
   }
-  const response = await fetchImpl(`${webUrl}${path}`, {
+  const response = await withFirepitTransport(webUrl, fetchImpl)(`${webUrl}${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: requestHeaders,
@@ -231,7 +232,7 @@ export async function spPost(
 
 /** GET returning the raw response text, for file contents. */
 export async function spGetText(webUrl, path, fetchImpl = fetch) {
-  const response = await fetchImpl(`${webUrl}${path}`, {
+  const response = await withFirepitTransport(webUrl, fetchImpl)(`${webUrl}${path}`, {
     method: 'GET',
     cache: 'no-store',
     credentials: 'include',
@@ -290,6 +291,10 @@ export function sharePointErrorMessage(detail) {
 function describeFailure(context, status, detail) {
   const reason = sharePointErrorMessage(detail);
   const because = reason ? ` SharePoint said: ${reason}` : '';
+
+  if (/Firepit|hosting web|read.only session|Lock Down Mode|bridge allowlist/i.test(reason)) {
+    return `${context} was blocked by the hosting policy (HTTP ${status}). ${reason}`;
+  }
 
   if (status === 403) {
     return `${context} was denied (403). Your account is not allowed to perform this operation on the requested resource. Ask a site owner to check the resource permissions.${because}`;

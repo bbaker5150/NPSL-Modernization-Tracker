@@ -3,6 +3,7 @@ import { retryMigrationRead, reconcileMigrationWrite, migrationRequest } from '.
 import { getFormDigest } from './spContext';
 import { makeMigrationBatch, checkMigrationBatch } from './migrationBatch';
 import { decodeProjectEngineers, projectEngineers } from './projectEngineers';
+import { fileDownloadUrl, getFirepitBridge, withFirepitTransport } from './firepit';
 
 export const MIGRATION_SOURCE = 'https://flankspeed.sharepoint-mil.us/sites/ISEAMETENG';
 export const MIGRATION_TARGET = 'https://flankspeed.sharepoint-mil.us/sites/metsoft';
@@ -43,7 +44,7 @@ async function readMigrationSource(source, list) {
 export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetch, { wait, timeoutMs, onActivity = () => {} } = {}) {
   webUrl = webUrl.replace(/\/+$/, '');
   prefix = String(prefix || 'Modernization').replace(/[^A-Za-z0-9]/g, '') || 'Modernization';
-  const transport = fetchImpl;
+  const transport = withFirepitTransport(webUrl, fetchImpl);
   fetchImpl = (url, options = {}) => {
     let attempt = 0;
     const request = async () => {
@@ -115,7 +116,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       if (!operations.length) return;
       const batch = makeMigrationBatch(webUrl, await root(key), operations);
       const digest = await getFormDigest(webUrl, fetchImpl);
-      const response = await fetchImpl(`${webUrl}/_api/$batch`, { method: 'POST', credentials: 'include', headers: { 'X-RequestDigest': digest, 'Content-Type': batch.contentType, Accept: 'multipart/mixed' }, body: batch.body });
+      const response = await fetchImpl(`${webUrl}/_api/$batch`, { method: 'POST', credentials: 'include', headers: { ...(digest ? { 'X-RequestDigest': digest } : {}), 'Content-Type': batch.contentType, Accept: 'multipart/mixed' }, body: batch.body });
       if (!response.ok) throw new Error(`SharePoint batch failed (${response.status}). Preview again before resuming.`);
       checkMigrationBatch(await response.text(), operations.length);
     },
@@ -139,7 +140,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
       const url = documentUrls.get(keyForFile);
       if (!url) throw new Error(`SharePoint did not return a download address for ${name}. No document was skipped.`);
       try {
-        const response = await fetchImpl(url, { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
+        const response = await fetchImpl(fileDownloadUrl(webUrl, url), { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (/text\/html/i.test(response.headers.get('Content-Type') || '') && !/\.html?$/i.test(name)) throw new Error('SharePoint returned an HTML page instead of the document');
         return await response.arrayBuffer();
@@ -152,6 +153,7 @@ export function migrationSite(webUrl, prefix = 'Modernization', fetchImpl = fetc
 }
 
 function assertSites(source, target) {
+  if (getFirepitBridge()) throw new Error('Firepit does not support a live transfer between SharePoint sites. Export a tracker backup from the source site, then open a fresh Tracker session on the destination site and use Import tracker backup. No cross-site request was sent.');
   if (normalizeUrl(source.webUrl) !== normalizeUrl(MIGRATION_SOURCE) || !isMigrationTarget(target.webUrl)) throw new Error('This migration only supports ISEA METENG → metsoft.');
 }
 

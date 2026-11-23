@@ -1,6 +1,8 @@
 import { TrackerLists, displayListTitle } from './trackerLists';
 import { ensureFeedbackStatus, FEEDBACK_STATUS_XML } from './feedbackFields';
 import { TRACKER_GROUPS, TRACKER_USERS_GROUP } from './trackerGroups';
+import { getFirepitBridge } from './firepit';
+import { assertPrivateFeedbackSupported } from './feedbackSubmission';
 const unwrap = body => body?.d || body;
 const quote = value => encodeURIComponent(value.replace(/'/g, "''"));
 const id = value => Number.isInteger(Number(value)) && Number(value) > 0;
@@ -44,6 +46,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
     const roles = await pages('/_api/web/roledefinitions?$select=Id,Name,BasePermissions&$top=500');
     let role = roles.find(entry => entry.Name === name);
     if (!role) {
+      if (getFirepitBridge()) throw new Error(`Firepit cannot create SharePoint permission levels. Ask a site owner to create and verify the documented ${name} permission level in SharePoint, then retry. Feedback permissions were not changed.`);
       await store.post('/_api/web/roledefinitions', { body: { Name: name, Description: 'Read, submit and edit Tracker feedback.', BasePermissions: REVIEW_PERMISSIONS } });
       role = unwrap(await store.get(`/_api/web/roledefinitions/getbyname('${quote(name)}')?$select=Id,BasePermissions`));
     }
@@ -101,11 +104,13 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       if (state.itemRestrictions) throw new Error('The Feedback list restricts item access by author. Under List settings → Advanced settings, allow reading and editing all items for accounts with those list permissions, then retry.');
       const managers = await managerGroup();
       if (!managers) throw new Error(`Create the SharePoint group ${TRACKER_GROUPS.Manager} first.`);
+      // Check the required permission level before any schema mutation.
+      const role = getFirepitBridge() ? await reviewRole() : null;
       await ensureFeedbackStatus(store, path);
-      const role = await reviewRole();
+      const reviewer = role || await reviewRole();
       const grants = await pages(`${path}/roleassignments?$select=PrincipalId,RoleDefinitionBindings/Id&$expand=RoleDefinitionBindings`);
-      if (!grants.some(grant => grant.PrincipalId === managers.Id && (grant.RoleDefinitionBindings?.results || grant.RoleDefinitionBindings || []).some(binding => binding.Id === role.Id))) {
-        await store.post(`${path}/roleassignments/addroleassignment(principalid=${managers.Id},roledefid=${role.Id})`);
+      if (!grants.some(grant => grant.PrincipalId === managers.Id && (grant.RoleDefinitionBindings?.results || grant.RoleDefinitionBindings || []).some(binding => binding.Id === reviewer.Id))) {
+        await store.post(`${path}/roleassignments/addroleassignment(principalid=${managers.Id},roledefid=${reviewer.Id})`);
       }
       const verified = await this.status();
       if (!verified.ready || verified.managerReviewNeeded) throw new Error('SharePoint did not verify manager access to Feedback History. Reopen feedback and retry.');
@@ -125,6 +130,7 @@ export function feedbackSetup(store, legacyTitle, isOwner) {
       return { owners, groups, manager: groups.find(group => group.Title === TRACKER_GROUPS.Manager), selected: groups.filter(group => defaults.includes(group.Title)).map(group => group.Id) };
     },
     async provision(selectedIds, progress = () => {}) {
+      assertPrivateFeedbackSupported();
       await requireOwner();
       // Creating schema and unique ACLs requires both site permissions.
       const response = unwrap(await store.get('/_api/web/EffectiveBasePermissions'));

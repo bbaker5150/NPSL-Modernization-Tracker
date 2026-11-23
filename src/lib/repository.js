@@ -34,15 +34,17 @@ class LocalStore {
   async currentUser() { return { id: 1, title: 'Local Engineer', email: 'local.engineer@example.invalid', loginName: 'local', isSiteAdmin: true }; }
   async readiness() { return { ready: true, checks: [] }; }
   async provision() { return []; }
-  async load() {
+  async load({ includeAcronyms = true } = {}) {
     const data = clone(this.data);
     data.projects = data.projects.map((row) => ({ ...row, ...engineerFields(projectEngineers(row)), currentStageKey: row.currentStageKey ? normalizePhaseKey(row.currentStageKey) : '', organization: normalizeOrganization(row.organization), ownerCanEdit: !!row.ownerCanEdit }));
     data.tasks = data.tasks.map((row) => ({ ...row, phaseKey: normalizePhaseKey(row.phaseKey), status: normalizeTaskStatus(row.status) }));
     for (const row of [...data.updates, ...data.risks]) row.version ||= '1';
     data.users = normalizeDirectory(data.users, data.projects);
     data.tasks = normalizeTaskOrganizations(data.tasks, data.projects);
+    if (!includeAcronyms) data.acronyms = [];
     return data;
   }
+  async listAcronyms() { return clone(this.data.acronyms); }
   async listTaskAttachments(task) { return localAttachments(task.id); }
   async downloadTaskAttachment(task, name) { const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name); if (!file) throw new Error('Document no longer exists.'); return file.blob; }
   async deleteTaskAttachment(task, name) { await localAttachments(task.id, undefined, name); }

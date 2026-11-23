@@ -9,6 +9,7 @@ import { defaultAcronyms } from '../data/defaultAcronyms';
 import { TrackerPermissions } from './trackerPermissions';
 import { TRACKER_USERS_GROUP } from './trackerGroups';
 import { TrackerAccessJob } from './trackerAccessJob';
+import { fileDownloadUrl, getFirepitBridge, withFirepitTransport, requireNativeInvitations, sharePointDownload } from './firepit';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
@@ -207,6 +208,7 @@ export class SharePointStore {
       catch (error) { if (controller.signal.aborted) throw new Error('SharePoint request timed out after 60 seconds. A write may have completed; reload or rerun permission setup to verify it.'); throw error; }
       finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     };
+    this.fetchImpl = withFirepitTransport(this.webUrl, this.fetchImpl);
     this.lists = new TrackerLists(prefix, path => spGet(this.webUrl, path, this.fetchImpl), (path, options) => spPost(this.webUrl, path, options, this.fetchImpl));
     this.userPromise = null;
     this.scopedAccess = scopedAccess;
@@ -344,13 +346,15 @@ export class SharePointStore {
     return rows.filter((row) => row.FileSystemObjectType !== 1 && (includeArchived || !row.Archived)).map(converter);
   }
 
-  async load() {
+  listAcronyms = () => this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym);
+
+  async load({ includeAcronyms = true } = {}) {
     const [projects, tasks, updates, risks, acronyms, users] = await Promise.all([
       this.listItems('projects', CONTAINERS[0].fields.map((field) => field.name), fromProject),
       this.listItems('tasks', CONTAINERS[1].fields.map((field) => field.name), fromTask),
       this.listItems('updates', CONTAINERS[2].fields.map((field) => field.name), fromUpdate),
       this.listItems('risks', CONTAINERS[3].fields.map((field) => field.name), fromRisk),
-      this.listItems('acronyms', CONTAINERS[4].fields.map((field) => field.name), fromAcronym),
+      includeAcronyms ? this.listAcronyms() : [],
       this.listItems('users', CONTAINERS[5].fields.map((field) => field.name), fromUser),
     ]);
     const directory = normalizeDirectory(users, projects);
@@ -386,7 +390,7 @@ export class SharePointStore {
     const result = await this.post(`${apiFor(this.prefix, key)}/items(${spId})/validateupdatelistitem`, {
       body: {
         formValues: this.formValues(fields),
-        bNewDocumentUpdate: true,
+        bNewDocumentUpdate: !getFirepitBridge(),
       },
     });
     const rows = result?.value || result?.ValidateUpdateListItem?.results || result?.ValidateUpdateListItem || result?.d?.ValidateUpdateListItem?.results || [];
@@ -427,10 +431,12 @@ export class SharePointStore {
     return names;
   }
 
-  async downloadTaskAttachment(task, name) {
+  async downloadTaskAttachment(task, name, { readBytes = false } = {}) {
     const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!file) throw new Error('This document no longer exists. Refresh the documents list.');
-    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    const native = !readBytes && sharePointDownload(this.webUrl, file.url, file.name);
+    if (native) return native;
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -458,7 +464,7 @@ export class SharePointStore {
     const current = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!current) throw new Error('This document no longer exists. Refresh the documents list.');
     if (current.name.toLowerCase() === cleanName.toLowerCase()) return this.listTaskAttachments(task);
-    const blob = await this.downloadTaskAttachment(task, name);
+    const blob = await this.downloadTaskAttachment(task, name, { readBytes: true });
     await this.addTaskAttachment(task, new File([blob], cleanName, { type: blob.type, lastModified: Date.now() }));
     await this.deleteTaskAttachment(task, name);
     return this.listTaskAttachments(task);
@@ -483,12 +489,16 @@ export class SharePointStore {
   async deleteUpdateAttachment(update, name) {
     const files = await this.listUpdateAttachments(update);
     if (!files.some(file => file.name === name)) throw new Error('This update document is no longer available.');
-    await this.post(`${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles('${escapeOData(name)}')`, { headers: { 'X-HTTP-Method': 'DELETE' } });
+    const path = `${apiFor(this.prefix, 'updates')}/items(${update.spId})/AttachmentFiles('${escapeOData(name)}')`;
+    if (getFirepitBridge()) await this.post(`${path}/recycle()`);
+    else await this.post(path, { headers: { 'X-HTTP-Method': 'DELETE' } });
   }
   async downloadUpdateAttachment(update, name) {
     const file = (await this.listUpdateAttachments(update)).find(item => item.name === name);
     if (!file) throw new Error('This update document is no longer available.');
-    const response = await this.fetchImpl(file.url, { credentials: 'include', headers: { Accept: '*/*' } });
+    const native = sharePointDownload(this.webUrl, file.url, file.name);
+    if (native) return native;
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -530,7 +540,9 @@ export class SharePointStore {
     if (!file) throw new Error('This reference document is unavailable.');
     const url = new URL(file.ServerRelativeUrl, this.webUrl);
     if (url.origin !== new URL(this.webUrl).origin) throw new Error('Unexpected reference document address.');
-    const response = await this.fetchImpl(url.href, { credentials: 'include', headers: { Accept: '*/*' } });
+    const native = sharePointDownload(this.webUrl, url.href, file.FileName);
+    if (native) return native;
+    const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, url.href), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
   }
@@ -558,6 +570,7 @@ export class SharePointStore {
   }
 
   async shareSiteAccess(person, role, appUrl) {
+    requireNativeInvitations();
     if (!ROLES.includes(role) || !person.loginName) throw new Error('Select a resolved person and a valid role.');
     const link = new URL(trackerPageUrl(appUrl, this.webUrl));
     const fileApi = `/_api/web/GetFileByServerRelativePath(decodedurl='${escapeOData(decodeURIComponent(link.pathname))}')`;
@@ -770,7 +783,12 @@ export class SharePointStore {
     if (!this.permissions) return row.spId ? (await this.update('projects', row.spId, fields), row) : { ...row, spId: await this.create('projects', fields) };
     // A retry after a partial permission update reuses the already-saved project.
     const saved = { ...row, spId: existing?.spId || row.spId };
-    if (saved.spId) await this.update('projects', saved.spId, fields);
+    if (saved.spId) {
+      const previous = existing && new Map(this.formValues(projectFields(existing)).map(field => [field.FieldName, field.FieldValue]));
+      if (!previous || this.formValues(fields).some(field => previous.get(field.FieldName) !== field.FieldValue)) {
+        await this.update('projects', saved.spId, fields);
+      }
+    }
     else saved.spId = await this.create('projects', fields);
     if (manager) {
       try {

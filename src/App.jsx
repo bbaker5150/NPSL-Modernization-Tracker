@@ -198,10 +198,11 @@ function MyWork({ projects, tasks, user, onOpen, onTask, onDelete }) {
   </div>;
 }
 
-function Glossary({ manager, acronyms, onAdd, onDelete }) {
+function Glossary({ manager, acronyms, onAdd, onDelete, loading, error, busy, onRetry }) {
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState({ acronym: '', term: '', definition: '' });
   const [adding, setAdding] = useState(false);
+  const disabled = loading || busy || !!error;
   const normalizedQuery = query.trim().toLowerCase();
   const rows = [...acronyms]
     .filter((entry) => [entry.acronym, entry.term, entry.definition].some((value) => String(value || '').toLowerCase().includes(normalizedQuery)))
@@ -209,22 +210,24 @@ function Glossary({ manager, acronyms, onAdd, onDelete }) {
   const set = (key) => (event) => setDraft((entry) => ({ ...entry, [key]: event.target.value }));
   const submit = async (event) => {
     event.preventDefault();
-    if (adding || !draft.acronym.trim() || !draft.term.trim()) return;
+    if (disabled || adding || !draft.acronym.trim() || !draft.term.trim()) return;
     setAdding(true);
     try {
       if (await onAdd(draft)) setDraft({ acronym: '', term: '', definition: '' });
     } finally { setAdding(false); }
   };
   return <div className="page-stack"><section className="page-heading inline"><div><span className="section-kicker">Modernization reference</span><h1>Acronym glossary</h1><p>Add terms and definitions to the shared glossary.</p></div><label className="select-wrap glossary-search"><Icon name="search" /><input aria-label="Search acronym glossary" placeholder="Search terms or definitions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></section>
+    {loading && <p role="status">Loading glossary…</p>}
+    {error && <div className="inline-error" role="alert"><p>{error}</p><button className="button secondary" type="button" onClick={onRetry}>Retry glossary</button></div>}
     <form className="panel glossary-composer" onSubmit={submit} onKeyDown={event => {
       if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.target.tagName === 'INPUT') submit(event);
     }}>
-      <label><span>Acronym</span><input aria-label="Acronym" disabled={adding} placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label>
-      <label><span>Full term</span><input aria-label="Full term" disabled={adding} placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label>
-      <label className="glossary-definition"><span>Definition</span><input aria-label="Definition" disabled={adding} placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label>
-      <button className="button primary" type="button" onClick={submit} disabled={adding || !draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button>
+      <label><span>Acronym</span><input aria-label="Acronym" disabled={disabled || adding} placeholder="e.g., CSS" value={draft.acronym} onChange={set('acronym')} /></label>
+      <label><span>Full term</span><input aria-label="Full term" disabled={disabled || adding} placeholder="Expanded term" value={draft.term} onChange={set('term')} /></label>
+      <label className="glossary-definition"><span>Definition</span><input aria-label="Definition" disabled={disabled || adding} placeholder="Optional plain-language definition" value={draft.definition} onChange={set('definition')} /></label>
+      <button className="button primary" type="button" onClick={submit} disabled={disabled || adding || !draft.acronym.trim() || !draft.term.trim()}><Icon name="plus" /> Add acronym</button>
     </form>
-    <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span>{manager && <span>Actions</span>}</div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p>{manager && <button className="glossary-delete" type="button" aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button>}</div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>
+    {!loading && !error && <section className="panel glossary-panel"><div className="glossary-table" role="table"><div className="glossary-row glossary-header" role="row"><span>Acronym</span><span>Full term</span><span>Definition</span>{manager && <span>Actions</span>}</div>{rows.map((entry) => <div className="glossary-row" role="row" key={entry.id}><strong>{entry.acronym}</strong><span>{entry.term}</span><p>{entry.definition || '—'}</p>{manager && <button className="glossary-delete" type="button" disabled={disabled} aria-label={`Remove ${entry.acronym}`} onClick={() => onDelete(entry)}><Icon name="trash" size={16} /></button>}</div>)}</div>{!rows.length && <EmptyState title={acronyms.length ? 'No matching acronym' : 'No acronyms yet'} message={acronyms.length ? 'Try a shorter acronym, term, or keyword.' : 'Add the first acronym using the fields above.'} />}</section>}
   </div>;
 }
 
@@ -588,7 +591,10 @@ export function App() {
   const repoRef = useRef(null);
   if (!repoRef.current) { const repository = createRepository(); repoRef.current = { ...repository, store: authorizedStore(repository.store, repository.config) }; }
   const repo = repoRef.current;
-  const [theme, setTheme] = useState(() => localStorage.getItem('mod-tracker-theme') === 'light' ? 'light' : 'dark');
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('mod-tracker-theme') === 'light' ? 'light' : 'dark'; }
+    catch { return 'dark'; }
+  });
   const [view, setView] = useState('my-work');
   const [user, setUser] = useState(null);
   const [data, setData] = useState({ projects: [], tasks: [], updates: [], risks: [], acronyms: [] });
@@ -602,10 +608,30 @@ export function App() {
   const [taskEditor, setTaskEditor] = useState(null);
   const [toast, setToast] = useState(null);
   const [exporting, setExporting] = useState(false);
+  // Glossary data belongs to its view. Portfolio refreshes must not erase it,
+  // and a late read must not replace a completed glossary edit.
+  const [glossary, setGlossary] = useState({ entries: [], loading: true, error: '' });
+  const [glossaryBusy, setGlossaryBusy] = useState(false);
+  const glossaryBusyRef = useRef(false);
+  const [glossaryRetry, setGlossaryRetry] = useState(0);
 
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('mod-tracker-theme', theme); }, [theme]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('mod-tracker-theme', theme); } catch { /* Theme still works in a read-only or opaque frame. */ }
+  }, [theme]);
   useEffect(() => { initialize(); }, []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 3200); return () => clearTimeout(timer); }, [toast]);
+  useEffect(() => {
+    if (view !== 'glossary' || glossaryBusy) return undefined;
+    let active = true;
+    setGlossary(current => ({ ...current, loading: true, error: '' }));
+    repo.store.listAcronyms().then(entries => {
+      if (active) setGlossary({ entries, loading: false, error: '' });
+    }).catch(caught => {
+      if (active) setGlossary(current => ({ ...current, loading: false, error: caught.message || 'Could not load the glossary.' }));
+    });
+    return () => { active = false; };
+  }, [view, glossaryRetry, glossaryBusy, repo.store]);
 
   async function initialize() {
     setLoading(true); setError('');
@@ -614,7 +640,7 @@ export function App() {
       setUser(currentUser);
       if (!readiness.ready) await repo.store.provision({ allowCompatibleRead: true });
       await repo.store.registerCurrentUser();
-      const loaded = await repo.store.load();
+      const loaded = await repo.store.load({ includeAcronyms: false });
       setData(loaded);
       setView(canViewPortfolio(currentUser, loaded.users) ? 'overview' : 'my-work');
       // Metadata maintenance is owner-only and does not block reading the app.
@@ -637,7 +663,7 @@ export function App() {
       if (checking || document.visibilityState === 'hidden') return;
       checking = true;
       try {
-        const loaded = await repo.store.load();
+        const loaded = await repo.store.load({ includeAcronyms: false });
         if (active && !isManager(user, loaded.users)) {
           const role = userRole(user, loaded.users);
           // A role check must not overwrite newer saves with its older snapshot.
@@ -664,7 +690,7 @@ export function App() {
 
   async function activateTestingManager(password) {
     const saved = await repo.store.activateTestingManager(password);
-    const loaded = await repo.store.load();
+    const loaded = await repo.store.load({ includeAcronyms: false });
     if (!isManager(user, loaded.users)) throw new Error('The directory still reports your account as a basic user. Manager access could not be confirmed; please reload and try again.');
     setData(loaded);
     setToast({ message: `Manager access confirmed for ${saved.title}.` });
@@ -685,14 +711,14 @@ export function App() {
           if (failed) throw failed.reason;
         }
       }
-      setData(await repo.store.load());
+      setData(await repo.store.load({ includeAcronyms: false }));
       setOpenProjectId(saved.id);
       setProjectEditor(null);
       setToast({ message: `${saved.title} is ready.` });
     } catch (error) {
       // A group, project or starter task may already be saved. Refresh the list
       // for a retry while keeping the same editor, record IDs and entered values.
-      try { setData(await repo.store.load()); } catch { /* keep the current view */ }
+      try { setData(await repo.store.load({ includeAcronyms: false })); } catch { /* keep the current view */ }
       throw error;
     }
   }
@@ -740,7 +766,7 @@ export function App() {
   }
   async function refreshUpdates() {
     try {
-      const fresh = await repo.store.load();
+      const fresh = await repo.store.load({ includeAcronyms: false });
       setData(state => ({ ...state, updates: fresh.updates, risks: fresh.risks }));
     } catch { setToast({ tone: 'info', message: 'History could not refresh. Reload the tracker before editing an update.' }); }
   }
@@ -779,7 +805,7 @@ export function App() {
       setData((state) => apply(state, saved));
       setToast({ message: `${phase?.short || 'Phase'} ${notRequired ? 'marked not required' : 'restored'}.` });
     } catch (caught) {
-      try { setData(await repo.store.load()); } catch { setData(source); }
+      try { setData(await repo.store.load({ includeAcronyms: false })); } catch { setData(source); }
       setToast({ tone: 'bad', message: caught.message || 'The phase could not be updated.' });
     }
   }
@@ -810,40 +836,44 @@ export function App() {
       await repo.store.recycle('projects', project.spId, project.id);
       setToast({ message: `${project.title} deleted.` });
     } catch (caught) {
-      try { setData(await repo.store.load()); } catch { setData(source); }
+      try { setData(await repo.store.load({ includeAcronyms: false })); } catch { setData(source); }
       setToast({ tone: 'bad', message: caught.message || 'Project could not be deleted.' });
     }
   }
 
   async function addAcronym(draft) {
+    if (glossaryBusyRef.current || glossary.loading || glossary.error) return null;
     const acronym = draft.acronym.trim().toUpperCase();
-    if (data.acronyms.some((entry) => entry.acronym.toUpperCase() === acronym)) {
+    if (glossary.entries.some((entry) => entry.acronym.toUpperCase() === acronym)) {
       setToast({ tone: 'bad', message: `${acronym} is already in the glossary.` });
       return null;
     }
     const row = { id: uid('acronym'), acronym, term: draft.term.trim(), definition: draft.definition.trim() };
+    glossaryBusyRef.current = true;
+    setGlossaryBusy(true);
     try {
       const saved = await repo.store.saveAcronym(row);
-      setData((state) => ({ ...state, acronyms: [...state.acronyms, saved] }));
+      setGlossary(current => ({ ...current, entries: [...current.entries, saved] }));
       setToast({ message: `${acronym} added to the glossary.` });
       return saved;
     } catch (caught) {
       setToast({ tone: 'bad', message: caught.message || `${acronym} could not be added.` });
       return null;
-    }
+    } finally { glossaryBusyRef.current = false; setGlossaryBusy(false); }
   }
 
   async function deleteAcronym(entry) {
-    const source = data;
-    setData((state) => ({ ...state, acronyms: state.acronyms.filter((row) => row.id !== entry.id) }));
+    if (glossaryBusyRef.current || glossary.loading || glossary.error) return;
+    glossaryBusyRef.current = true;
+    setGlossaryBusy(true);
     setToast({ tone: 'info', message: `Removing ${entry.acronym}…` });
     try {
       await repo.store.recycle('acronyms', entry.spId, entry.id);
+      setGlossary(current => ({ ...current, entries: current.entries.filter(row => row.id !== entry.id) }));
       setToast({ message: `${entry.acronym} removed.` });
     } catch (caught) {
-      try { setData(await repo.store.load()); } catch { setData(source); }
       setToast({ tone: 'bad', message: caught.message || `${entry.acronym} could not be removed.` });
-    }
+    } finally { glossaryBusyRef.current = false; setGlossaryBusy(false); }
   }
 
   async function exportWorkbook() {
@@ -889,7 +919,7 @@ export function App() {
         {view === 'references' && <ReferenceDocuments store={repo.store} readOnly={!manager} />}
         {view === 'users' && manager && <UserDirectory currentUser={user} onDelete={deleteUser} store={repo.store} config={repo.config} localPreview={repo.mode === 'local'} users={data.users || []} manager={manager} onSave={saveUser} />}
         {view === 'my-work' && <MyWork projects={enriched} tasks={data.tasks} user={user} onOpen={(project) => setOpenProjectId(project.id)} onTask={setTaskEditor} onDelete={manager ? deleteProject : undefined} />}
-        {view === 'glossary' && <Glossary manager={manager} acronyms={data.acronyms} onAdd={addAcronym} onDelete={deleteAcronym} />}
+        {view === 'glossary' && <Glossary manager={manager} acronyms={glossary.entries} loading={glossary.loading} error={glossary.error} busy={glossaryBusy} onRetry={() => setGlossaryRetry(value => value + 1)} onAdd={addAcronym} onDelete={deleteAcronym} />}
       </main>
     </div>
     {openProject && <ProjectDrawer readOnly={!canManageProject(openProject, user, data.users)} store={repo.store} key={openProject.id} project={openProject} user={user} manager={manager} users={data.users || []} onDeleteTask={deleteTask} onProgressMode={async (id, mode) => { try { const saved = await repo.store.saveProgressMode(id, mode); setData((state) => ({ ...state, projects: state.projects.map((row) => row.id === saved.id ? saved : row) })); } catch (error) { setToast({ tone: 'bad', message: error.message }); } }} tasks={data.tasks} updates={data.updates} risks={data.risks} onClose={() => setOpenProjectId('')} onEdit={(project) => setProjectEditor(data.projects.find((row) => row.id === project.id))} onSaveTask={saveTask} onToggleTask={toggleTaskComplete} onSetPhaseRequired={setPhaseRequired} onAddUpdate={addUpdate} onEditUpdate={editUpdate} onDeleteUpdate={deleteUpdate} onRefreshUpdates={refreshUpdates} onDelete={deleteProject} />}

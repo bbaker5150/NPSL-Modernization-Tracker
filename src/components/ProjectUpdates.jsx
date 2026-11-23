@@ -3,6 +3,8 @@ import { Icon } from './Icon';
 import { FilePicker } from './FilePicker';
 import { displayName } from '../lib/displayName';
 import { validateAttachment } from '../lib/taskAttachments';
+import { downloadDocument } from '../lib/downloadDocument';
+import { getFirepitBridge } from '../lib/firepit';
 
 export function updateTimestamp(item) {
   const value = item.postedAt || item.entryDate;
@@ -25,10 +27,7 @@ function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
   async function download(file) {
     setBusy(true); setError('');
     try {
-      const blob = await store.downloadUpdateAttachment(item.id, file.name);
-      const url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = file.name; document.body.append(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      downloadDocument(await store.downloadUpdateAttachment(item.id, file.name), file.name);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   async function upload(event) {
@@ -54,7 +53,7 @@ function UpdateDocuments({ item, store, revision, canPost, onRefresh }) {
     finally { setBusy(false); }
   }
   return <div className="update-documents">
-    {!!files.length && <ul>{files.map(file => <li key={file.name}><button type="button" className="text-button" disabled={busy} onClick={() => download(file)}><Icon name="paperclip" size={14} />{file.name}</button>
+    {!!files.length && <ul>{files.map(file => <li key={file.name}><button type="button" className="text-button" title={getFirepitBridge() ? 'Download from SharePoint' : undefined} disabled={busy} onClick={() => download(file)}><Icon name="paperclip" size={14} />{file.name}</button>
       {canPost && (removal?.name === file.name ? <>
         <button type="button" className="text-button" disabled={busy} onClick={() => setRemoval(null)}>Keep file</button>
         <button type="button" className="text-button update-delete" aria-label={`Confirm remove ${file.name}`} disabled={busy} onClick={remove}>Confirm removal</button>

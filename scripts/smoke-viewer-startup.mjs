@@ -8,7 +8,49 @@ const priorSchema = JSON.parse(await fs.readFile('scripts/fixtures/pre-update-ed
 const artifact = await fs.readFile('build-singlefile/modernization-project-tracker.html', 'utf8');
 await fs.mkdir('test-artifacts', { recursive: true });
 const webUrl = 'https://tenant.sharepoint-mil.us/sites/metsoft';
-const html = artifact.replace('<head>', `<head><script>window.MOD_TRACKER_CONFIG=${JSON.stringify({ webUrl, forceSharePoint: true, scopedAccess: true })}</script>`);
+const firepit = process.argv.includes('--firepit');
+const referenceName = 'PFA - PFR Lookup Table.xlsm';
+const referencePath = '/sites/metsoft/Lists/ModernizationReferenceDocuments/Attachments/7/' + encodeURIComponent(referenceName);
+// Contract fixture, not a copy of the host implementation. The opaque child can
+// only ask the parent bridge for REST responses; CSP blocks direct networking/eval.
+const bridgeScript = `
+  let requestId = 0; const pending = new Map();
+  addEventListener('message', event => {
+    if (event.source !== parent || event.data?.type !== 'mock-bridge-result') return;
+    const item = pending.get(event.data.id); if (!item) return;
+    pending.delete(event.data.id);
+    item.resolve(new Response(event.data.body, {status: event.data.status, headers: {'Content-Type':'application/json'}}));
+  });
+  window.firepit = {sharepoint: {siteUrl: ${JSON.stringify(webUrl)}, fetch: (input, init = {}) => new Promise((resolve, reject) => {
+    const id = ++requestId; pending.set(id, {resolve, reject});
+    parent.postMessage({type:'mock-bridge-request', id, url: typeof input === 'string' ? input : input.url,
+      method:init.method || input.method || 'GET', headers:[...new Headers(init.headers).entries()], body:init.body}, '*');
+  })}};
+  // Observe the ordinary-link contract without opening a popup or reproducing
+  // private host navigation/approval code. Enable only for the stored-file test.
+  document.addEventListener('click', event => {
+    const link = event.target.closest?.('a[href]');
+    if (!window.__mockObserveNativeLinks || !link) return;
+    event.preventDefault();
+    parent.postMessage({type:'mock-native-link', url:link.href, fileName:link.download,
+      target:link.target, rel:link.rel, objectUrls:window.__mockNativeObjectUrls}, '*');
+  }, true);
+`;
+const parentRelay = `<script>
+window.__mockNativeLinks = []; window.__mockCompletedReads = [];
+addEventListener('message', async event => {
+  if (event.source !== document.querySelector('#app').contentWindow) return;
+  if (event.data?.type === 'mock-native-link') {
+    window.__mockNativeLinks.push({...event.data, completedReads:[...window.__mockCompletedReads]}); return;
+  }
+  if (event.data?.type !== 'mock-bridge-request') return;
+  const {id, url, method, headers, body} = event.data;
+  const result = await fetch(url, {method, headers, body});
+  const text = await result.text();
+  if (method === 'GET' && result.ok) window.__mockCompletedReads.push(url);
+  event.source.postMessage({type:'mock-bridge-result', id, status:result.status, body:text}, '*');
+});</script>`;
+const html = artifact.replace('<head>', `<head>${firepit ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'"><script>${bridgeScript}</script>` : ''}<script>window.MOD_TRACKER_CONFIG=${JSON.stringify({ ...(firepit ? {} : { webUrl }), forceSharePoint: true, scopedAccess: true })}</script>`);
 const suffixes = ['Projects', 'Tasks', 'Updates', 'Risks', 'Acronyms', 'Users', 'Reference Documents'];
 const lists = Object.keys(priorSchema).map((key, index) => ({ key, Id: `${String(index + 1).padStart(8, '0')}-1111-1111-1111-111111111111`, Title: `Modernization-Tracker - ${suffixes[index]}`, BaseTemplate: 100, Hidden: false }));
 const user = { Id: 10, Title: 'Viewer Test Account', LoginName: 'i:0#.f|membership|viewer@example.test', Email: 'viewer@example.test', IsSiteAdmin: false };
@@ -16,7 +58,8 @@ const rows = {
   projects: [{ Id: 1, RecordId: 'p', ProjectKey: 'p', Title: 'Viewer access project', MeasurementArea: 'Thermometry', OwnerName: 'Project Engineer', OwnerEmail: 'engineer@example.test', Organization: 'NAVAIR METCAL 260B', Health: 'On Track', Priority: 'Medium', ProjectStatus: 'Active', CurrentStageKey: 'requirement' }],
   tasks: [{ Id: 2, RecordId: 't', ProjectKey: 'p', TaskTitle: 'Review requirement', PhaseKey: 'requirement', TaskStatus: 'In Progress', DueDate: '2027-01-01', Organization: 'NAVAIR METCAL 260B' }],
   updates: [{ Id: 3, RecordId: 'u', ProjectKey: 'p', Summary: 'Existing project history', AuthorName: 'Original author', PostedAt: '2026-11-01T18:00:00Z', UpdateType: 'Status', 'odata.etag': '"1"' }],
-  risks: [], acronyms: [], users: [{ Id: 10, RecordId: 'viewer', Title: user.Title, LoginKey: user.LoginName, Email: user.Email, AppRole: 'Viewer' }], references: [],
+  risks: [], acronyms: [], users: [{ Id: 10, RecordId: 'viewer', Title: user.Title, LoginKey: user.LoginName, Email: user.Email, AppRole: 'Viewer' }],
+  references: [{ Id: 7, RecordId: 'ref-7', Title: referenceName, ReferenceParentId: '', EntryKind: 'file', FileName: referenceName, FileSize: 1024 }],
 };
 const browser = await chromium.launch();
 try {
@@ -30,7 +73,8 @@ try {
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname.slice(new URL(webUrl).pathname.length);
       const send = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-      if (url.href === `${webUrl}/preview`) return route.fulfill({ contentType: 'text/html', body: '<iframe id="app" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>' });
+      if (url.href === `${webUrl}/preview`) return route.fulfill({ contentType: 'text/html', body: `<iframe id="app" ${firepit ? 'sandbox="allow-scripts allow-downloads"' : ''} style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>${firepit ? parentRelay : ''}` });
+      if (firepit) assert.equal(request.headers()['x-requestdigest'], undefined, 'The child must not supply a form digest');
       requests.push({ method: request.method(), path, select: url.searchParams.get('$select') });
       if (request.method() !== 'GET') { unexpected.push(`Unexpected write: ${request.method()} ${path}`); return send({ error: { message: 'Viewer cannot write setup or data' } }, 403); }
       if (path.toLowerCase().endsWith('/effectivebasepermissions')) return send({ Low: '1', High: '0' });
@@ -45,7 +89,8 @@ try {
       const list = lists.find(item => item.Id === id);
       if (list) {
         if (path.endsWith('/fields')) return send({ value: schemas[list.key].map(InternalName => ({ InternalName })) });
-        if (path.endsWith('/AttachmentFiles')) return send({ value: [] });
+        if (path.endsWith('/AttachmentFiles')) return send({ value: list.key === 'references' && path.endsWith('/items(7)/AttachmentFiles')
+          ? [{ FileName: referenceName, ServerRelativeUrl: referencePath }] : [] });
         const itemId = path.match(/\/items\((\d+)\)$/)?.[1];
         if (itemId) return send({ ...rows[list.key].find(row => row.Id === Number(itemId)), ArchivedDocuments: '[]' });
         if (path.endsWith('/items')) {
@@ -66,6 +111,42 @@ try {
       const app = page.frameLocator('#app');
       if (scenario === 'prior-schema') {
         await app.getByRole('heading', { name: 'Modernization at a glance', exact: true }).waitFor();
+        const glossaryId = lists.find(list => list.key === 'acronyms').Id;
+        assert.ok(!requests.some(request => request.path.includes(glossaryId) && request.path.endsWith('/items')), 'Ordinary startup must not read glossary rows before the glossary or export is requested');
+        if (firepit) {
+          assert.equal(await app.locator('body').evaluate(() => window.origin), 'null', 'Firepit smoke must use an opaque frame');
+          assert.equal(await app.locator('body').evaluate(() => { try { localStorage.getItem('theme'); return true; } catch { return false; } }), false);
+          const downloadReady = page.waitForEvent('download');
+          await app.getByRole('button', { name: 'Export Excel', exact: true }).click();
+          const download = await downloadReady;
+          assert.match(download.suggestedFilename(), /\.xlsx$/);
+          const workbook = await fs.readFile(await download.path());
+          assert.equal(workbook.subarray(0, 2).toString(), 'PK', 'Workbook export must work without eval permission');
+          await app.locator('body').evaluate(() => {
+            window.__mockObserveNativeLinks = true;
+            window.__mockNativeObjectUrls = 0;
+            const createObjectURL = URL.createObjectURL.bind(URL);
+            URL.createObjectURL = value => { window.__mockNativeObjectUrls++; return createObjectURL(value); };
+          });
+          const start = requests.length;
+          await app.locator('.sidebar nav').getByRole('button', { name: 'Reference Documents', exact: true }).click();
+          await app.getByRole('button', { name: `Edit ${referenceName}`, exact: true }).click();
+          await app.getByRole('button', { name: 'Download from SharePoint', exact: true }).click();
+          await page.waitForFunction(() => window.__mockNativeLinks.length === 1);
+          const [link] = await page.evaluate(() => window.__mockNativeLinks);
+          assert.equal(link.url, new URL(referencePath, webUrl).href);
+          assert.equal(link.fileName, referenceName, 'The stored XLSM name and extension must be preserved');
+          assert.equal(link.target, '_blank');
+          assert.deepEqual(link.rel.split(/\s+/).sort(), ['noopener', 'noreferrer']);
+          assert.equal(link.objectUrls, 0, 'Stored files must not be reconstructed as Blob downloads');
+          const referenceId = lists.find(list => list.key === 'references').Id;
+          const metadataPath = `/_api/web/lists(guid'${referenceId}')/items(7)/AttachmentFiles`;
+          assert.ok(link.completedReads.some(url => new URL(url).pathname.endsWith(metadataPath)), 'Attachment metadata must be delivered before the navigation intent');
+          assert.equal(requests.slice(start).filter(request => request.path === metadataPath).length, 1);
+          assert.ok(requests.slice(start).every(request => request.method === 'GET' && !/\$value|GetFileBy|\/Lists\//i.test(request.path)), 'Native download must not fetch bytes or mutate SharePoint');
+          assert.equal(await app.locator('.reference-library [role="alert"]').count(), 0);
+          await app.locator('.sidebar nav').getByRole('button', { name: 'Portfolio', exact: true }).click();
+        }
         assert.equal(await app.getByRole('button', { name: 'New project', exact: true }).count(), 0);
         assert.equal(await app.getByRole('button', { name: 'Users and managers', exact: true }).count(), 0);
         assert.equal(await app.getByRole('heading', { name: 'Users and managers', exact: true }).count(), 0);
@@ -95,5 +176,5 @@ try {
     } catch (error) { await page.screenshot({ path: `test-artifacts/viewer-startup-${scenario}-failure.png` }).catch(() => {}); throw error; }
     finally { await page.close(); }
   }
-  console.log('Viewer SharePoint startup smoke passed: prior schema loads read-only without writes; missing core fields, missing lists and denied reads remain explicit failures.');
+  console.log(`${firepit ? 'Firepit opaque-frame/CSP bridge and stored-file link contract' : 'Viewer SharePoint'} startup smoke passed: prior schema loads read-only without writes; missing core fields, missing lists and denied reads remain explicit failures.`);
 } finally { await browser.close(); }

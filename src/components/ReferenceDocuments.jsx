@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { FilePicker } from './FilePicker';
 import { referencePath } from '../lib/referenceDocuments';
+import { downloadDocument } from '../lib/downloadDocument';
+import { getFirepitBridge } from '../lib/firepit';
 
 function ReferenceActions({ row, busy, readOnly, onDownload, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
@@ -17,7 +19,7 @@ function ReferenceActions({ row, busy, readOnly, onDownload, onEdit, onDelete })
   return <div className="reference-actions" ref={ref}>
     <button type="button" className="button secondary" disabled={busy} aria-label={`Edit ${row.name}`} aria-expanded={open} onClick={() => setOpen(!open)}>Edit</button>
     {open && <div className="reference-action-menu" aria-label={`Actions for ${row.name}`}>
-      {row.kind === 'file' && <button type="button" onClick={() => action(() => onDownload(row))}>Download</button>}
+      {row.kind === 'file' && <button type="button" onClick={() => action(() => onDownload(row))}>{getFirepitBridge() ? 'Download from SharePoint' : 'Download'}</button>}
       {!readOnly && <><button type="button" onClick={() => action(() => onEdit(row, 'rename'))}>Rename</button><button type="button" onClick={() => action(() => onEdit(row, 'move'))}>Move</button><button type="button" onClick={() => action(() => onDelete(row))}>Delete</button></>}
     </div>}
   </div>;
@@ -65,12 +67,7 @@ export function ReferenceDocuments({ store, readOnly }) {
   async function download(row) {
     setBusy(true); setError('');
     try {
-      const blob = await store.downloadReferenceEntry(row.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = row.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      downloadDocument(await store.downloadReferenceEntry(row.id), row.name);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
@@ -106,7 +103,7 @@ export function ReferenceDocuments({ store, readOnly }) {
       {!loading && !rows.length && <p className="empty-state">{search ? 'No matching references.' : 'No references in this folder yet.'}</p>}
       <ul className="reference-list">{rows.map((row) => <li key={row.id}>
         <Icon name={row.kind === 'folder' ? 'folder' : 'note'} size={22} />
-        <div className="reference-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => row.kind === 'folder' ? navigate(row.id) : download(row)}>{row.name}</button>
+        <div className="reference-name"><button type="button" className="text-button document-file-name" title={row.kind === 'file' && getFirepitBridge() ? 'Download from SharePoint' : undefined} disabled={busy} onClick={() => row.kind === 'folder' ? navigate(row.id) : download(row)}>{row.name}</button>
           <small>{row.kind === 'folder' ? `${entries.filter((entry) => entry.parentId === row.id).length} items` : `${Math.max(1, Math.round(row.size / 1024)).toLocaleString()} KB`}{search && ` · ${referencePath(entries, row.parentId).map((part) => part.name).join(' / ') || 'All references'}`}</small>
         </div>
         {(!readOnly || row.kind === 'file') && <ReferenceActions row={row} busy={busy} readOnly={readOnly} onDownload={download} onEdit={(entry, mode) => { setDraft({ ...entry, mode }); setError(''); }} onDelete={remove} />}

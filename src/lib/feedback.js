@@ -1,11 +1,12 @@
 import { TrackerLists, legacyListTitle, listTitleAliases } from './trackerLists';
-import { submitPrivateFeedback } from './feedbackSubmission';
+import { assertPrivateFeedbackSupported, submitPrivateFeedback } from './feedbackSubmission';
 import { TRACKER_GROUPS } from './trackerGroups';
 import { isManager } from './access';
 import { feedbackSetup } from './feedbackSetup';
 import { ensureFeedbackStatus, FEEDBACK_STATUSES } from './feedbackFields';
 import { attachmentDescriptor, feedbackFileUploader, feedbackFilePath, parseFeedbackAttachments, validateFeedbackFiles, MAX_FEEDBACK_FILE_BYTES } from './feedbackAttachments';
 import { feedbackAttachmentsSetup } from './feedbackAttachmentsSetup';
+import { fileDownloadUrl, withFirepitTransport } from './firepit';
 // Feedback is deliberately separate from shared tracker data and exports.
 const unwrap = value => value?.d || value;
 const rows = value => value?.value || value?.d?.results || [];
@@ -70,6 +71,7 @@ export function createFeedback(store) {
         const attachments = files.map(file => { const attachment = attachmentDescriptor(file); localFiles.set(attachment.key, file); return attachment; });
         preview.unshift({ ...value, attachments, status: 'New', etag: '1', id: crypto.randomUUID(), created: new Date().toISOString(), author: 'Local preview' }); return;
       }
+      assertPrivateFeedbackSupported();
       if (files.some(file => uncertainReportFiles.has(file))) throw new Error('A report using these files may already be in Feedback History. Ask an owner to check before starting another report. This draft has not been sent again.');
       value.attachments = await uploadFiles(files, progress);
       progress('Sending feedback…');
@@ -89,10 +91,10 @@ export function createFeedback(store) {
       const attachment = parseFeedbackAttachments(local ? record?.attachments : record?.FeedbackAttachments, { strict: true }).find(file => file.key === key);
       if (!attachment) throw new Error('This attachment is no longer linked to the selected submission. Reopen Feedback History.');
       if (local) return { blob: localFiles.get(key), attachment };
-      // Match normal Tracker downloads: embedded hosts may stall binary REST
-      // $value requests. The direct private file URL still enforces SharePoint ACLs.
+      // Firepit authenticates REST downloads through its parent bridge. Keep
+      // the existing direct private file download in other SharePoint hosts.
       const url = await feedbackFilePath(store, attachment, { download: true });
-      const response = await (store.fetchImpl || fetch)(url, { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
+      const response = await withFirepitTransport(store.webUrl, store.fetchImpl || fetch)(fileDownloadUrl(store.webUrl, url), { credentials: 'include', cache: 'no-store', headers: { Accept: '*/*' } });
       if (!response.ok) throw new Error(`The attachment could not be downloaded (${response.status}). Check your feedback library access with a site owner.`);
       if (/text\/html/i.test(response.headers?.get('Content-Type') || '')) throw new Error('SharePoint returned a sign-in page instead of the attachment. Refresh your session and try again.');
       const blob = await response.blob();

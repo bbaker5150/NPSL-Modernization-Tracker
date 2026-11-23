@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FilePicker } from './FilePicker';
+import { downloadDocument } from '../lib/downloadDocument';
+import { getFirepitBridge } from '../lib/firepit';
 
 function DocumentActions({ file, busy, canEdit, onDownload, onRename, onDelete }) {
   const [open, setOpen] = useState(false);
@@ -14,7 +16,7 @@ function DocumentActions({ file, busy, canEdit, onDownload, onRename, onDelete }
   return <div className="reference-actions" ref={ref}>
     <button type="button" className="button secondary" disabled={busy} aria-label={`Edit ${file.name}`} aria-expanded={open} onClick={() => setOpen(!open)}>Edit</button>
     {open && <div className="reference-action-menu" aria-label={`Actions for ${file.name}`}>
-      <button type="button" onClick={() => action(onDownload)}>Download</button>
+      <button type="button" onClick={() => action(onDownload)}>{getFirepitBridge() ? 'Download from SharePoint' : 'Download'}</button>
       {canEdit && <><button type="button" onClick={() => action(onRename)}>Rename</button><button type="button" onClick={() => action(onDelete)}>Delete</button></>}
     </div>}
   </div>;
@@ -62,12 +64,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
   async function download(file) {
     setBusy(true); setError('');
     try {
-      const blob = await store.downloadTaskAttachment(file.taskId || taskId, file.name);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = file.name;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      downloadDocument(await store.downloadTaskAttachment(file.taskId || taskId, file.name), file.name);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
@@ -92,7 +89,7 @@ export function TaskDocuments({ taskId, projectKey, store, readOnly, canDelete =
     {renaming && <div className="reference-editor document-rename"><h4>Rename document</h4><label className="field"><span>Document name</span><input autoFocus value={renaming.name} disabled={busy} onChange={(event) => setRenaming({ ...renaming, name: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); rename(); } }} /></label><div className="invite-actions"><button type="button" className="button primary" disabled={busy || !renaming.name.trim()} onClick={rename}>Save</button><button type="button" className="button secondary" disabled={busy} onClick={() => setRenaming(null)}>Cancel</button></div></div>}
     {loading && <p role="status">Loading documents…</p>}
     {!loading && !files.length && <p>No documents attached.</p>}
-    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div>{!compact && <DocumentActions file={file} busy={busy || loading} canEdit={canDelete} onDownload={download} onRename={(row) => setRenaming({ file: row, name: row.name })} onDelete={remove} />}</li>)}</ul>
+    <ul className="document-list">{files.map((file) => <li key={`${file.taskId || taskId}/${file.name}`}><div className="document-name"><button type="button" className="text-button document-file-name" title={getFirepitBridge() ? 'Download from SharePoint' : undefined} disabled={busy} onClick={() => download(file)}>{file.name}</button>{file.taskTitle && <small>{file.taskTitle}</small>}</div>{!compact && <DocumentActions file={file} busy={busy || loading} canEdit={canDelete} onDownload={download} onRename={(row) => setRenaming({ file: row, name: row.name })} onDelete={remove} />}</li>)}</ul>
     {!readOnly && <FilePicker label={busy ? 'Uploading documents…' : 'Attach documents'} hint="Up to 50 MB each · saved with this task" ariaLabel="Attach documents" disabled={busy || loading} onChange={upload} />}
     {message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}
   </section>;
