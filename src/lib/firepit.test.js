@@ -96,10 +96,12 @@ it('downloads bytes through the file REST endpoint without losing punctuation', 
   bridge.fetch.mockResolvedValueOnce(new Response(new Uint8Array([0, 1, 255])));
   const store = new SharePointStore({ webUrl: web });
   store.listTaskAttachments = vi.fn(async () => [{ name: "O'Brien #1.pdf", url: web + "/Docs/O'Brien%20%231.pdf" }]);
-  const blob = await store.downloadTaskAttachment({ spId: 1 }, "O'Brien #1.pdf");
+  const blob = await store.downloadTaskAttachment({ spId: 1 }, "O'Brien #1.pdf", { readBytes: true });
   const buffer = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsArrayBuffer(blob); });
   expect([...new Uint8Array(buffer)]).toEqual([0, 1, 255]);
-  expect(decodeURIComponent(new URL(bridge.fetch.mock.calls[0][0]).pathname)).toBe("/sites/Tracker/Subweb/_api/web/GetFileByServerRelativePath(decodedurl='/sites/Tracker/Subweb/Docs/O''Brien #1.pdf')/$value");
+  const target = new URL(bridge.fetch.mock.calls[0][0]);
+  expect(target.pathname).toBe('/sites/Tracker/Subweb/_api/web/GetFileByServerRelativePath(decodedurl=@file)/$value');
+  expect(target.searchParams.get('@file')).toBe("'/sites/Tracker/Subweb/Docs/O''Brien #1.pdf'");
   expect(() => fileDownloadUrl(web, 'https://outside.test/file.pdf')).toThrow('outside');
   const proxyWeb = web.replace('.us/', '.us.mcas-gov.us/');
   expect(fileDownloadUrl(proxyWeb, web + '/Docs/file.pdf')).toContain('/_api/web/GetFileByServerRelativePath');

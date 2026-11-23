@@ -75,9 +75,9 @@ it('downloads only a verified feedback manifest attachment through the authentic
   window.firepit.sharepoint.fetch.mockResolvedValue({ ok: true, blob: async () => new Blob(['pixels']) });
   const feedback = createFeedback(raw);
   expect((await feedback.downloadAttachment(1, key)).attachment).toEqual(attachment);
-  expect(window.firepit.sharepoint.fetch).toHaveBeenCalledWith(
-    `${raw.webUrl}/_api/web/GetFileByServerRelativePath(decodedurl='%2Fsites%2Ftracker%2FFeedbackFiles%2F${key}')/$value`, expect.any(Object),
-  );
+  const target = new URL(window.firepit.sharepoint.fetch.mock.calls[0][0]);
+  expect(target.pathname).toBe('/sites/tracker/_api/web/GetFileByServerRelativePath(decodedurl=@file)/$value');
+  expect(target.searchParams.get('@file')).toBe(`'/sites/tracker/FeedbackFiles/${key}'`);
   expect(raw.fetchImpl).not.toHaveBeenCalled();
   await expect(feedback.downloadAttachment(1, '22222222-2222-4222-8222-222222222222.png')).rejects.toThrow('no longer linked');
   expect(window.firepit.sharepoint.fetch).toHaveBeenCalledTimes(1);

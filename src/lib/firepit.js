@@ -76,15 +76,27 @@ export function withFirepitTransport(webUrl, fallback) {
   return transport;
 }
 
-export function fileDownloadUrl(webUrl, fileUrl) {
-  if (!getFirepitBridge()) return fileUrl;
+function storedFileUrl(webUrl, fileUrl) {
   const url = canonicalUrl(new URL(fileUrl, `${webUrl}/`).href), web = canonicalUrl(webUrl);
   if (url.origin !== web.origin || url.username || url.password || url.hash ||
       !url.pathname.toLowerCase().startsWith(`${web.pathname.replace(/\/$/, '').toLowerCase()}/`)) {
     throw new Error('The document is outside the configured Tracker site. No download request was sent.');
   }
+  return url;
+}
+
+export function sharePointDownload(webUrl, fileUrl, fileName) {
+  if (!getFirepitBridge()) return null;
+  return { type: 'sharepoint-download', url: storedFileUrl(webUrl, fileUrl).href, fileName };
+}
+
+export function fileDownloadUrl(webUrl, fileUrl) {
+  if (!getFirepitBridge()) return fileUrl;
+  const url = storedFileUrl(webUrl, fileUrl);
   const path = encodeURIComponent(decodeURIComponent(url.pathname).replace(/'/g, "''"));
-  return `${webUrl.replace(/\/$/, '')}/_api/web/GetFileByServerRelativePath(decodedurl='${path}')/$value`;
+  // Keep a server-relative /Lists/ path in a query alias: the host's list-target
+  // classifier also scans quoted path arguments for list selectors.
+  return `${webUrl.replace(/\/$/, '')}/_api/web/GetFileByServerRelativePath(decodedurl=@file)/$value?@file='${path}'`;
 }
 
 export function requireNativeInvitations() {

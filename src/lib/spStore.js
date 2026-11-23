@@ -9,7 +9,7 @@ import { defaultAcronyms } from '../data/defaultAcronyms';
 import { TrackerPermissions } from './trackerPermissions';
 import { TRACKER_USERS_GROUP } from './trackerGroups';
 import { TrackerAccessJob } from './trackerAccessJob';
-import { fileDownloadUrl, getFirepitBridge, withFirepitTransport, requireNativeInvitations } from './firepit';
+import { fileDownloadUrl, getFirepitBridge, withFirepitTransport, requireNativeInvitations, sharePointDownload } from './firepit';
 
 const FIELD = { TEXT: 'Text', NOTE: 'Note', NUMBER: 'Number', DATE: 'DateTime', BOOLEAN: 'Boolean' };
 const ADD_FIELD = { INTERNAL_NAME_HINT: 8, TO_DEFAULT_VIEW: 16 };
@@ -429,9 +429,11 @@ export class SharePointStore {
     return names;
   }
 
-  async downloadTaskAttachment(task, name) {
+  async downloadTaskAttachment(task, name, { readBytes = false } = {}) {
     const file = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!file) throw new Error('This document no longer exists. Refresh the documents list.');
+    const native = !readBytes && sharePointDownload(this.webUrl, file.url, file.name);
+    if (native) return native;
     const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
@@ -460,7 +462,7 @@ export class SharePointStore {
     const current = (await this.listTaskAttachments(task)).find((entry) => entry.name === name);
     if (!current) throw new Error('This document no longer exists. Refresh the documents list.');
     if (current.name.toLowerCase() === cleanName.toLowerCase()) return this.listTaskAttachments(task);
-    const blob = await this.downloadTaskAttachment(task, name);
+    const blob = await this.downloadTaskAttachment(task, name, { readBytes: true });
     await this.addTaskAttachment(task, new File([blob], cleanName, { type: blob.type, lastModified: Date.now() }));
     await this.deleteTaskAttachment(task, name);
     return this.listTaskAttachments(task);
@@ -492,6 +494,8 @@ export class SharePointStore {
   async downloadUpdateAttachment(update, name) {
     const file = (await this.listUpdateAttachments(update)).find(item => item.name === name);
     if (!file) throw new Error('This update document is no longer available.');
+    const native = sharePointDownload(this.webUrl, file.url, file.name);
+    if (native) return native;
     const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, file.url), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();
@@ -534,6 +538,8 @@ export class SharePointStore {
     if (!file) throw new Error('This reference document is unavailable.');
     const url = new URL(file.ServerRelativeUrl, this.webUrl);
     if (url.origin !== new URL(this.webUrl).origin) throw new Error('Unexpected reference document address.');
+    const native = sharePointDownload(this.webUrl, url.href, file.FileName);
+    if (native) return native;
     const response = await this.fetchImpl(fileDownloadUrl(this.webUrl, url.href), { credentials: 'include', headers: { Accept: '*/*' } });
     if (!response.ok) throw new Error(`Document download failed (${response.status}).`);
     return response.blob();

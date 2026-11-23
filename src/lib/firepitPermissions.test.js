@@ -39,7 +39,7 @@ describe('Firepit project folder creation', () => {
       "/_api/web/lists/getbytitle('ModernizationTasks')/items(22)",
     ]);
     expect(row).toMatchObject({ Title: 'tracker-project-5', ProjectKey: 'p' });
-    expect(store.get).toHaveBeenCalledWith(expect.stringContaining("GetFolderByServerRelativePath(decodedurl='%2Fsites%2Ftracker%2FLists%2FModernizationTasks%2Ftracker-project-5')?$select=ServerRelativeUrl,ItemCount"), undefined);
+    expect(store.get).toHaveBeenCalledWith(expect.stringContaining("GetFolderByServerRelativePath(decodedurl=@folder)?@folder='%2Fsites%2Ftracker%2FLists%2FModernizationTasks%2Ftracker-project-5'&$select=ServerRelativeUrl,ItemCount"), undefined);
     store.post.mockClear();
     await permissions.folder('tasks', project, true);
     expect(store.post).not.toHaveBeenCalled();

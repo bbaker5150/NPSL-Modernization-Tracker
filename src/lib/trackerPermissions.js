@@ -379,8 +379,10 @@ export class TrackerPermissions {
       // Computed ItemChildCount/FolderChildCount columns are not REST item
       // properties on every list. Use the associated Folder resource, and
       // only when recovering a blank key; absent counts never mean zero.
-      const folderResource = getFirepitBridge() ? `/_api/web/GetFolderByServerRelativePath(decodedurl='${quote(path)}')` : `${scope}/Folder`;
-      const folderInfo = unwrap(await this.get(`${folderResource}?$select=ServerRelativeUrl,ItemCount`));
+      const folderResource = getFirepitBridge()
+        ? `/_api/web/GetFolderByServerRelativePath(decodedurl=@folder)?@folder='${quote(path)}'&$select=ServerRelativeUrl,ItemCount`
+        : `${scope}/Folder?$select=ServerRelativeUrl,ItemCount`;
+      const folderInfo = unwrap(await this.get(folderResource));
       if (String(folderInfo?.ServerRelativeUrl || '').toLowerCase() !== path.toLowerCase() || ![0, '0'].includes(folderInfo?.ItemCount)) {
         throw identityError('SharePoint did not verify that the unassigned folder is empty. Resolve its contents before retrying setup.');
       }

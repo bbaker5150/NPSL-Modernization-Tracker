@@ -6,8 +6,9 @@ The bridge handles SharePoint authentication and form digests. Tracker sends RES
 
 ## Supported changes
 
-- Current-user discovery, list/field queries, ordinary record writes, and attachment downloads use the hosting-web bridge.
-- File downloads use the SharePoint file REST endpoint; the host still enforces actual file ownership and access.
+- Current-user discovery, list/field queries, and ordinary record writes use the hosting-web bridge.
+- Reference, task, and update document downloads use native SharePoint file links through Firepit's parent navigation handler. This supports existing macro-enabled workbooks without turning them into app-generated Blob downloads, changing their names, or exposing their contents to the app. The parent owns destination review, cancellation, and tenant access checks. The menu labels this action **Download from SharePoint**.
+- Content operations that need file bytes (such as copying an attachment during rename or exporting a backup) use the file REST endpoint. File and folder paths are passed in OData query aliases so a quoted `/Lists/` storage path cannot be mistaken for an unidentified list selector. The host still validates the resolved path and permissions.
 - Group membership writes use `sitegroups/getbyid(...)`; form field updates set `bNewDocumentUpdate: false`.
 - Project permission setup creates folders through the list's folder collection and verifies the resulting list item, folder identity, emptiness, parent project, and concurrency token before completing metadata or ACL changes.
 - Themes tolerate opaque-frame storage restrictions. The final HTML is tested with an opaque sandbox, no direct network access, and no eval permission.
@@ -24,3 +25,5 @@ Lock Down Mode, a read-only Firepit session, and unavailable REST routes remain 
 ## Validation boundary
 
 `npm test`, `npm run verify:singlefile`, and `npm run smoke:singlefile` cover request routing, rejected writes, cancellation, file bytes, folder identity safeguards, privacy guards, legacy behavior, and the production HTML in a mocked opaque Firepit frame. The smoke uses an independent bridge contract fixture, not Firepit implementation code. Real tenant permissions, host approval prompts, and live upload/write outcomes still require deployment verification.
+
+When the Firepit 9.2 source and its test dependencies are available locally, run `FIREPIT_SOURCE=/path/to/firepit/source npm run test:firepit-host`. This optional check loads the real generated child/parent handler and restores the real list-target, site-scope, and version-protection guards. Only the SharePoint wire uses local fixtures. Host source is not included in this repository or required by normal CI.
